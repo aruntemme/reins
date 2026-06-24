@@ -11,6 +11,13 @@ export default function Dashboard() {
   const [llm, setLlm] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
+  // Gate: if auth is on and there's no session, bounce to /signin immediately.
+  useEffect(() => {
+    api.me().then((m) => {
+      if (m.auth && !m.workspace && typeof window !== "undefined") window.location.href = "/signin";
+    }).catch(() => {});
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const r = await api.projects();

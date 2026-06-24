@@ -314,6 +314,43 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
   background: var(--panel); border: 1px solid var(--line-2); border-radius: 999px; padding: 11px 18px;
 }
 .installcmd::before { content: "$ "; color: var(--ink-3); }
+/* click-to-copy command */
+.copycmd {
+  display: inline-flex; align-items: center; gap: 12px; cursor: pointer;
+  appearance: none; transition: border-color .15s, color .15s, transform .15s;
+}
+.copycmd:hover { border-color: var(--ink-3); color: var(--ink); transform: translateY(-1px); }
+.copycmd .cc-ic { display: inline-flex; color: var(--ink-3); transition: color .15s; }
+.copycmd:hover .cc-ic { color: var(--ink-2); }
+.copycmd.copied { border-color: var(--active); color: var(--active); }
+.copycmd.copied .cc-ic { color: var(--active); }
+.copycmd.block {
+  border-radius: 12px; align-items: flex-start; text-align: left;
+  max-width: 620px; width: 100%; padding: 13px 16px; gap: 14px; font-size: 12.5px;
+}
+.copycmd.block .cc-text { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+.copycmd.block .cc-ic { margin-top: 2px; flex-shrink: 0; }
+
+/* signin onboarding steps */
+.signin-note {
+  max-width: 520px; font-size: 14px; line-height: 1.55; color: var(--ink-2);
+  background: #fbf6ea; border: 1px solid #efe2c4; border-left: 3px solid var(--accent);
+  border-radius: 10px; padding: 13px 16px;
+}
+.signin-note b { color: var(--ink); }
+.setup-wrap { max-width: 720px; margin: 0 auto; padding: 48px 0 110px; border-top: 1px solid var(--line); }
+.signin { max-width: 720px; margin: 0 auto; padding-top: 56px; }
+.setup { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+.setupstep { display: flex; gap: 16px; align-items: flex-start; }
+.setup-n {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: 999px;
+  background: var(--ink); color: #faf8f4; font-family: var(--font-mono); font-size: 13px;
+  display: grid; place-items: center; margin-top: 2px;
+}
+.setup-body { flex: 1; min-width: 0; display: grid; gap: 8px; }
+.setup-t { font-family: var(--font-display); font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+.setup-body .muted { font-size: 14px; line-height: 1.5; }
+.setup-body code { font-family: var(--font-mono); font-size: 12px; background: #f6f3ec; padding: 1px 5px; border-radius: 5px; }
 
 /* sections */
 .lsection { padding: 92px 0; border-bottom: 1px solid var(--line); }
