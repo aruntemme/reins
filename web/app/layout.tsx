@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
+import { Inter, Inter_Tight, JetBrains_Mono, EB_Garamond } from "next/font/google";
 import "./globals.css";
 
 const body = Inter({ subsets: ["latin"], variable: "--font-body", display: "swap" });
@@ -7,6 +7,13 @@ const display = Inter_Tight({
   subsets: ["latin"],
   variable: "--font-display",
   weight: ["500", "600", "700"],
+  display: "swap",
+});
+const serif = EB_Garamond({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
   display: "swap",
 });
 const mono = JetBrains_Mono({
@@ -23,7 +30,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${body.variable} ${display.variable} ${mono.variable}`}>
+    <html lang="en" className={`${body.variable} ${display.variable} ${serif.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );

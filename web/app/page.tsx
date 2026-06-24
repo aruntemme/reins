@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LandingHero } from "@/components/landing-hero";
+import { Reveal } from "@/components/reveal";
 
 export const metadata = {
   title: "Reins — live shared context for AI-agent teams",
@@ -19,9 +20,7 @@ export default function Landing() {
         <section id="why" className="lsection">
           <div className="wrap">
             <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> why</div>
-            <h2 className="display lsection-title">
-              Your <code>context.md</code> is stale the moment you save it.
-            </h2>
+            <Reveal as="h2" className="lsection-title" text={"Your context.md is stale\nthe moment you save it."} />
             <p className="sub lsection-lead">
               The gap between what the docs say and what&rsquo;s actually happening is the most
               expensive problem on any team. Now that everyone drives an agent, there&rsquo;s finally a
@@ -48,7 +47,7 @@ export default function Landing() {
         <section id="pipeline" className="lsection alt">
           <div className="wrap">
             <div className="label" style={{ marginBottom: 18 }}><span className="sq active" /> the pipeline</div>
-            <h2 className="display lsection-title">Noise in. Signal out.</h2>
+            <Reveal as="h2" className="lsection-title" text="Noise in. Signal out." />
             <p className="sub lsection-lead">
               Raw agent activity is a firehose. Each event runs through a multi-agent, provider-neutral
               LLM pipeline that turns it into living context — not a dump of logs.
@@ -74,7 +73,7 @@ export default function Landing() {
         <section id="start" className="lsection">
           <div className="wrap">
             <div className="label" style={{ marginBottom: 18 }}><span className="sq" /> get started</div>
-            <h2 className="display lsection-title">Three steps. No standup.</h2>
+            <Reveal as="h2" className="lsection-title" text="Three steps. No standup." />
             <div className="startgrid">
               <div className="startstep">
                 <div className="mono num">1 — install the hook</div>

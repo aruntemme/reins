@@ -32,8 +32,8 @@ export function LandingHero() {
 
         <div className="lhero-fg">
           <header className="lhero-nav">
-            <Link href="/" className="brand light"><Mark /> reins</Link>
-            <nav className="navlinks light">
+            <Link href="/" className="brand"><Mark /> reins</Link>
+            <nav className="navlinks">
               <a href="#why">Why</a>
               <a href="#pipeline">Pipeline</a>
               <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
@@ -42,7 +42,8 @@ export function LandingHero() {
           </header>
 
           <div className="lhero-center">
-            <h1 className="display lhero-title">
+           <div className="lhero-copy">
+            <h1 className="lhero-title">
               {lines.map((line, li) => (
                 <span key={li} className="lhero-line">
                   {splitGlyphs(line).map((g, gi) => {
@@ -66,8 +67,9 @@ export function LandingHero() {
 
             <div className="lhero-cta lhero-fade" style={{ animationDelay: "1.82s" }}>
               <Link href="/dashboard" className="btn solid lg">Open the dashboard &rarr;</Link>
-              <code className="installcmd light">npx reins-hook install</code>
+              <code className="installcmd">npx reins-hook install</code>
             </div>
+           </div>
           </div>
         </div>
       </div>
