@@ -26,7 +26,6 @@ export default function Landing() {
 
       {/* ── Hero ─────────────────────────────────────────── */}
       <section className="lhero">
-        <div className="lhero-bg" />
         <div className="lhero-inner wrap">
           <div className="label eyebrow" style={{ marginBottom: 22 }}>
             <span className="sq" /> live context · for agent teams
@@ -44,6 +43,10 @@ export default function Landing() {
             <code className="installcmd">npx reins-hook install</code>
           </div>
         </div>
+        <figure className="lhero-figure">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/hero.jpg" alt="A rider taking the reins across golden fields at sunrise" className="lhero-image" />
+        </figure>
       </section>
 
       <main>
