@@ -24,10 +24,10 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   const live = useStream(id, load);
 
   if (missing) return (
-    <><TopBar live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">No project “{id}”. <Link href="/" className="hl">Back</Link></div></div></main></>
+    <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">No project “{id}”. <Link href="/dashboard" className="hl">Back</Link></div></div></main></>
   );
   if (!proj) return (
-    <><TopBar live={live} /><main className="wrap"><div className="dash"><div className="empty">Loading…</div></div></main></>
+    <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="empty">Loading…</div></div></main></>
   );
 
   return (
@@ -81,7 +81,7 @@ function DashHead({ proj, onSaved }: { proj: Project; onSaved: () => void }) {
   return (
     <div className="dashhead">
       <div className="crumbs">
-        <Link href="/" className="mono">← projects</Link>
+        <Link href="/dashboard" className="mono">← projects</Link>
         <span className="mono">/</span>
         <span className="label"><span className="sq" /> {proj.id}</span>
       </div>

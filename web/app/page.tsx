@@ -1,80 +1,146 @@
-"use client";
-import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { api, timeAgo, type ProjectSummary } from "@/lib/api";
-import { useStream } from "@/lib/useStream";
-import { handleAuth } from "@/lib/guard";
 import { TopBar } from "@/components/ui";
 
-export default function Home() {
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [llm, setLlm] = useState(true);
-  const [loaded, setLoaded] = useState(false);
+export const metadata = {
+  title: "Reins — live shared context for AI-agent teams",
+  description:
+    "Every teammate's AI agent reports what it's doing. Reins distills it live into one shared brain — status a lead can glance at, work a peer can grab, without a single standup.",
+};
 
-  const load = useCallback(async () => {
-    try {
-      const r = await api.projects();
-      setProjects(r.projects);
-      setLlm(r.llm);
-    } catch (e) {
-      if (handleAuth(e)) return;
-      /* server may be down */
-    } finally {
-      setLoaded(true);
-    }
-  }, []);
+const GITHUB = "https://github.com/aruntemme/reins";
 
-  useEffect(() => { load(); }, [load]);
-  const live = useStream(undefined, load);
-
+export default function Landing() {
   return (
     <>
-      <TopBar live={live} />
-      <main className="wrap">
-        <section className="hero">
-          <div className="label eyebrow"><span className="sq" /> live context · for agent teams</div>
-          <h1 className="display">
+      <TopBar
+        hideLive
+        right={
+          <nav className="navlinks">
+            <a href="#why">Why</a>
+            <a href="#pipeline">Pipeline</a>
+            <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+            <Link href="/dashboard" className="btn solid">Open dashboard →</Link>
+          </nav>
+        }
+      />
+
+      {/* ── Hero ─────────────────────────────────────────── */}
+      <section className="lhero">
+        <div className="lhero-bg" />
+        <div className="lhero-inner wrap">
+          <div className="label eyebrow" style={{ marginBottom: 22 }}>
+            <span className="sq" /> live context · for agent teams
+          </div>
+          <h1 className="display lhero-title">
             The context your team<br />actually <span className="hl">shares</span>.
           </h1>
-          <p className="sub">
-            Every teammate&rsquo;s AI agent reports what it&rsquo;s doing. Reins distills it live into
-            one shared brain — so a lead can glance at status and a peer can grab what&rsquo;s pending,
-            without a single standup.
+          <p className="sub lhero-sub">
+            Every teammate&rsquo;s AI agent already narrates what it&rsquo;s doing. Reins captures that
+            stream and distills it — live — into one shared brain. A lead glances at status; a peer
+            grabs what&rsquo;s pending. No standups, no stale <code>context.md</code>.
           </p>
+          <div className="lhero-cta">
+            <Link href="/dashboard" className="btn solid lg">Open the dashboard →</Link>
+            <code className="installcmd">npx reins-hook install</code>
+          </div>
+        </div>
+      </section>
+
+      <main>
+        {/* ── Why ────────────────────────────────────────── */}
+        <section id="why" className="lsection">
+          <div className="wrap">
+            <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> why</div>
+            <h2 className="display lsection-title">
+              Your <code>context.md</code> is stale the moment you save it.
+            </h2>
+            <p className="sub lsection-lead">
+              The gap between what the docs say and what&rsquo;s actually happening is the most
+              expensive problem on any team. Now that everyone drives an agent, there&rsquo;s finally a
+              machine-readable stream of intent to tap — for free.
+            </p>
+            <div className="whycards">
+              <div className="card pad whycard">
+                <div className="label"><span className="sq" /> captured, not written</div>
+                <p>No one logs anything. The hook siphons what your agent already produces — every prompt and turn.</p>
+              </div>
+              <div className="card pad whycard">
+                <div className="label"><span className="sq blue" /> for the whole team</div>
+                <p>A lead sees status and risks at a glance. A peer sees what&rsquo;s blocked and grabs what&rsquo;s up for grabs.</p>
+              </div>
+              <div className="card pad whycard">
+                <div className="label"><span className="sq active" /> a shared brain</div>
+                <p>Any agent can pull the live context over MCP — so everyone&rsquo;s agent reads from the same source of truth.</p>
+              </div>
+            </div>
+          </div>
         </section>
 
-        {!llm && loaded && (
-          <div className="banner" style={{ marginBottom: 24 }}>
-            ⚠ No LLM configured — running in degraded mode (raw capture, no distillation). Set
-            <code style={{ margin: "0 4px" }}>REINS_LLM_API_KEY</code> in the server.
-          </div>
-        )}
-
-        <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> projects</div>
-        {projects.length === 0 ? (
-          <div className="card pad empty">
-            {loaded
-              ? "No projects yet. Point an agent's hook at the server, or run the seed script."
-              : "Loading…"}
-          </div>
-        ) : (
-          <div className="grid projects">
-            {projects.map((p) => (
-              <Link key={p.id} href={`/project/${encodeURIComponent(p.id)}`} className="card pcard">
-                <div className="label"><span className="sq" /> {p.id}</div>
-                <h3>{p.name}</h3>
-                <div className="goal">{p.goal || "No goal set yet."}</div>
-                <div className="foot">
-                  <div className="mono">{p.active}/{p.members} active</div>
-                  <div className="mono">{timeAgo(p.updatedAt)}</div>
+        {/* ── Pipeline ───────────────────────────────────── */}
+        <section id="pipeline" className="lsection alt">
+          <div className="wrap">
+            <div className="label" style={{ marginBottom: 18 }}><span className="sq active" /> the pipeline</div>
+            <h2 className="display lsection-title">Noise in. Signal out.</h2>
+            <p className="sub lsection-lead">
+              Raw agent activity is a firehose. Each event runs through a multi-agent, provider-neutral
+              LLM pipeline that turns it into living context — not a dump of logs.
+            </p>
+            <div className="steps">
+              {[
+                ["01", "triage", "Gate the noise. Most low-content events stop here."],
+                ["02", "extract", "Pull structured facts: intent, actions, files, decisions, blockers."],
+                ["03", "reconcile", "Merge into each person's living context — headline, status, pending, handoffs."],
+                ["04", "rollup", "Synthesize the whole team: status, goal-alignment, collisions, risks."],
+              ].map(([n, t, d]) => (
+                <div className="step" key={n}>
+                  <div className="stepnum mono">{n}</div>
+                  <div className="steplabel">{t}</div>
+                  <p>{d}</p>
                 </div>
-              </Link>
-            ))}
+              ))}
+            </div>
           </div>
-        )}
+        </section>
+
+        {/* ── Get started ────────────────────────────────── */}
+        <section id="start" className="lsection">
+          <div className="wrap">
+            <div className="label" style={{ marginBottom: 18 }}><span className="sq" /> get started</div>
+            <h2 className="display lsection-title">Three steps. No standup.</h2>
+            <div className="startgrid">
+              <div className="startstep">
+                <div className="mono num">1 — install the hook</div>
+                <pre className="code">npx reins-hook install \
+  --url https://your-reins --me you</pre>
+                <p className="muted">Then run <code>/hooks</code> in Claude Code to approve it.</p>
+              </div>
+              <div className="startstep">
+                <div className="mono num">2 — just work</div>
+                <p>Every prompt and agent turn flows to the board and gets distilled into live context. Nothing to log.</p>
+              </div>
+              <div className="startstep">
+                <div className="mono num">3 — open the board</div>
+                <p>Paste your access token once. Watch the team&rsquo;s status, pending work, and handoffs update live.</p>
+                <Link href="/dashboard" className="btn solid" style={{ marginTop: 6 }}>Open the dashboard →</Link>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
-      <footer className="foot">
-        <div className="wrap">reins · hook → distill → live shared context → MCP retrieval</div>
+
+      {/* ── Footer ──────────────────────────────────────── */}
+      <footer className="lfooter">
+        <div className="wrap lfooter-in">
+          <div className="brand"><span className="mono" style={{ fontSize: 15 }}>reins</span></div>
+          <div className="lfooter-links mono">
+            <a href="#why">why</a>
+            <a href="#pipeline">pipeline</a>
+            <a href={GITHUB} target="_blank" rel="noreferrer">github</a>
+            <a href="https://www.npmjs.com/package/reins-hook" target="_blank" rel="noreferrer">npm</a>
+            <Link href="/dashboard">dashboard</Link>
+          </div>
+          <div className="mono muted">hook → distill → live shared context → MCP</div>
+        </div>
       </footer>
     </>
   );

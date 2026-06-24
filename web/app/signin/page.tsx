@@ -12,7 +12,7 @@ export default function SignIn() {
 
   // If auth is off, or already signed in, skip straight to the board.
   useEffect(() => {
-    api.me().then((m) => { if (!m.auth || m.workspace) router.replace("/"); }).catch(() => {});
+    api.me().then((m) => { if (!m.auth || m.workspace) router.replace("/dashboard"); }).catch(() => {});
   }, [router]);
 
   const submit = async (e: React.FormEvent) => {
@@ -20,7 +20,7 @@ export default function SignIn() {
     setErr(""); setBusy(true);
     try {
       await api.signin(token.trim());
-      router.replace("/");
+      router.replace("/dashboard");
     } catch {
       setErr("That token wasn’t accepted. Check it’s an access token for your workspace.");
       setBusy(false);

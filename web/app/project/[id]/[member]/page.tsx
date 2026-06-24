@@ -24,15 +24,15 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
   const live = useStream(id, load);
 
   if (missing)
-    return (<><TopBar live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">Not found. <Link href={`/project/${id}`} className="hl">Back</Link></div></div></main></>);
+    return (<><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">Not found. <Link href={`/project/${id}`} className="hl">Back</Link></div></div></main></>);
   if (!m)
-    return (<><TopBar live={live} /><main className="wrap"><div className="dash"><div className="empty">Loading…</div></div></main></>);
+    return (<><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="empty">Loading…</div></div></main></>);
 
   const s = STATUS[m.displayStatus] ?? STATUS.idle;
 
   return (
     <>
-      <TopBar live={live} />
+      <TopBar brandHref="/dashboard" live={live} />
       <main className="wrap">
         <div className="dash member">
           <div className="crumbs">

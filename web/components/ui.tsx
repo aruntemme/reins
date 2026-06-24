@@ -13,20 +13,32 @@ export function Mark({ size = 26 }: { size?: number }) {
   );
 }
 
-export function TopBar({ live, right }: { live?: boolean; right?: React.ReactNode }) {
+export function TopBar({
+  live,
+  right,
+  hideLive,
+  brandHref = "/",
+}: {
+  live?: boolean;
+  right?: React.ReactNode;
+  hideLive?: boolean;
+  brandHref?: string;
+}) {
   return (
     <div className="topbar">
       <div className="wrap">
-        <Link href="/" className="brand">
+        <Link href={brandHref} className="brand">
           <Mark />
           reins
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {right}
-          <span className="livechip">
-            <span className={`dot ${live ? "on" : ""}`} />
-            {live ? "live" : "offline"}
-          </span>
+          {!hideLive && (
+            <span className="livechip">
+              <span className={`dot ${live ? "on" : ""}`} />
+              {live ? "live" : "offline"}
+            </span>
+          )}
         </div>
       </div>
     </div>
