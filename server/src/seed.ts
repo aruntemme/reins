@@ -1,109 +1,170 @@
 /**
- * Seed a believable project so the dashboard has something to show.
- *   npm run seed            -> seeds via the running server (REAL pipeline; needs LLM configured)
- *   npm run seed -- --local -> writes a pre-distilled demo board directly (no LLM, instant)
+ * Seed believable demo projects so the dashboard has something to show.
+ *   npm run seed -- --local   -> writes a pre-distilled demo board directly (no LLM, instant)
+ *   npm run seed              -> seeds project "atlas" via the running server (real pipeline)
  *
  * --local fills the same fields the distillation pipeline would, so the UI looks real
- * without an LLM key. It is illustrative demo data, not a substitute for the pipeline.
+ * without an LLM. Set REINS_WORKSPACE to scope the demo projects to a workspace
+ * (needed when auth is on); defaults to "default".
  */
-import { db, setGoal, ensureMember, insertEvent, upsertPending, saveRollup, now } from "./db.js";
+import {
+  db, ensureProject, setGoal, ensureMember, insertEvent, upsertPending, saveRollup, now,
+} from "./db.js";
 
 const LOCAL = process.argv.includes("--local");
 const URL = (process.env.REINS_URL || "http://localhost:4319").replace(/\/$/, "");
-const PROJECT = "reins";
+const WORKSPACE = process.env.REINS_WORKSPACE || "default";
 
-const events: { member: string; displayName: string; kind: string; text: string }[] = [
-  { member: "praveen", displayName: "Praveen", kind: "intent", text: "Build the live distillation pipeline: triage -> extract -> reconcile agents over an OpenAI-compatible LLM. Starting on the reconcile tool-calling loop." },
-  { member: "praveen", displayName: "Praveen", kind: "summary", text: "Reconcile agent now updates member headline/goal/status and surfaces pending items via tool calls. Next: project rollup synthesizer." },
-  { member: "asha", displayName: "Asha", kind: "intent", text: "Designing the dashboard in Next.js with a light editorial theme, monospace status labels, no kanban." },
-  { member: "asha", displayName: "Asha", kind: "summary", text: "Hero + team grid laid out. Need the SSE stream endpoint shape finalized before wiring live updates." },
-  { member: "ravi", displayName: "Ravi", kind: "intent", text: "Setting up the MCP server so any teammate's agent can pull reins_context. Also touching the reconcile schema." },
-  { member: "ravi", displayName: "Ravi", kind: "summary", text: "MCP exposes reins_context/reins_pending/reins_member. I edited reconcile.ts. Heads up Praveen, we both touched it." },
-];
-
-async function viaServer() {
-  await fetch(`${URL}/api/projects/${PROJECT}/goal`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ goal: "Ship the Reins MVP: hook / live distilled team context / dashboard + MCP retrieval.", by: "praveen" }),
-  });
-  for (const e of events) {
-    const r = await fetch(`${URL}/api/ingest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ project: PROJECT, ...e }),
-    });
-    console.log(e.member, e.kind, "->", r.status);
-    await new Promise((res) => setTimeout(res, 600));
-  }
-  console.log("\nSeeded via real pipeline. Project:", PROJECT);
-}
-
-function setMember(member: string, name: string, patch: Record<string, unknown>) {
-  ensureMember(PROJECT, member, name);
+function setMember(project: string, member: string, name: string, patch: Record<string, unknown>) {
+  ensureMember(project, member, name);
   const cols = Object.keys(patch);
   db.prepare(
     `UPDATE members SET ${cols.map((c) => `${c} = @${c}`).join(", ")}, updated_at=@ts, last_seen=@ts
      WHERE project=@project AND member=@member`
-  ).run({ ...patch, ts: now(), project: PROJECT, member });
+  ).run({ ...patch, ts: now(), project, member });
 }
-function tl(member: string, kind: string, summary: string) {
+function tl(project: string, member: string, kind: string, summary: string) {
   db.prepare(
     "INSERT INTO timeline (id, project, member, kind, summary, created_at) VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)"
-  ).run(PROJECT, member, kind, summary, now());
+  ).run(project, member, kind, summary, now());
+}
+
+function seedAtlas() {
+  const P = "atlas";
+  ensureProject(P, "Atlas", WORKSPACE);
+  setGoal(P, "Ship the new payments checkout: one-tap pay, 3-D Secure, and webhooks by end of quarter.", "sofia");
+
+  setMember(P, "sofia", "Sofia Almeida", {
+    headline: "Wiring 3-D Secure into the checkout flow and reconciling the webhook retries",
+    goal: "Lead the checkout rewrite to GA",
+    status: "active",
+    working_on: JSON.stringify(["checkout/three-ds.ts", "webhooks/retry.ts"]),
+  });
+  tl(P, "sofia", "did", "Checkout now falls back to 3-D Secure when the issuer requires it");
+  tl(P, "sofia", "decided", "Retry webhooks with exponential backoff, cap at 24h");
+
+  setMember(P, "mateo", "Mateo Rossi", {
+    headline: "Building the one-tap pay button and the saved-cards drawer",
+    goal: "Frontend for the new checkout",
+    status: "active",
+    working_on: JSON.stringify(["ui/pay-button.tsx", "ui/cards-drawer.tsx"]),
+  });
+  tl(P, "mateo", "did", "One-tap pay button shipped behind a flag");
+  tl(P, "mateo", "blocked", "Needs the webhook event shape finalized to show payment status");
+
+  setMember(P, "yuki", "Yuki Tanaka", {
+    headline: "Hardening the webhooks endpoint and signing events",
+    goal: "Reliable, verifiable webhooks",
+    status: "blocked",
+    working_on: JSON.stringify(["webhooks/sign.ts", "webhooks/retry.ts"]),
+  });
+  tl(P, "yuki", "did", "Webhook payloads are now HMAC-signed");
+  tl(P, "yuki", "blocked", "Waiting on Sofia's retry schema before finalizing the event shape");
+
+  setMember(P, "lukas", "Lukas Novak", {
+    headline: "Load-testing checkout and chasing a p99 latency spike",
+    goal: "Keep checkout under 300ms p99",
+    status: "active",
+    working_on: JSON.stringify(["bench/checkout.ts"]),
+  });
+  tl(P, "lukas", "did", "Found a slow query in the cards lookup; added an index");
+
+  upsertPending(P, "yuki", "Finalize the webhook event shape so the UI can render payment status");
+  upsertPending(P, "sofia", "Decide whether saved cards are workspace- or user-scoped");
+  upsertPending(P, "lukas", "Add a p99 latency alert to the checkout dashboard");
+
+  saveRollup(P, {
+    summary:
+      "The checkout rewrite is on track. 3-D Secure and signed webhooks are in; the team is converging on the webhook event shape, which a couple of people are waiting on. One latency regression was found and indexed away.",
+    alignment:
+      "All four workstreams (3-D Secure, one-tap UI, webhooks, performance) map directly to the GA goal.",
+    collisions: [
+      { area: "webhooks/retry.ts", members: ["sofia", "yuki"], note: "Both editing retry logic; coordinate before merge." },
+    ],
+    risks: [
+      "Mateo and Yuki both blocked on the webhook event shape",
+      "Saved-cards scoping still undecided",
+    ],
+  });
+}
+
+function seedNimbus() {
+  const P = "nimbus";
+  ensureProject(P, "Nimbus", WORKSPACE);
+  setGoal(P, "Cut deploy time in half: parallel builds, warm caches, and a one-command rollback.", "aisha");
+
+  setMember(P, "aisha", "Aisha Khan", {
+    headline: "Parallelizing the build graph and warming the dependency cache",
+    goal: "Halve CI build time",
+    status: "active",
+    working_on: JSON.stringify(["ci/build-graph.ts", "ci/cache.ts"]),
+  });
+  tl(P, "aisha", "did", "Build graph now runs independent targets in parallel");
+
+  setMember(P, "nikolai", "Nikolai Petrov", {
+    headline: "Writing the one-command rollback and pinning previous releases",
+    goal: "Safe, instant rollback",
+    status: "active",
+    working_on: JSON.stringify(["deploy/rollback.ts"]),
+  });
+  tl(P, "nikolai", "decided", "Keep the last 5 releases warm for instant rollback");
+
+  setMember(P, "emma", "Emma Lindqvist", {
+    headline: "Idle: finished the cache-hit metrics dashboard",
+    goal: "Observability for the build pipeline",
+    status: "idle",
+    working_on: JSON.stringify([]),
+  });
+  tl(P, "emma", "did", "Shipped a cache-hit-rate dashboard");
+
+  upsertPending(P, "aisha", "Document the cache key strategy so teams can opt in");
+  upsertPending(P, "nikolai", "Decide the rollback retention window (5 vs 10 releases)");
+
+  saveRollup(P, {
+    summary:
+      "Build times are coming down: parallel builds and a warm cache are in, and a one-command rollback is landing. No blockers right now.",
+    alignment: "On track to halve deploy time.",
+    collisions: [],
+    risks: ["Rollback retention window undecided"],
+  });
+}
+
+function clearProject(p: string) {
+  for (const t of ["events", "members", "timeline", "pending", "handoffs", "rollup"]) {
+    try { db.prepare(`DELETE FROM ${t} WHERE project = ?`).run(p); } catch { /* table may differ */ }
+  }
+  db.prepare("DELETE FROM projects WHERE id = ?").run(p);
 }
 
 function localOnly() {
-  setGoal(PROJECT, "Ship the Reins MVP: hook / live distilled team context / dashboard + MCP retrieval.", "praveen");
-  for (const e of events) insertEvent({ project: PROJECT, member: e.member, kind: e.kind, text: e.text });
+  // Idempotent: clear the projects we manage (incl. the old "reins" demo) first.
+  for (const p of ["atlas", "nimbus", "reins"]) clearProject(p);
+  seedAtlas();
+  seedNimbus();
+  console.log(`Seeded demo board (no LLM) into workspace "${WORKSPACE}". Projects: atlas, nimbus`);
+}
 
-  setMember("praveen", "Praveen", {
-    headline: "Wiring the project rollup synthesizer after finishing the reconcile loop",
-    goal: "Stand up the full triage / extract / reconcile / rollup distillation pipeline",
-    status: "active",
-    working_on: JSON.stringify(["pipeline/reconcile.ts", "pipeline/rollup.ts", "llm/agent.ts"]),
+async function viaServer() {
+  await fetch(`${URL}/api/projects/atlas/goal`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ goal: "Ship the new payments checkout by end of quarter.", by: "sofia" }),
   });
-  tl("praveen", "did", "Reconcile agent updates headline/goal/status via tool calls");
-  tl("praveen", "decided", "Debounce rollup at 4s so bursts collapse to one synthesis");
-  tl("praveen", "started", "Project rollup synthesizer");
-
-  setMember("asha", "Asha", {
-    headline: "Building the team grid + pending rail in the Next.js dashboard",
-    goal: "Editorial light-theme dashboard, no kanban, living context per person",
-    status: "blocked",
-    working_on: JSON.stringify(["app/project/[id]/page.tsx", "globals.css"]),
-  });
-  tl("asha", "did", "Hero, goal editor, and team cards laid out");
-  tl("asha", "blocked", "Needs the /api/stream SSE event shape finalized to wire live updates");
-
-  setMember("ravi", "Ravi", {
-    headline: "Exposed reins_context over MCP so any agent can pull shared state",
-    goal: "MCP retrieval layer for cross-agent context",
-    status: "active",
-    working_on: JSON.stringify(["mcp.ts", "pipeline/reconcile.ts"]),
-  });
-  tl("ravi", "did", "reins_context / reins_pending / reins_member tools live over stdio");
-  tl("ravi", "decided", "Render context as markdown so it drops straight into an agent prompt");
-
-  upsertPending(PROJECT, "asha", "Document the /api/stream SSE event shape so live updates can be wired");
-  upsertPending(PROJECT, "praveen", "Decide the rollup debounce window and whether leads can force a resync");
-  upsertPending(PROJECT, "ravi", "Add a reins_claim write-tool so agents can claim pending work directly");
-
-  saveRollup(PROJECT, {
-    summary:
-      "The team is converging on a working MVP. The distillation pipeline (triage / extract / reconcile) is functional and now feeding the dashboard; the rollup synthesizer and MCP retrieval are landing in parallel. One person is blocked on an interface detail.",
-    alignment:
-      "On track for the goal. All three workstreams (capture/distill, dashboard, and MCP retrieval) map directly to the MVP loop.",
-    collisions: [
-      { area: "pipeline/reconcile.ts", members: ["praveen", "ravi"], note: "Both edited the reconcile stage; coordinate before merge." },
-    ],
-    risks: [
-      "Asha blocked on SSE event shape",
-      "Rollup debounce window undecided",
-    ],
-  });
-
-  console.log("Seeded a pre-distilled demo board (no LLM). Project:", PROJECT);
+  const events = [
+    { member: "sofia", displayName: "Sofia Almeida", kind: "intent", text: "Wiring 3-D Secure into the checkout flow and reconciling webhook retries." },
+    { member: "mateo", displayName: "Mateo Rossi", kind: "intent", text: "Building the one-tap pay button; need the webhook event shape finalized." },
+    { member: "yuki", displayName: "Yuki Tanaka", kind: "summary", text: "Webhook payloads are HMAC-signed now. Blocked on Sofia's retry schema before I finalize the event shape." },
+  ];
+  for (const e of events) {
+    const r = await fetch(`${URL}/api/ingest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: "atlas", ...e }),
+    });
+    console.log(e.member, e.kind, "->", r.status);
+    await new Promise((res) => setTimeout(res, 600));
+  }
+  console.log("\nSeeded via real pipeline. Project: atlas");
 }
 
 if (LOCAL) localOnly();

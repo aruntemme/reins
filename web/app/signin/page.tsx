@@ -6,6 +6,8 @@ import { TopBar } from "@/components/ui";
 import { CopyCommand } from "@/components/copy-command";
 
 const GITHUB = "https://github.com/aruntemme/reins";
+// Read-only-ish access token for the public demo workspace, so anyone can look around.
+const DEMO_TOKEN = "rk_access_417e294368663099cbae2471fedbf1bccdc96525a18c752d";
 
 export default function SignIn() {
   const router = useRouter();
@@ -13,22 +15,23 @@ export default function SignIn() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // If auth is off, or already signed in, skip straight to the board.
-  useEffect(() => {
-    api.me().then((m) => { if (!m.auth || m.workspace) router.replace("/dashboard"); }).catch(() => {});
-  }, [router]);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const enter = async (t: string) => {
     setErr(""); setBusy(true);
     try {
-      await api.signin(token.trim());
+      await api.signin(t.trim());
       router.replace("/dashboard");
     } catch {
       setErr("That token wasn’t accepted. Check it’s an access token for your workspace.");
       setBusy(false);
     }
   };
+
+  // If auth is off, or already signed in, skip straight to the board.
+  useEffect(() => {
+    api.me().then((m) => { if (!m.auth || m.workspace) router.replace("/dashboard"); }).catch(() => {});
+  }, [router]);
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); enter(token); };
 
   return (
     <>
@@ -44,12 +47,26 @@ export default function SignIn() {
           </p>
 
           <div className="signin-note">
-            <b>This site is a public demo instance.</b> Sign-in only works with a token from whoever
-            runs it, and there’s no public sign-up here. To use Reins with your own team, self-host it
-            (steps below) — your workspace, tokens, and data stay yours.
+            <b>This is a public demo instance.</b> Take a look around with the demo workspace below.
+            To use Reins with your own team, self-host it (steps below) — your workspace, tokens, and
+            data stay yours.
+          </div>
+
+          <button
+            type="button"
+            className="btn solid lg"
+            disabled={busy}
+            onClick={() => enter(DEMO_TOKEN)}
+            style={{ marginTop: 20, justifyContent: "center", width: "100%", maxWidth: 520 }}
+          >
+            {busy ? "Opening…" : "Try the demo workspace"}
+          </button>
+          <div className="mono muted" style={{ marginTop: 8, fontSize: 11.5 }}>
+            Opens a sample board (Atlas &amp; Nimbus). No sign-up, nothing stored.
           </div>
 
           <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520, marginTop: 22 }}>
+            <div className="mono muted" style={{ fontSize: 11.5 }}>or paste your own access token</div>
             <input
               className="tokeninput"
               placeholder="rk_access_…"
