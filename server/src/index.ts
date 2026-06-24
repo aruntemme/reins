@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { env, llmConfigured } from "./env.js";
+import { env, llmConfigured, usesRouter, usesOG } from "./env.js";
 import "./db.js"; // initialize schema
 import { api } from "./routes/api.js";
 import { auth } from "./routes/auth.js";
@@ -26,7 +26,15 @@ app.use("/api", api);
 app.use("/api", stream);
 
 app.listen(env.port, () => {
-  console.log(`\n  reins server → http://localhost:${env.port}`);
-  console.log(`  llm          → ${llmConfigured ? `${env.llm.baseURL} (${env.llm.model})` : "NOT CONFIGURED (degraded mode)"}`);
-  console.log(`  auth         → ${env.authEnabled ? "ON (multi-tenant)" : "off (open instance)"}\n`);
+  console.log(`\n  reins server -> http://localhost:${env.port}`);
+  const backend = usesRouter
+    ? `0G Compute (Private Computer router) (${env.llm.model})`
+    : usesOG
+      ? `0G Compute (broker SDK) (${env.llm.model})`
+      : llmConfigured
+        ? `${env.llm.baseURL} (${env.llm.model})`
+        : "NOT CONFIGURED (degraded mode)";
+  console.log(`  inference    -> ${backend}`);
+  console.log(`  storage      -> ${env.og.storageEnabled ? "0G Storage (on)" : "local only"}`);
+  console.log(`  auth         -> ${env.authEnabled ? "ON (multi-tenant)" : "off (open instance)"}\n`);
 });

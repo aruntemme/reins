@@ -2,13 +2,22 @@
 import Link from "next/link";
 
 export function Mark({ size = 26 }: { size?: number }) {
-  // Abstract "reins" mark: two reins converging to a ring (control point).
+  // reins mascot: a friendly gradient blob with eyes.
   return (
-    <svg className="mark" width={size} height={size} viewBox="0 0 26 26" fill="none">
-      <rect width="26" height="26" rx="7" fill="#1b1a17" />
-      <path d="M7 6.5C7 13 9.5 16 13 16.5" stroke="#e9c245" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M19 6.5C19 13 16.5 16 13 16.5" stroke="#faf8f4" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="13" cy="18.5" r="2.4" stroke="#e9c245" strokeWidth="1.8" />
+    <svg className="mark" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="reinsBlob" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffd96b" />
+          <stop offset="100%" stopColor="#e9c245" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M16 5C23 5 27 10 27 17C27 24 22 27 16 27C10 27 5 24 5 17C5 10 9 5 16 5Z"
+        fill="url(#reinsBlob)"
+      />
+      <circle cx="13" cy="16" r="2" fill="#1b1a17" />
+      <circle cx="21" cy="16" r="2" fill="#1b1a17" />
+      <path d="M13 21C15 22.5 17 22.5 19 21" stroke="#1b1a17" strokeWidth="1.6" strokeLinecap="round" fill="none" />
     </svg>
   );
 }

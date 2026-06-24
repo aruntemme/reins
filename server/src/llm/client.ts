@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import { env, llmConfigured } from "../env.js";
+import { env, llmConfigured, usesOG, usesRouter } from "../env.js";
+import { ogChat, ogStats } from "./og-compute.js";
 
 export const llm = new OpenAI({
   baseURL: env.llm.baseURL,
@@ -8,7 +9,45 @@ export const llm = new OpenAI({
   maxRetries: 0, // we handle retry/backoff ourselves (below)
 });
 
+// 0G Private Computer Router — OpenAI-compatible, so it's just a client pointed
+// at the router with the pc.0g.ai API key. Optional private-TEE routing header.
+const router = usesRouter
+  ? new OpenAI({
+      baseURL: env.og.routerBaseUrl,
+      apiKey: env.og.routerApiKey || "not-set",
+      maxRetries: 0,
+      defaultHeaders: env.og.privateMode ? { "X-0G-Provider-Trust-Mode": "private" } : undefined,
+    })
+  : null;
+
+if (usesRouter) {
+  ogStats.mode = "router";
+  ogStats.ready = true;
+  ogStats.model = env.llm.model;
+  ogStats.endpoint = env.og.routerBaseUrl;
+  ogStats.private = env.og.privateMode;
+}
+
 export { llmConfigured };
+
+/**
+ * One raw completion against the configured backend — 0G Router (recommended),
+ * the 0G broker SDK, or any OpenAI-compatible gateway. Same signature either
+ * way, so the serial queue + backoff below is backend-agnostic.
+ */
+async function rawCompletion(params: Params): Promise<string> {
+  if (usesRouter && router) {
+    // Respect the model's output cap (e.g. qwen2.5-omni maxes at 2048).
+    const cap = env.og.maxOutput;
+    const max_tokens = Math.min(params.max_tokens ?? cap, cap);
+    const res = await router.chat.completions.create({ ...params, max_tokens });
+    ogStats.requests++;
+    return res.choices[0]?.message?.content ?? "";
+  }
+  if (usesOG) return ogChat(params);
+  const res = await llm.chat.completions.create(params);
+  return res.choices[0]?.message?.content ?? "";
+}
 
 type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type Params = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
@@ -43,8 +82,7 @@ export async function chat(params: Params, attempts = 8): Promise<string> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const res = await enqueue(() => llm.chat.completions.create(params));
-      return res.choices[0]?.message?.content ?? "";
+      return await enqueue(() => rawCompletion(params));
     } catch (err: any) {
       lastErr = err;
       const status = err?.status ?? err?.response?.status;

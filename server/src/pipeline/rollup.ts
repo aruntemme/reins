@@ -1,6 +1,17 @@
-import { listMembers, listPending, getProject, saveRollup, resolveMember, createHandoff } from "../db.js";
+import {
+  listMembers,
+  listPending,
+  getProject,
+  saveRollup,
+  setRollupProvenance,
+  resolveMember,
+  createHandoff,
+} from "../db.js";
 import { jsonComplete } from "../llm/client.js";
 import { bus } from "../bus.js";
+import { env } from "../env.js";
+import { putSnapshot } from "../llm/og-storage.js";
+import { buildContextPack } from "../context-pack.js";
 import { RollupSchema } from "./schemas.js";
 
 const SYSTEM = `You are the project synthesizer of Reins. Given the live state of every teammate
@@ -61,6 +72,19 @@ ${pendingBlock}`,
 
   saveRollup(project, r);
   bus.emitChange({ type: "rollup.updated", project });
+
+  // Persist the canonical Context Pack to 0G Storage so the shared context is
+  // verifiable and portable: addressable by Merkle root hash, not locked in one
+  // server's DB. The MCP retrieval reads this exact pack back FROM 0G Storage.
+  if (env.og.storageEnabled) {
+    void putSnapshot(buildContextPack(project))
+      .then(({ rootHash, txHash }) => {
+        setRollupProvenance(project, rootHash, txHash);
+        bus.emitChange({ type: "rollup.updated", project });
+        console.log(`[0g-storage] ${project} context pack -> ${rootHash}`);
+      })
+      .catch((e) => console.error("[0g-storage]", e.message));
+  }
 
   // Turn synthesized cross-team nudges into directed handoffs (deduped).
   let handed = false;

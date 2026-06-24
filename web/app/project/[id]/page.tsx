@@ -34,7 +34,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     <>
       <TopBar
         live={live}
-        right={<button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>↻ resync</button>}
+        right={<button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>resync</button>}
       />
       <main className="wrap">
         <div className="dash">
@@ -81,7 +81,7 @@ function DashHead({ proj, onSaved }: { proj: Project; onSaved: () => void }) {
   return (
     <div className="dashhead">
       <div className="crumbs">
-        <Link href="/dashboard" className="mono">← projects</Link>
+        <Link href="/dashboard" className="mono">‹ projects</Link>
         <span className="mono">/</span>
         <span className="label"><span className="sq" /> {proj.id}</span>
       </div>
@@ -163,7 +163,7 @@ function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number];
           {m.handoffs.map((h) => (
             <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
               <div className="hmeta">
-                <span className="hkind">↳ {HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
+                <span className="hkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
                 {h.status === "ack" && <span className="mono">ack’d</span>}
               </div>
               <div className="htext">{h.text}</div>
@@ -178,7 +178,7 @@ function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number];
         </div>
       )}
       <div className="headline">{m.headline || "…"}</div>
-      {m.goal && <div className="goal">↳ {m.goal}</div>}
+      {m.goal && <div className="goal">{m.goal}</div>}
       {m.workingOn.length > 0 && (
         <div className="chiprow">
           {m.workingOn.map((w, k) => <span key={k} className="chip">{w}</span>)}

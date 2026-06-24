@@ -36,7 +36,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
       <main className="wrap">
         <div className="dash member">
           <div className="crumbs">
-            <Link href={`/project/${id}`} className="mono">← {id}</Link>
+            <Link href={`/project/${id}`} className="mono">‹ {id}</Link>
             <span className="mono">/</span>
             <span className="label"><span className={`sq ${s.cls}`} /> {m.live ? s.label : "idle"}</span>
           </div>
@@ -56,7 +56,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
                   {m.handoffs.map((h) => (
                     <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
                       <div className="hmeta">
-                        <span className="hkind">↳ {h.kind}{h.from ? ` · ${h.from}` : ""}</span>
+                        <span className="hkind">{h.kind}{h.from ? ` · ${h.from}` : ""}</span>
                         {h.status === "ack" && <span className="mono">ack’d</span>}
                       </div>
                       <div className="htext">{h.text}</div>

@@ -114,6 +114,18 @@ if (!projCols.some((c) => c.name === "workspace_id")) {
   db.exec("ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'");
 }
 
+// 0G Storage provenance: each rollup snapshot is uploaded to 0G Storage and
+// addressed by its Merkle root hash (+ the upload tx). These columns hold the
+// latest verifiable pointer for the project's shared context.
+const rollupCols = db.prepare("PRAGMA table_info(rollup)").all() as { name: string }[];
+for (const [col, ddl] of [
+  ["root_hash", "ALTER TABLE rollup ADD COLUMN root_hash TEXT NOT NULL DEFAULT ''"],
+  ["tx_hash", "ALTER TABLE rollup ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''"],
+  ["anchored_at", "ALTER TABLE rollup ADD COLUMN anchored_at INTEGER NOT NULL DEFAULT 0"],
+] as const) {
+  if (!rollupCols.some((c) => c.name === col)) db.exec(ddl);
+}
+
 export const now = () => Date.now();
 
 // ── Projects ──────────────────────────────────────────────────
@@ -354,4 +366,12 @@ export function saveRollup(
     risks: JSON.stringify(r.risks ?? []),
     updated_at: now(),
   });
+}
+
+/** Record the 0G Storage pointer for a project's latest rollup snapshot. */
+export function setRollupProvenance(project: string, rootHash: string, txHash: string) {
+  db.prepare(
+    `UPDATE rollup SET root_hash = @root_hash, tx_hash = @tx_hash, anchored_at = @anchored_at
+     WHERE project = @project`
+  ).run({ project, root_hash: rootHash, tx_hash: txHash, anchored_at: now() });
 }

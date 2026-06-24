@@ -19,7 +19,6 @@ export default function Landing() {
         {/* ── Why ────────────────────────────────────────── */}
         <section id="why" className="lsection">
           <div className="wrap">
-            <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> why</div>
             <Reveal as="h2" className="lsection-title" text={"Your context.md is stale\nthe moment you save it."} />
             <p className="sub lsection-lead">
               The gap between what the docs say and what&rsquo;s actually happening is the most
@@ -46,7 +45,6 @@ export default function Landing() {
         {/* ── Pipeline ───────────────────────────────────── */}
         <section id="pipeline" className="lsection alt">
           <div className="wrap">
-            <div className="label" style={{ marginBottom: 18 }}><span className="sq active" /> the pipeline</div>
             <Reveal as="h2" className="lsection-title" text="Noise in. Signal out." />
             <p className="sub lsection-lead">
               Raw agent activity is a firehose. Each event runs through a multi-agent, provider-neutral
@@ -72,7 +70,6 @@ export default function Landing() {
         {/* ── Get started ────────────────────────────────── */}
         <section id="start" className="lsection">
           <div className="wrap">
-            <div className="label" style={{ marginBottom: 18 }}><span className="sq" /> get started</div>
             <Reveal as="h2" className="lsection-title" text="Three steps. No standup." />
             <div className="startgrid">
               <div className="startstep">
@@ -88,7 +85,7 @@ export default function Landing() {
               <div className="startstep">
                 <div className="mono num">3 · open the board</div>
                 <p>Paste your access token once. Watch the team&rsquo;s status, pending work, and handoffs update live.</p>
-                <Link href="/dashboard" className="btn solid" style={{ marginTop: 6 }}>Open the dashboard →</Link>
+                <Link href="/dashboard" className="btn solid" style={{ marginTop: 6 }}>Open the dashboard</Link>
               </div>
             </div>
           </div>
@@ -106,7 +103,7 @@ export default function Landing() {
             <a href="https://www.npmjs.com/package/reins-hook" target="_blank" rel="noreferrer">npm</a>
             <Link href="/dashboard">dashboard</Link>
           </div>
-          <div className="mono muted">hook → distill → live shared context → MCP</div>
+          <div className="mono muted">hook / distill / live shared context / MCP</div>
         </div>
       </footer>
     </>
