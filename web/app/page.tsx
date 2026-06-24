@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { LandingHero } from "@/components/landing-hero";
+import { LandingHeroBounce } from "@/components/landing-hero-bounce";
+import { FooterPeek } from "@/components/footer-peek";
+import { ToolsSection } from "@/components/tools";
 import { Reveal } from "@/components/reveal";
 
 export const metadata = {
-  title: "Reins: live shared context for AI-agent teams",
+  title: "Reins: shared context for teams building with AI agents",
   description:
-    "Every teammate's AI agent reports what it's doing. Reins distills it live into one shared brain: status a lead can glance at, work a peer can grab, without a single standup.",
+    "Each teammate's coding agent already reports what it's doing. Reins gathers that into one shared, up-to-date view of the work: status to glance at, and tasks a teammate can pick up.",
 };
 
 const GITHUB = "https://github.com/aruntemme/reins";
@@ -13,30 +16,31 @@ const GITHUB = "https://github.com/aruntemme/reins";
 export default function Landing() {
   return (
     <>
-      <LandingHero />
+      {/* Bouncing-mascot hero. To revert: swap back to <LandingHero />. */}
+      <LandingHeroBounce />
 
       <main>
         {/* ── Why ────────────────────────────────────────── */}
         <section id="why" className="lsection">
           <div className="wrap">
-            <Reveal as="h2" className="lsection-title" text={"Your context.md is stale\nthe moment you save it."} />
+            <Reveal as="h2" className="lsection-title" text={"A context.md goes stale\nthe moment you save it."} />
             <p className="sub lsection-lead">
-              The gap between what the docs say and what&rsquo;s actually happening is the most
-              expensive problem on any team. Now that everyone drives an agent, there&rsquo;s finally a
-              machine-readable stream of intent to tap, for free.
+              Docs drift from what&rsquo;s actually happening almost right away. But now that everyone
+              works through an agent, there&rsquo;s already a live record of what each person is doing.
+              Reins just reads it.
             </p>
             <div className="whycards">
               <div className="card pad whycard">
-                <div className="label"><span className="sq" /> captured, not written</div>
-                <p>No one logs anything. The hook siphons what your agent already produces: every prompt and turn.</p>
+                <div className="label"><span className="sq" /> nothing to write</div>
+                <p>No one logs updates. The hook reads what your agent already produces: every prompt and every turn.</p>
               </div>
               <div className="card pad whycard">
                 <div className="label"><span className="sq blue" /> for the whole team</div>
-                <p>A lead sees status and risks at a glance. A peer sees what&rsquo;s blocked and grabs what&rsquo;s up for grabs.</p>
+                <p>A lead sees status and risks at a glance. A teammate sees what&rsquo;s blocked and what&rsquo;s free to pick up.</p>
               </div>
               <div className="card pad whycard">
-                <div className="label"><span className="sq active" /> a shared brain</div>
-                <p>Any agent can pull the live context over MCP, so everyone&rsquo;s agent reads from the same source of truth.</p>
+                <div className="label"><span className="sq active" /> one shared view</div>
+                <p>Any agent can pull the current context over MCP, so everyone reads from the same place.</p>
               </div>
             </div>
           </div>
@@ -45,10 +49,10 @@ export default function Landing() {
         {/* ── Pipeline ───────────────────────────────────── */}
         <section id="pipeline" className="lsection alt">
           <div className="wrap">
-            <Reveal as="h2" className="lsection-title" text="Noise in. Signal out." />
+            <Reveal as="h2" className="lsection-title" text="A lot of noise in. A short status out." />
             <p className="sub lsection-lead">
-              Raw agent activity is a firehose. Each event runs through a multi-agent, provider-neutral
-              LLM pipeline that turns it into living context, not a dump of logs.
+              Raw agent activity is mostly noise. Each event goes through a few small steps that keep
+              what matters and drop the rest, so you get a short status instead of a pile of logs.
             </p>
             <div className="steps">
               {[
@@ -67,10 +71,13 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* ── Works with your agent ──────────────────────── */}
+        <ToolsSection />
+
         {/* ── Get started ────────────────────────────────── */}
         <section id="start" className="lsection">
           <div className="wrap">
-            <Reveal as="h2" className="lsection-title" text="Three steps. No standup." />
+            <Reveal as="h2" className="lsection-title" text="Three steps. Everything in one place." />
             <div className="startgrid">
               <div className="startstep">
                 <div className="mono num">1 · install the hook</div>
@@ -80,11 +87,11 @@ export default function Landing() {
               </div>
               <div className="startstep">
                 <div className="mono num">2 · just work</div>
-                <p>Every prompt and agent turn flows to the board and gets distilled into live context. Nothing to log.</p>
+                <p>Keep working as usual. Each prompt and turn flows in and gets summarized. There&rsquo;s nothing to log.</p>
               </div>
               <div className="startstep">
                 <div className="mono num">3 · open the board</div>
-                <p>Paste your access token once. Watch the team&rsquo;s status, pending work, and handoffs update live.</p>
+                <p>Paste your access token once, and watch the team&rsquo;s status, pending work, and handoffs update live.</p>
                 <Link href="/dashboard" className="btn solid" style={{ marginTop: 6 }}>Open the dashboard</Link>
               </div>
             </div>
@@ -94,6 +101,7 @@ export default function Landing() {
 
       {/* ── Footer ──────────────────────────────────────── */}
       <footer className="lfooter">
+        <FooterPeek />
         <div className="wrap lfooter-in">
           <div className="brand"><span className="mono" style={{ fontSize: 15 }}>reins</span></div>
           <div className="lfooter-links mono">
