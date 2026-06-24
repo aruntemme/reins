@@ -37,7 +37,7 @@ export function LandingHero() {
               <a href="#why">Why</a>
               <a href="#pipeline">Pipeline</a>
               <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
-              <Link href="/dashboard" className="btn solid">Open dashboard &rarr;</Link>
+              <Link href="/dashboard" className="btn solid">Open dashboard</Link>
             </nav>
           </header>
 
@@ -62,11 +62,11 @@ export function LandingHero() {
 
             <p className="sub lhero-sub lhero-fade" style={{ animationDelay: "1.6s" }}>
               Every teammate&rsquo;s AI agent already narrates what it&rsquo;s doing. Reins distills it
-              live into one shared brain. A lead glances at status; a peer grabs what&rsquo;s pending.
+              live into one shared brain.
             </p>
 
             <div className="lhero-cta lhero-fade" style={{ animationDelay: "1.82s" }}>
-              <Link href="/dashboard" className="btn solid lg">Open the dashboard &rarr;</Link>
+              <Link href="/dashboard" className="btn solid lg">Open the dashboard</Link>
               <code className="installcmd">npx reins-hook install</code>
             </div>
            </div>

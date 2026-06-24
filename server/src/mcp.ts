@@ -4,7 +4,9 @@ import { z } from "zod";
 import "./db.js";
 import { env } from "./env.js";
 import { projectSnapshot, projectsList } from "./state.js";
-import { getProject } from "./db.js";
+import { getProject, getRollup } from "./db.js";
+import { buildContextPack, renderContextPack, type ContextPack } from "./context-pack.js";
+import { getSnapshot, storageExplorerUrl } from "./llm/og-storage.js";
 
 // Write tools go through the HTTP server so distillation + live SSE fire in the
 // server process (the MCP server is a separate process sharing the same DB file).
@@ -35,41 +37,62 @@ function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
 }
 
-function renderProject(id: string): string {
-  const s = projectSnapshot(id);
-  if (!s) return `No project "${id}". Known: ${projectsList().map((p) => p.id).join(", ") || "(none)"}`;
-  const lines: string[] = [];
-  lines.push(`# ${s.name} — live shared context`);
-  lines.push(`Goal: ${s.goal || "(not set)"}`);
-  if (s.rollup) {
-    lines.push(`\n## Status\n${s.rollup.summary}`);
-    if (s.rollup.alignment) lines.push(`Alignment: ${s.rollup.alignment}`);
-    if (s.rollup.risks?.length) lines.push(`Risks: ${s.rollup.risks.join("; ")}`);
-    if (s.rollup.collisions?.length)
-      lines.push(
-        `Collisions: ${s.rollup.collisions
-          .map((c: any) => `${c.area} (${(c.members || []).join(", ")})`)
-          .join("; ")}`
-      );
+/**
+ * Retrieve a project's shared context. When the project has a context pack
+ * anchored on 0G Storage, we fetch + verify it straight from 0G Storage (the
+ * pack is content-addressed by Merkle root hash, so a successful fetch IS the
+ * integrity check). We fall back to the local DB only if Storage is off or the
+ * project hasn't been distilled yet.
+ */
+async function renderProject(id: string): Promise<string> {
+  if (!getProject(id)) {
+    return `No project "${id}". Known: ${projectsList().map((p) => p.id).join(", ") || "(none)"}`;
   }
-  lines.push(`\n## Team`);
-  for (const m of s.members) {
-    lines.push(
-      `- ${m.displayName} [${m.status}] — ${m.headline || "(idle)"}` +
-        (m.workingOn.length ? `\n    on: ${m.workingOn.join(", ")}` : "")
-    );
+
+  const rollup: any = getRollup(id);
+  const rootHash: string = rollup?.root_hash || "";
+
+  if (env.og.storageEnabled && rootHash) {
+    try {
+      const pack = await getSnapshot<ContextPack>(rootHash);
+      return renderContextPack(pack, {
+        from: "0g-storage",
+        rootHash,
+        url: storageExplorerUrl(rootHash),
+      });
+    } catch (e: any) {
+      // 0G Storage unreachable — fall back to local but say so plainly.
+      return renderContextPack(buildContextPack(id), {
+        from: "local",
+        note: `could not reach 0G Storage for root ${rootHash}: ${e?.message ?? e}`,
+      });
+    }
   }
-  const open = s.pending.filter((p: any) => p.status !== "done");
-  lines.push(`\n## Pending / up for grabs`);
-  lines.push(open.map((p: any) => `- [${p.status}] (${p.member}) ${p.text}`).join("\n") || "(none)");
-  return lines.join("\n");
+
+  return renderContextPack(buildContextPack(id), { from: "local" });
 }
 
 server.tool(
   "reins_context",
   "Get the live shared context for a project: goal, team status, and pending work. Call this before starting work to know what teammates are doing.",
   { project: z.string().describe("Project id") },
-  async ({ project }) => text(renderProject(project))
+  async ({ project }) => text(await renderProject(project))
+);
+
+server.tool(
+  "reins_pull_context",
+  "Reconstruct a shared-context snapshot from a 0G Storage root hash ALONE — no database needed. Use this to pull a teammate's or another team's context when all you have is the hash: the pack is fetched and Merkle-verified straight from 0G Storage.",
+  { rootHash: z.string().describe("0G Storage Merkle root hash of a context pack") },
+  async ({ rootHash }) => {
+    try {
+      const pack = await getSnapshot<ContextPack>(rootHash);
+      return text(
+        renderContextPack(pack, { from: "0g-storage", rootHash, url: storageExplorerUrl(rootHash) })
+      );
+    } catch (e: any) {
+      return text(`Could not pull context from 0G Storage for root ${rootHash}: ${e?.message ?? e}`);
+    }
+  }
 );
 
 server.tool(

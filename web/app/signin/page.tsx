@@ -49,7 +49,7 @@ export default function SignIn() {
             />
             {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
             <button className="btn solid" disabled={busy || !token.trim()} style={{ justifyContent: "center" }}>
-              {busy ? "Checking…" : "Enter workspace →"}
+              {busy ? "Checking…" : "Enter workspace"}
             </button>
           </form>
           <p className="mono" style={{ marginTop: 18, color: "var(--ink-3)" }}>

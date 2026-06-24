@@ -86,6 +86,32 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Workspace { id: string; name: string }
 export interface Me { auth: boolean; workspace: Workspace | null }
 
+export interface OgStatus {
+  enabled: boolean;
+  network?: string;
+  chainId?: number;
+  explorer?: string;
+  compute?: {
+    mode: "router" | "broker";
+    private: boolean;
+    ready: boolean;
+    provider?: string;
+    model: string;
+    endpoint: string;
+    requests: number;
+    verified: number;
+    unverifiable: number;
+    balance: number | null;
+    lastError?: string;
+  } | null;
+  storage?: {
+    uploads: number;
+    lastRootHash?: string;
+    explorer: string;
+    lastError?: string;
+  } | null;
+}
+
 export const api = {
   me: () => j<Me>("/api/auth/me"),
   signin: (token: string) => j<{ ok: boolean; workspace: Workspace }>("/api/auth/session", { method: "POST", body: JSON.stringify({ token }) }),
@@ -107,6 +133,7 @@ export const api = {
     j(`/api/handoffs/${id}/${action}`, { method: "POST", body: JSON.stringify({ project }) }),
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
+  ogStatus: () => j<OgStatus>("/api/og/status"),
 };
 
 export function timeAgo(ts: number): string {

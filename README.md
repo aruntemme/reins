@@ -1,100 +1,158 @@
 # reins
 
-**The live shared context layer for teams who code with AI agents.**
+Shared context for teams that build with AI coding agents.
 
-🔗 Live: **[reinshq.vercel.app](https://reinshq.vercel.app)** · install the hook: `npx reins-hook install`
+Live: [reinshq.vercel.app](https://reinshq.vercel.app) · install the hook: `npx reins-hook install`
 
-Every teammate's agent already narrates what it's doing. Reins captures that stream, distills
-it into living context with a multi-agent LLM pipeline, and serves it as one shared brain — a
-dashboard a lead can glance at, and an MCP tool any teammate's agent can pull from. No standups,
-no stale `context.md`.
+## What it is
+
+When a team codes with AI agents, each person's agent works on its own. Nobody can easily see
+what a teammate's agent is doing, so people duplicate work, edit the same files without knowing,
+and fall back to standups and a `context.md` that goes stale within a day.
+
+Reins watches what each agent is doing, summarizes it into a short per-person and per-team status,
+and makes that status available in two places: a dashboard a admin can read, and an MCP server any
+teammate's agent can query before it starts work.
+
+It is a small project, built for the 0G Zero Cup. The capture, the distillation, and the
+retrieval all work end to end today.
+
+## How it works
 
 ```
- Claude Code hook ──POST──▶ reins server ──distill (triage→extract→reconcile)──▶ living context
-                                  │                                                    │
-                                  ├──▶ dashboard (Next.js, live via SSE) ──────────────┘
-                                  └──▶ MCP server  ("reins_context" / pending / member)──▶ any agent
+Claude Code hook  ->  reins server  ->  distill (triage, extract, reconcile, rollup)
+                          |
+                          |-- dashboard (Next.js, live over SSE)
+                          |-- MCP server (reins_context, reins_pull_context, ...)
 ```
 
-## The pipeline (the part that turns noise into signal)
+A hook in each teammate's Claude Code posts their prompts and agent turns to the reins server.
+The server runs each event through a short pipeline and keeps a current status per person and per
+project. The dashboard streams updates over SSE, and the MCP server lets any agent pull the same
+status as plain markdown.
 
-Raw agent events are a firehose. Reins runs each one through a **multi-agent, tool-calling
-pipeline** over any OpenAI-compatible LLM:
+## The distillation pipeline
 
-1. **Triage** (fast model) — gates noise vs. minor vs. major. Most low-content events stop here.
-2. **Extract** — pulls structured facts: intent, actions, files, decisions, blockers, next steps.
-3. **Reconcile** (agentic, tool-calling) — merges those facts into the person's living context by
-   *calling real tools* that mutate state: `set_headline`, `set_goal`, `set_status`,
-   `add_timeline`, `add_pending`, `resolve_pending`, `set_working_on`.
-4. **Rollup** (debounced) — synthesizes the whole team into a lead-level status: summary,
-   goal-alignment, collisions (two people in the same file), and risks.
+Each incoming event is processed in steps so that most of the noise is dropped early:
 
-If no LLM is configured, Reins degrades gracefully to raw capture (no distillation).
+1. **Triage** (fast model) sorts the event into noise, minor, or major. Low-value events stop here.
+2. **Extract** pulls structured facts: intent, actions, files touched, decisions, blockers, next steps.
+3. **Reconcile** merges those facts into the person's current status by calling tools that update
+   state: `set_headline`, `set_goal`, `set_status`, `add_timeline`, `add_pending`, `resolve_pending`,
+   `set_working_on`.
+4. **Rollup** (debounced) summarizes the whole team for a lead: a short status, goal alignment,
+   collisions (two people in the same file), and risks.
+
+If no inference backend is configured, Reins still captures raw events but does not distill them.
+
+## Where 0G fits
+
+- **Inference runs on 0G Compute.** The whole pipeline above calls the 0G Private Computer router,
+  which is OpenAI compatible.
+- **Snapshots live on 0G Storage.** Each context snapshot is written to 0G Storage and addressed by
+  its Merkle root hash, so the shared context can be pulled and verified from anywhere, not only
+  from this server's database. The MCP `reins_pull_context` tool rebuilds a snapshot from a hash
+  alone, with no local state, which is something a plain database cannot do.
+
+## What works today
+
+The pipeline is built around teams of people who each run a coding agent. What is working now:
+
+- Capture from Claude Code through a hook, installed with one command.
+- Distillation on 0G Compute: triage, extract, reconcile, and a debounced team rollup.
+- A current status per person (headline, goal, what they are working on, recent timeline, pending items).
+- A team rollup for a lead: summary, goal alignment, file collisions, and risks.
+- Handoffs and @mentions, created automatically when two agents touch the same file or one is blocked on another's work.
+- A live dashboard over SSE, and an MCP server so any teammate's agent can read or write the shared context.
+- Verifiable, portable snapshots on 0G Storage, including `reins_pull_context` to rebuild context from a hash.
+- Multi-tenant auth (workspaces and tokens) and a simple deploy to Vercel plus a small VM.
+
+## Roadmap
+
+- More agent harnesses. Today capture is wired for Claude Code. Add hooks for other coding agents
+  (Cursor, opencode, pi, Aider, codex, koda and more) so a team on mixed tools still shares
+  one context.
+- Agents and sub-agents without a human in the loop. Capture from agents running in autonomous loops,
+  and from sub-agents that a parent agent fans out, so the shared context keeps updating even when
+  nobody is typing.
+- Agents that act on the context. Let an agent claim and resolve pending work through the MCP write
+  tools, so up-for-grabs items get picked up without a person.
+- Cross-instance sync over 0G Storage. Two teams hand over a single root hash to share context,
+  with no shared server.
+- Optional on-chain anchoring on 0G Chain, so the history of snapshot hashes is a tamper-evident
+  audit trail.
+- Smarter retrieval that ranks and trims context, so an agent pulls only what is relevant to its task.
+- Digests to Slack or Discord for the humans who still want a glance.
 
 ## Quick start
 
 ```bash
 npm run install:all
 
-# 1) configure the LLM (OpenAI / OpenRouter / Ollama / vLLM / LM Studio — anything OpenAI-compatible)
+# 1) configure inference (runs on 0G Compute, via the 0G Private Computer router)
 cp server/.env.example server/.env
-#   set REINS_LLM_BASE_URL, REINS_LLM_API_KEY, REINS_LLM_MODEL
+#   set REINS_LLM_PROVIDER=0g-router, OG_ROUTER_API_KEY, REINS_LLM_MODEL, OG_STORAGE=on
+#   (or REINS_LLM_PROVIDER=openai with REINS_LLM_BASE_URL for any OpenAI-compatible endpoint)
 
 # 2) run server + dashboard
 npm run dev
-#   server    → http://localhost:4319
-#   dashboard → http://localhost:4320
+#   server    on http://localhost:4319
+#   dashboard on http://localhost:4320
 
-# 3) (optional) see it populated without wiring agents
-npm run seed                 # writes a pre-distilled demo board to project "reins"
+# 3) optional: populate a demo board without wiring agents
+npm run seed
 ```
 
-Then point an agent at it with one command — installs the capture hook into Claude Code:
+## Connect an agent
+
+One command installs the capture hook into Claude Code:
 
 ```bash
 npx reins-hook install --url http://localhost:4319 --me yourname
-#   (before publishing: npx ./cli install --me yourname)
 # then run /hooks in Claude Code to approve it
 ```
 
-Every prompt + agent turn now flows into Reins. See [`hooks/README.md`](hooks/README.md) for flags
-(`--global`, `--project`, `--key`) and `status` / `uninstall`.
+Every prompt and agent turn now flows into Reins. See [`hooks/README.md`](hooks/README.md) for flags
+(`--global`, `--project`, `--key`) and the `status` and `uninstall` commands.
 
-## Retrieve shared context from any agent (MCP)
+## Pull context from an agent (MCP)
 
-Register the MCP server so a teammate's agent can pull live context natively:
+Register the MCP server so a teammate's agent can read the shared context:
 
 ```json
 { "mcpServers": { "reins": { "command": "npx", "args": ["tsx", "server/src/mcp.ts"], "cwd": "/ABS/PATH/reins" } } }
 ```
 
-Tools: `reins_context` (project status as agent-ready markdown), `reins_projects`,
-`reins_member`, `reins_pending`.
+Tools:
+
+- `reins_context` reads a project's current status, fetched and verified from 0G Storage.
+- `reins_pull_context` rebuilds a snapshot from a 0G Storage root hash alone, with no database.
+- `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs` for narrower reads.
+- `reins_note`, `reins_claim`, `reins_resolve`, `reins_handoff_ack` let an agent write back.
 
 ## Layout
 
 | Path | What |
 |------|------|
-| `server/` | Express ingest + SSE + REST, SQLite, the LLM pipeline, MCP server |
-| `web/` | Next.js dashboard (light editorial theme, live over SSE) |
-| `cli/` | `reins-hook` — the `npx` installer (bundles the capture hook) |
-| `hooks/` | Hook docs (the canonical hook ships inside `cli/`) |
-| `deploy/` | [`DEPLOY.md`](deploy/DEPLOY.md) (Vercel + AWS) and the ECR push script |
+| `server/` | Express ingest, SSE, REST, SQLite, the distillation pipeline, the MCP server |
+| `web/` | Next.js dashboard, light editorial theme, live over SSE |
+| `cli/` | `reins-hook`, the `npx` installer that bundles the capture hook |
+| `hooks/` | Hook docs (the hook itself ships inside `cli/`) |
+| `deploy/` | [`DEPLOY.md`](deploy/DEPLOY.md) and the deploy scripts |
 
-## Auth & deploy
+## Auth and deploy
 
-Local dev runs as a single open instance (`REINS_AUTH=off`). For a shared/deployed instance,
-turn on multi-tenant auth: **workspaces** are the tenant boundary, **ingest tokens** authenticate
-hooks/agents, **access tokens** authenticate dashboard viewers (httpOnly session cookie), **admin
-tokens** mint/revoke. Bootstrap with `npm run admin -- create-workspace "Team"`.
+Local dev runs as a single open instance (`REINS_AUTH=off`). For a shared instance, turn on
+multi-tenant auth: workspaces are the tenant boundary, ingest tokens authenticate hooks and agents,
+access tokens authenticate dashboard viewers (httpOnly session cookie), and admin tokens mint or
+revoke tokens. Bootstrap with `npm run admin -- create-workspace "Team"`.
 
-Deploy in two commands: **server + SQLite → AWS Lightsail** (`deploy/lightsail/provision.sh` then
-`ship.sh`), **dashboard → Vercel** (set `REINS_URL`). The dashboard proxies `/api/*` to the backend
-so the browser stays HTTPS-only and sessions are first-party. Full guide:
-[`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+The dashboard deploys to Vercel and the server with its SQLite database to a small VM. The dashboard
+proxies `/api/*` to the backend so the browser stays first party. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
 
 ## Configuration
 
-All server config is env (`server/.env`) — see `server/.env.example`. Provider-neutral by design:
-set `REINS_LLM_BASE_URL` to any OpenAI-compatible endpoint. Set `REINS_LLM_MODEL_FAST` to a
-cheaper model for the triage gate.
+All server config is environment variables (`server/.env`, see `server/.env.example`). Inference
+runs on 0G Compute (`REINS_LLM_PROVIDER=0g-router` with `OG_ROUTER_API_KEY`) and snapshots persist
+to 0G Storage (`OG_STORAGE=on`). To use a different inference backend, set `REINS_LLM_PROVIDER=openai`
+with `REINS_LLM_BASE_URL` and any OpenAI-compatible endpoint.

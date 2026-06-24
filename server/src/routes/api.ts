@@ -6,7 +6,9 @@ import { projectSnapshot, projectsList, memberDetail } from "../state.js";
 import { setGoal, setPendingStatus, getProject, setHandoffStatus } from "../db.js";
 import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
-import { env } from "../env.js";
+import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
+import { storageStats } from "../llm/og-storage.js";
+import { env, usesOG, usesRouter } from "../env.js";
 import { requireIngest, requireViewer, authorizeProject } from "../middleware.js";
 
 export const api = Router();
@@ -97,4 +99,40 @@ api.post("/projects/:id/rollup", requireViewer, async (req, res) => {
   if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
   await runRollup(req.params.id!);
   res.json({ ok: true, rollup: projectSnapshot(req.params.id!)?.rollup ?? null });
+});
+
+// ── 0G status (powering the dashboard's "running on 0G" surface) ──
+api.get("/og/status", requireViewer, async (_req, res) => {
+  const computeOn = usesOG || usesRouter;
+  if (!computeOn && !env.og.storageEnabled) return res.json({ enabled: false });
+  if (usesOG) await ogRefreshBalance();
+  res.json({
+    enabled: true,
+    network: "0G Galileo Testnet",
+    chainId: 16602,
+    explorer: env.og.explorer,
+    compute: computeOn
+      ? {
+          mode: ogStats.mode, // "router" (pc.0g.ai) | "broker" (SDK)
+          private: ogStats.private,
+          ready: ogStats.ready,
+          provider: ogStats.provider || undefined,
+          model: ogStats.model,
+          endpoint: ogStats.endpoint,
+          requests: ogStats.requests,
+          verified: ogStats.verified,
+          unverifiable: ogStats.unverifiable,
+          balance: ogStats.balance,
+          lastError: ogStats.lastError || undefined,
+        }
+      : null,
+    storage: env.og.storageEnabled
+      ? {
+          uploads: storageStats.uploads,
+          lastRootHash: storageStats.lastRootHash || undefined,
+          explorer: env.og.storageExplorer,
+          lastError: storageStats.lastError || undefined,
+        }
+      : null,
+  });
 });

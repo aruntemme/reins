@@ -25,7 +25,7 @@ async function viaServer() {
   await fetch(`${URL}/api/projects/${PROJECT}/goal`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ goal: "Ship the Reins MVP: hook → live distilled team context → dashboard + MCP retrieval.", by: "praveen" }),
+    body: JSON.stringify({ goal: "Ship the Reins MVP: hook / live distilled team context / dashboard + MCP retrieval.", by: "praveen" }),
   });
   for (const e of events) {
     const r = await fetch(`${URL}/api/ingest`, {
@@ -54,12 +54,12 @@ function tl(member: string, kind: string, summary: string) {
 }
 
 function localOnly() {
-  setGoal(PROJECT, "Ship the Reins MVP: hook → live distilled team context → dashboard + MCP retrieval.", "praveen");
+  setGoal(PROJECT, "Ship the Reins MVP: hook / live distilled team context / dashboard + MCP retrieval.", "praveen");
   for (const e of events) insertEvent({ project: PROJECT, member: e.member, kind: e.kind, text: e.text });
 
   setMember("praveen", "Praveen", {
     headline: "Wiring the project rollup synthesizer after finishing the reconcile loop",
-    goal: "Stand up the full triage → extract → reconcile → rollup distillation pipeline",
+    goal: "Stand up the full triage / extract / reconcile / rollup distillation pipeline",
     status: "active",
     working_on: JSON.stringify(["pipeline/reconcile.ts", "pipeline/rollup.ts", "llm/agent.ts"]),
   });
@@ -91,7 +91,7 @@ function localOnly() {
 
   saveRollup(PROJECT, {
     summary:
-      "The team is converging on a working MVP. The distillation pipeline (triage → extract → reconcile) is functional and now feeding the dashboard; the rollup synthesizer and MCP retrieval are landing in parallel. One person is blocked on an interface detail.",
+      "The team is converging on a working MVP. The distillation pipeline (triage / extract / reconcile) is functional and now feeding the dashboard; the rollup synthesizer and MCP retrieval are landing in parallel. One person is blocked on an interface detail.",
     alignment:
       "On track for the goal. All three workstreams (capture/distill, dashboard, and MCP retrieval) map directly to the MVP loop.",
     collisions: [
