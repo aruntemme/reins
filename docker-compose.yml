@@ -1,0 +1,21 @@
+# Self-host Reins (server + SQLite volume). Good for a single EC2/Lightsail box.
+# The Next.js dashboard deploys separately to Vercel (see deploy/DEPLOY.md).
+services:
+  reins:
+    build: ./server
+    restart: unless-stopped
+    ports:
+      - "4319:4319"
+    environment:
+      REINS_AUTH: "on"
+      REINS_SESSION_SECRET: "${REINS_SESSION_SECRET:?set a long random secret}"
+      REINS_LLM_BASE_URL: "${REINS_LLM_BASE_URL}"
+      REINS_LLM_API_KEY: "${REINS_LLM_API_KEY}"
+      REINS_LLM_MODEL: "${REINS_LLM_MODEL}"
+      REINS_CORS_ORIGIN: "${REINS_CORS_ORIGIN}" # your Vercel dashboard origin
+      REINS_COOKIE_SECURE: "on"
+    volumes:
+      - reins-data:/data
+
+volumes:
+  reins-data:

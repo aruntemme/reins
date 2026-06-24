@@ -1,0 +1,15 @@
+{
+  "name": "reins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reins — live shared context layer for AI-agent teams.",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix web install",
+    "seed": "npm --prefix server run seed -- --local",
+    "dev:server": "npm --prefix server run dev",
+    "dev:web": "npm --prefix web run dev",
+    "mcp": "npm --prefix server run mcp",
+    "hook": "node cli/bin.mjs",
+    "dev": "npm --prefix server run dev & npm --prefix web run dev"
+  }
+}

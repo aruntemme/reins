@@ -1,0 +1,86 @@
+import { db, findOpenPending, listMembers, resolveMember, createHandoff } from "../db.js";
+import { jsonComplete } from "../llm/client.js";
+import { getProject } from "../db.js";
+import { bus } from "../bus.js";
+import { DistillSchema } from "./schemas.js";
+import { applyOps } from "./reconcile.js";
+
+const SYSTEM = `You are the distiller of Reins — you maintain a teammate's LIVING CONTEXT on a
+shared team board, from a stream of signals emitted by their AI coding agent. In ONE pass you:
+  1) TRIAGE the new event — is it noise, minor, or major?
+  2) EXTRACT what actually happened (intent, actions, decisions, blockers, next steps).
+  3) RECONCILE it into the board as a minimal op-set.
+
+Return ONLY a JSON object:
+- "significance": "noise" | "minor" | "major". "noise" = no informational content (ran ls, "ok",
+  formatting, empty/garbled) -> return significance only and omit everything else. A teammate
+  stating what they're doing / did / decided / is blocked on is ALWAYS at least "minor".
+- "headline": the single best "what are they doing this moment" line (tight). Omit/null if unchanged.
+- "goal": current session/task objective (more stable than headline). Omit/null if unchanged.
+- "status": "active" | "blocked" | "idle". Omit/null if unchanged.
+- "working_on": array of files/areas now in play (replaces the list). Omit/null if unchanged.
+- "timeline_add": array of {kind: did|decided|blocked|started, summary} — ONLY genuinely NEW events.
+  Never restate the headline. Usually 0-1 items.
+- "pending_add": array of strings a PEER could pick up or that must not be forgotten. No duplicates of open pending.
+- "pending_resolve": ids of existing open pending items the new facts show are now done.
+- "mentions": array of {to, note} — when this person directly flags, @mentions, or hands work to a
+  named teammate ("heads up Praveen…", "@asha can you…", "blocked on the API Ravi owns"). "to" MUST
+  be an exact name from the TEAMMATE ROSTER; drop mentions of anyone not on it. "note" = what that
+  teammate needs to do or know. Empty array if none.
+
+Be faithful — never invent. If nothing meaningful changed, return just the significance.`;
+
+export async function distillCombined(input: {
+  project: string;
+  member: string;
+  text: string;
+}): Promise<"noise" | "minor" | "major"> {
+  const { project, member, text } = input;
+  const current: any =
+    db.prepare("SELECT * FROM members WHERE project = ? AND member = ?").get(project, member) ?? {};
+  const openPending = findOpenPending(project, member);
+  const proj = getProject(project);
+  const roster = listMembers(project)
+    .map((x) => x.display_name || x.member)
+    .filter((n) => n !== (current.display_name || member));
+
+  const ops = await jsonComplete({
+    schema: DistillSchema,
+    system: SYSTEM,
+    maxTokens: 3500,
+    user: `PROJECT GOAL (for relevance): ${proj?.goal || "(not set)"}
+TEAMMATE ROSTER (use these exact names for mentions): ${roster.join(", ") || "(no other teammates yet)"}
+
+CURRENT STATE for ${current.display_name || member}
+headline: ${current.headline || "(none)"}
+goal: ${current.goal || "(none)"}
+status: ${current.status || "idle"}
+working_on: ${current.working_on || "[]"}
+open_pending:
+${openPending.map((p) => `  - [${p.id}] ${p.text}`).join("\n") || "  (none)"}
+
+NEW EVENT FROM THEIR AGENT:
+${text}`,
+  });
+
+  if (ops.significance === "noise") return "noise";
+  applyOps(project, member, ops);
+
+  // @mentions -> directed handoffs to the named teammate.
+  let handed = false;
+  for (const mention of ops.mentions ?? []) {
+    const toId = resolveMember(project, mention.to);
+    if (!toId || toId === member) continue; // must be a real, different teammate
+    const created = createHandoff({
+      project,
+      toMember: toId,
+      fromMember: member,
+      kind: "mention",
+      text: mention.note,
+    });
+    if (created) handed = true;
+  }
+  if (handed) bus.emitChange({ type: "handoff.changed", project });
+
+  return ops.significance;
+}

@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REINS_URL=http://localhost:4319 REINS_MEMBER=praveen REINS_PROJECT=reins-dev node /Users/temme/.reins/reins-hook.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "REINS_URL=http://localhost:4319 REINS_MEMBER=praveen REINS_PROJECT=reins-dev node /Users/temme/.reins/reins-hook.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}

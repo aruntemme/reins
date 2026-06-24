@@ -1,0 +1,14 @@
+node_modules/
+.next/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.DS_Store
+*.log
+dist/
+
+# deploy secrets
+deploy/lightsail/reins-key.pem
+deploy/lightsail/.env.deploy
