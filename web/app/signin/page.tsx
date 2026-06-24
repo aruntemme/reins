@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { TopBar } from "@/components/ui";
+import { CopyCommand } from "@/components/copy-command";
+
+const GITHUB = "https://github.com/aruntemme/reins";
 
 export default function SignIn() {
   const router = useRouter();
@@ -34,17 +37,24 @@ export default function SignIn() {
         <div className="signin">
           <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> sign in</div>
           <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Enter your workspace.</h1>
-          <p className="sub" style={{ maxWidth: 460, marginBottom: 28 }}>
-            Paste your <b>access token</b> (the <code>rk_access_…</code> your admin gave you).
-            It’s exchanged for a secure session. Nothing is stored in the browser.
+          <p className="sub" style={{ maxWidth: 480, marginBottom: 24 }}>
+            Reins is multi-tenant: each team runs in its own isolated workspace. Already have an
+            <b> access token</b> (an <code>rk_access_…</code>) for one? Paste it below. It’s exchanged
+            for a secure session; nothing is stored in the browser.
           </p>
-          <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520 }}>
+
+          <div className="signin-note">
+            <b>This site is a public demo instance.</b> Sign-in only works with a token from whoever
+            runs it, and there’s no public sign-up here. To use Reins with your own team, self-host it
+            (steps below) — your workspace, tokens, and data stay yours.
+          </div>
+
+          <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520, marginTop: 22 }}>
             <input
               className="tokeninput"
               placeholder="rk_access_…"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              autoFocus
               spellCheck={false}
             />
             {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
@@ -52,10 +62,57 @@ export default function SignIn() {
               {busy ? "Checking…" : "Enter workspace"}
             </button>
           </form>
-          <p className="mono" style={{ marginTop: 18, color: "var(--ink-3)" }}>
-            No token? Your admin mints one with <code>npm run admin -- mint &lt;workspace&gt; access</code>
-          </p>
         </div>
+
+        {/* Onboarding: how to actually run Reins and get a token. */}
+        <section className="setup-wrap">
+          <div className="label" style={{ marginBottom: 14 }}><span className="sq" /> run it for your team — 4 steps</div>
+          <h2 className="display" style={{ fontSize: 28, marginBottom: 8 }}>Self-host Reins.</h2>
+          <p className="sub" style={{ maxWidth: 560, marginBottom: 26 }}>
+            Reins is open source and multi-tenant. Clone the repo, run the server, create your own
+            workspace (which mints your tokens), point your agent at it, then sign in above with the
+            access token.
+          </p>
+
+          <ol className="setup">
+            <li className="setupstep">
+              <span className="setup-n">1</span>
+              <div className="setup-body">
+                <div className="setup-t">Run the server + dashboard</div>
+                <p className="muted">Clone, install, and start it locally (server on :4319, dashboard on :4320).</p>
+                <CopyCommand block text="git clone https://github.com/aruntemme/reins && cd reins && npm run install:all && npm run dev" />
+              </div>
+            </li>
+            <li className="setupstep">
+              <span className="setup-n">2</span>
+              <div className="setup-body">
+                <div className="setup-t">Create a workspace</div>
+                <p className="muted">This mints your <b>ingest</b>, <b>access</b>, and <b>admin</b> tokens — shown once, so copy them.</p>
+                <CopyCommand block text={'npm run admin -- create-workspace "My Team"'} />
+              </div>
+            </li>
+            <li className="setupstep">
+              <span className="setup-n">3</span>
+              <div className="setup-body">
+                <div className="setup-t">Connect your agent</div>
+                <p className="muted">Install the capture hook into Claude Code with your <b>ingest</b> token, then run <code>/hooks</code> to approve it.</p>
+                <CopyCommand block text="npx reins-hook install --url http://localhost:4319 --me you --token rk_ingest_…" />
+              </div>
+            </li>
+            <li className="setupstep">
+              <span className="setup-n">4</span>
+              <div className="setup-body">
+                <div className="setup-t">Open the board</div>
+                <p className="muted">Just work as usual. Paste your <b>access</b> token in the box above to watch the team’s status, pending work, and handoffs update live.</p>
+              </div>
+            </li>
+          </ol>
+
+          <p className="mono" style={{ marginTop: 22, color: "var(--ink-3)" }}>
+            Deploying for a team? See the full guide in the{" "}
+            <a href={`${GITHUB}#readme`} target="_blank" rel="noreferrer" className="hl" style={{ color: "var(--ink)" }}>README</a>.
+          </p>
+        </section>
       </main>
     </>
   );

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Mark } from "./ui";
+import { CopyCommand } from "./copy-command";
 
 const GITHUB = "https://github.com/aruntemme/reins";
 const LIGS = ["ffi", "ffl", "fi", "fl", "ff"];
@@ -361,7 +362,7 @@ export function LandingHeroBounce() {
 
               <div className="lhero-cta lhero-fade" style={{ animationDelay: "1.82s" }}>
                 <Link href="/dashboard" className="btn solid lg">Open the dashboard</Link>
-                <code className="installcmd">npx reins-hook install</code>
+                <CopyCommand text="npx reins-hook install" />
               </div>
             </div>
           </div>
