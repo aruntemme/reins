@@ -2,6 +2,8 @@
 
 **The live shared context layer for teams who code with AI agents.**
 
+🔗 Live: **[reinshq.vercel.app](https://reinshq.vercel.app)** · install the hook: `npx reins-hook install`
+
 Every teammate's agent already narrates what it's doing. Reins captures that stream, distills
 it into living context with a multi-agent LLM pipeline, and serves it as one shared brain — a
 dashboard a lead can glance at, and an MCP tool any teammate's agent can pull from. No standups,
