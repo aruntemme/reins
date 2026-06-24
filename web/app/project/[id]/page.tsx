@@ -35,12 +35,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     <>
       <TopBar
         live={live}
-        right={
-          <>
-            <Invite projectId={id} />
-            <button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>resync</button>
-          </>
-        }
+        right={<button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>resync</button>}
       />
       <main className="wrap">
         <div className="dash">
@@ -49,11 +44,14 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
               <div>
-                <div className="label" style={{ marginBottom: 14, justifyContent: "space-between", display: "flex" }}>
+                <div className="label" style={{ marginBottom: 14, justifyContent: "space-between", display: "flex", alignItems: "center" }}>
                   <span><span className="sq active" /> team · live</span>
-                  {proj.handoffs.length > 0 && (
-                    <span className="hcount"><span className="sq blocked" /> {proj.handoffs.length} open handoff{proj.handoffs.length > 1 ? "s" : ""}</span>
-                  )}
+                  <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    {proj.handoffs.length > 0 && (
+                      <span className="hcount"><span className="sq blocked" /> {proj.handoffs.length} open handoff{proj.handoffs.length > 1 ? "s" : ""}</span>
+                    )}
+                    <Invite projectId={id} />
+                  </span>
                 </div>
                 {proj.members.length === 0 ? (
                   <div className="card pad empty">No activity captured yet.</div>

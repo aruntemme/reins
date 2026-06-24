@@ -472,10 +472,14 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 /* ── invite teammate modal ──────────────────────────────────── */
 .invite-backdrop {
   position: fixed; inset: 0; z-index: 60; background: rgba(27,26,23,0.34);
-  backdrop-filter: blur(2px); display: flex; align-items: flex-start; justify-content: center;
-  padding: 10vh 20px 20px; overflow-y: auto;
+  backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center;
+  padding: 24px; overflow-y: auto;
 }
-.invite-modal { width: 100%; max-width: 560px; background: var(--panel); }
+.invite-modal {
+  width: 100%; max-width: 560px; background: var(--panel);
+  max-height: calc(100vh - 48px); overflow-y: auto;
+  box-shadow: 0 24px 60px -24px rgba(27,26,23,0.5);
+}
 .invite-l { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
 .invite-check {
   display: flex; align-items: center; gap: 9px; margin-top: 14px;
