@@ -5,6 +5,7 @@ import { api, timeAgo, type Project } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
+import { Invite } from "@/components/invite";
 
 export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -34,7 +35,12 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     <>
       <TopBar
         live={live}
-        right={<button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>resync</button>}
+        right={
+          <>
+            <Invite projectId={id} />
+            <button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>resync</button>
+          </>
+        }
       />
       <main className="wrap">
         <div className="dash">

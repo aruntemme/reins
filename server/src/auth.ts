@@ -76,13 +76,13 @@ export function revokeToken(id: string): boolean {
 const b64 = (s: string) => Buffer.from(s).toString("base64url");
 const unb64 = (s: string) => Buffer.from(s, "base64url").toString();
 
-export function signSession(workspaceId: string): string {
-  const payload = b64(JSON.stringify({ ws: workspaceId, iat: now() }));
+export function signSession(workspaceId: string, kind: TokenKind = "access"): string {
+  const payload = b64(JSON.stringify({ ws: workspaceId, k: kind, iat: now() }));
   const sig = createHmac("sha256", SECRET).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
 
-export function verifySession(cookie: string | undefined): { workspaceId: string } | null {
+export function verifySession(cookie: string | undefined): { workspaceId: string; kind: TokenKind } | null {
   if (!cookie || !cookie.includes(".")) return null;
   const [payload, sig] = cookie.split(".");
   if (!payload || !sig) return null;
@@ -93,7 +93,7 @@ export function verifySession(cookie: string | undefined): { workspaceId: string
   try {
     const data = JSON.parse(unb64(payload));
     if (!data.ws || !getWorkspace(data.ws)) return null;
-    return { workspaceId: data.ws };
+    return { workspaceId: data.ws, kind: (data.k as TokenKind) ?? "access" };
   } catch {
     return null;
   }

@@ -58,16 +58,23 @@ export function requireViewer(req: Request, res: Response, next: NextFunction) {
   return res.status(401).json({ error: "authentication required" });
 }
 
-/** Admin-only operations (mint/revoke tokens). */
+/** Admin-only operations (mint/revoke tokens). Accepts an admin session or admin token. */
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!env.authEnabled) {
     req.workspaceId = "default";
     return next();
   }
+  const sess = verifySession(readCookie(req, COOKIE));
+  if (sess && sess.kind === "admin") {
+    req.workspaceId = sess.workspaceId;
+    return next();
+  }
   const info = verifyToken(bearer(req));
-  if (!info || info.kind !== "admin") return res.status(401).json({ error: "admin token required" });
-  req.workspaceId = info.workspaceId;
-  next();
+  if (info && info.kind === "admin") {
+    req.workspaceId = info.workspaceId;
+    return next();
+  }
+  return res.status(401).json({ error: "admin token required" });
 }
 
 /** Guard: the project must belong to the caller's workspace. Returns false + responds on failure. */

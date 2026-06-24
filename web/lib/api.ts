@@ -84,7 +84,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface Workspace { id: string; name: string }
-export interface Me { auth: boolean; workspace: Workspace | null }
+export interface Me { auth: boolean; workspace: Workspace | null; admin?: boolean }
 
 export interface OgStatus {
   enabled: boolean;
@@ -134,6 +134,11 @@ export const api = {
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
   ogStatus: () => j<OgStatus>("/api/og/status"),
+  invite: (name: string, access: boolean) =>
+    j<{ ok: boolean; name: string | null; ingest: string; access?: string }>("/api/admin/invite", {
+      method: "POST",
+      body: JSON.stringify({ name, access }),
+    }),
 };
 
 export function timeAgo(ts: number): string {

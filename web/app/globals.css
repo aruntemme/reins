@@ -468,3 +468,18 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
   white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s;
 }
 .tool.soon:hover .tool-badge, .tool.soon:focus-visible .tool-badge { opacity: 1; transform: translate(-50%, -6px); }
+
+/* ── invite teammate modal ──────────────────────────────────── */
+.invite-backdrop {
+  position: fixed; inset: 0; z-index: 60; background: rgba(27,26,23,0.34);
+  backdrop-filter: blur(2px); display: flex; align-items: flex-start; justify-content: center;
+  padding: 10vh 20px 20px; overflow-y: auto;
+}
+.invite-modal { width: 100%; max-width: 560px; background: var(--panel); }
+.invite-l { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.invite-check {
+  display: flex; align-items: center; gap: 9px; margin-top: 14px;
+  font-size: 14px; color: var(--ink-2); cursor: pointer;
+}
+.invite-check input { width: 16px; height: 16px; accent-color: var(--ink); cursor: pointer; }
+.invite-modal .tokeninput { width: 100%; }

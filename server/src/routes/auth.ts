@@ -35,8 +35,8 @@ auth.post("/auth/session", (req, res) => {
   if (!info || (info.kind !== "access" && info.kind !== "admin")) {
     return res.status(401).json({ error: "invalid token" });
   }
-  res.setHeader("Set-Cookie", `${COOKIE}=${signSession(info.workspaceId)}; ${cookieOpts()}`);
-  res.json({ ok: true, workspace: getWorkspace(info.workspaceId) });
+  res.setHeader("Set-Cookie", `${COOKIE}=${signSession(info.workspaceId, info.kind)}; ${cookieOpts()}`);
+  res.json({ ok: true, workspace: getWorkspace(info.workspaceId), admin: info.kind === "admin" });
 });
 
 auth.post("/auth/logout", (_req, res) => {
@@ -46,11 +46,11 @@ auth.post("/auth/logout", (_req, res) => {
 
 // Who am I / is auth even on? Used by the web to decide whether to show sign-in.
 auth.get("/auth/me", (req, res) => {
-  if (!env.authEnabled) return res.json({ auth: false, workspace: { id: "default", name: "Local" } });
+  if (!env.authEnabled) return res.json({ auth: false, workspace: { id: "default", name: "Local" }, admin: true });
   const sess = verifySession(readCookie(req, COOKIE));
-  const info = sess ? { workspaceId: sess.workspaceId } : verifyToken(bearer(req));
-  if (!info) return res.json({ auth: true, workspace: null });
-  res.json({ auth: true, workspace: getWorkspace(info.workspaceId) ?? null });
+  const info = sess ? { workspaceId: sess.workspaceId, kind: sess.kind } : verifyToken(bearer(req));
+  if (!info) return res.json({ auth: true, workspace: null, admin: false });
+  res.json({ auth: true, workspace: getWorkspace(info.workspaceId) ?? null, admin: info.kind === "admin" });
 });
 
 // ── Admin: manage tokens (admin-token gated) ──────────────────
@@ -65,6 +65,19 @@ auth.post("/admin/tokens", requireAdmin, (req, res) => {
 
 auth.get("/admin/tokens", requireAdmin, (req, res) => {
   res.json({ tokens: listTokens(req.workspaceId!) });
+});
+
+// Invite a teammate: mint an ingest token (their agent) and, optionally, an
+// access token (dashboard viewing). Both are workspace-scoped.
+auth.post("/admin/invite", requireAdmin, (req, res) => {
+  const body = z
+    .object({ name: z.string().trim().min(1).max(60).optional(), access: z.boolean().optional() })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const label = body.data.name;
+  const ingest = mintToken(req.workspaceId!, "ingest", label);
+  const access = body.data.access ? mintToken(req.workspaceId!, "access", label) : undefined;
+  res.json({ ok: true, name: label ?? null, ingest, access });
 });
 
 auth.post("/admin/tokens/:id/revoke", requireAdmin, (req, res) => {
