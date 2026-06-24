@@ -36,7 +36,7 @@ export default function SignIn() {
           <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Enter your workspace.</h1>
           <p className="sub" style={{ maxWidth: 460, marginBottom: 28 }}>
             Paste your <b>access token</b> (the <code>rk_access_…</code> your admin gave you).
-            It’s exchanged for a secure session — nothing is stored in the browser.
+            It’s exchanged for a secure session. Nothing is stored in the browser.
           </p>
           <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520 }}>
             <input

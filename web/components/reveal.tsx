@@ -16,7 +16,7 @@ function splitGlyphs(text: string): string[] {
 
 /**
  * A heading whose glyphs blur-in (creed-style) the first time it scrolls into
- * view. Pure CSS animation gated by a class toggled via IntersectionObserver —
+ * view. Pure CSS animation gated by a class toggled via IntersectionObserver,
  * no animation library. `text` may contain "\n" for explicit line breaks.
  */
 export function Reveal({

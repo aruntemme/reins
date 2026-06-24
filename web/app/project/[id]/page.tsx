@@ -111,7 +111,7 @@ function Rollup({ proj }: { proj: Project }) {
   if (!r) return (
     <div className="card pad">
       <div className="label" style={{ marginBottom: 10 }}><span className="sq" /> status</div>
-      <div className="empty">No rollup yet — it synthesizes after the team logs a bit of activity.</div>
+      <div className="empty">No rollup yet. It synthesizes after the team logs a bit of activity.</div>
     </div>
   );
   return (
@@ -177,7 +177,7 @@ function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number];
           ))}
         </div>
       )}
-      <div className="headline">{m.headline || "—"}</div>
+      <div className="headline">{m.headline || "…"}</div>
       {m.goal && <div className="goal">↳ {m.goal}</div>}
       {m.workingOn.length > 0 && (
         <div className="chiprow">

@@ -15,10 +15,10 @@ const PROJECT = "reins";
 const events: { member: string; displayName: string; kind: string; text: string }[] = [
   { member: "praveen", displayName: "Praveen", kind: "intent", text: "Build the live distillation pipeline: triage -> extract -> reconcile agents over an OpenAI-compatible LLM. Starting on the reconcile tool-calling loop." },
   { member: "praveen", displayName: "Praveen", kind: "summary", text: "Reconcile agent now updates member headline/goal/status and surfaces pending items via tool calls. Next: project rollup synthesizer." },
-  { member: "asha", displayName: "Asha", kind: "intent", text: "Designing the dashboard in Next.js — light editorial theme, monospace status labels, no kanban." },
+  { member: "asha", displayName: "Asha", kind: "intent", text: "Designing the dashboard in Next.js with a light editorial theme, monospace status labels, no kanban." },
   { member: "asha", displayName: "Asha", kind: "summary", text: "Hero + team grid laid out. Need the SSE stream endpoint shape finalized before wiring live updates." },
   { member: "ravi", displayName: "Ravi", kind: "intent", text: "Setting up the MCP server so any teammate's agent can pull reins_context. Also touching the reconcile schema." },
-  { member: "ravi", displayName: "Ravi", kind: "summary", text: "MCP exposes reins_context/reins_pending/reins_member. I edited reconcile.ts — heads up Praveen, we both touched it." },
+  { member: "ravi", displayName: "Ravi", kind: "summary", text: "MCP exposes reins_context/reins_pending/reins_member. I edited reconcile.ts. Heads up Praveen, we both touched it." },
 ];
 
 async function viaServer() {
@@ -69,7 +69,7 @@ function localOnly() {
 
   setMember("asha", "Asha", {
     headline: "Building the team grid + pending rail in the Next.js dashboard",
-    goal: "Editorial light-theme dashboard, no kanban — living context per person",
+    goal: "Editorial light-theme dashboard, no kanban, living context per person",
     status: "blocked",
     working_on: JSON.stringify(["app/project/[id]/page.tsx", "globals.css"]),
   });
@@ -93,7 +93,7 @@ function localOnly() {
     summary:
       "The team is converging on a working MVP. The distillation pipeline (triage → extract → reconcile) is functional and now feeding the dashboard; the rollup synthesizer and MCP retrieval are landing in parallel. One person is blocked on an interface detail.",
     alignment:
-      "On track for the goal. All three workstreams — capture/distill, dashboard, and MCP retrieval — map directly to the MVP loop.",
+      "On track for the goal. All three workstreams (capture/distill, dashboard, and MCP retrieval) map directly to the MVP loop.",
     collisions: [
       { area: "pipeline/reconcile.ts", members: ["praveen", "ravi"], note: "Both edited the reconcile stage; coordinate before merge." },
     ],

@@ -24,7 +24,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Reins — live shared context for AI-agent teams",
+  title: "Reins: live shared context for AI-agent teams",
   description: "The context your team actually shares. Captured from every agent, distilled live.",
 };
 

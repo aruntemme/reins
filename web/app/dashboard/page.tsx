@@ -40,7 +40,7 @@ export default function Dashboard() {
 
         {!llm && loaded && (
           <div className="banner" style={{ marginBottom: 24 }}>
-            ⚠ No LLM configured — running in degraded mode (raw capture, no distillation). Set
+            ⚠ No LLM configured: running in degraded mode (raw capture, no distillation). Set
             <code style={{ margin: "0 4px" }}>REINS_LLM_API_KEY</code> in the server.
           </div>
         )}

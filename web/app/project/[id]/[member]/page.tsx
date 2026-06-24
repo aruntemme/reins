@@ -72,7 +72,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
               </Section>
             )}
             <Section label="now">
-              <div className="bighead">{m.headline || "—"}</div>
+              <div className="bighead">{m.headline || "…"}</div>
             </Section>
 
             {m.goal && (

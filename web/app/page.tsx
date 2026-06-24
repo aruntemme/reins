@@ -3,9 +3,9 @@ import { LandingHero } from "@/components/landing-hero";
 import { Reveal } from "@/components/reveal";
 
 export const metadata = {
-  title: "Reins — live shared context for AI-agent teams",
+  title: "Reins: live shared context for AI-agent teams",
   description:
-    "Every teammate's AI agent reports what it's doing. Reins distills it live into one shared brain — status a lead can glance at, work a peer can grab, without a single standup.",
+    "Every teammate's AI agent reports what it's doing. Reins distills it live into one shared brain: status a lead can glance at, work a peer can grab, without a single standup.",
 };
 
 const GITHUB = "https://github.com/aruntemme/reins";
@@ -24,12 +24,12 @@ export default function Landing() {
             <p className="sub lsection-lead">
               The gap between what the docs say and what&rsquo;s actually happening is the most
               expensive problem on any team. Now that everyone drives an agent, there&rsquo;s finally a
-              machine-readable stream of intent to tap — for free.
+              machine-readable stream of intent to tap, for free.
             </p>
             <div className="whycards">
               <div className="card pad whycard">
                 <div className="label"><span className="sq" /> captured, not written</div>
-                <p>No one logs anything. The hook siphons what your agent already produces — every prompt and turn.</p>
+                <p>No one logs anything. The hook siphons what your agent already produces: every prompt and turn.</p>
               </div>
               <div className="card pad whycard">
                 <div className="label"><span className="sq blue" /> for the whole team</div>
@@ -37,7 +37,7 @@ export default function Landing() {
               </div>
               <div className="card pad whycard">
                 <div className="label"><span className="sq active" /> a shared brain</div>
-                <p>Any agent can pull the live context over MCP — so everyone&rsquo;s agent reads from the same source of truth.</p>
+                <p>Any agent can pull the live context over MCP, so everyone&rsquo;s agent reads from the same source of truth.</p>
               </div>
             </div>
           </div>
@@ -50,13 +50,13 @@ export default function Landing() {
             <Reveal as="h2" className="lsection-title" text="Noise in. Signal out." />
             <p className="sub lsection-lead">
               Raw agent activity is a firehose. Each event runs through a multi-agent, provider-neutral
-              LLM pipeline that turns it into living context — not a dump of logs.
+              LLM pipeline that turns it into living context, not a dump of logs.
             </p>
             <div className="steps">
               {[
                 ["01", "triage", "Gate the noise. Most low-content events stop here."],
                 ["02", "extract", "Pull structured facts: intent, actions, files, decisions, blockers."],
-                ["03", "reconcile", "Merge into each person's living context — headline, status, pending, handoffs."],
+                ["03", "reconcile", "Merge into each person's living context: headline, status, pending, handoffs."],
                 ["04", "rollup", "Synthesize the whole team: status, goal-alignment, collisions, risks."],
               ].map(([n, t, d]) => (
                 <div className="step" key={n}>
@@ -76,17 +76,17 @@ export default function Landing() {
             <Reveal as="h2" className="lsection-title" text="Three steps. No standup." />
             <div className="startgrid">
               <div className="startstep">
-                <div className="mono num">1 — install the hook</div>
+                <div className="mono num">1 · install the hook</div>
                 <pre className="code">npx reins-hook install \
   --url https://your-reins --me you</pre>
                 <p className="muted">Then run <code>/hooks</code> in Claude Code to approve it.</p>
               </div>
               <div className="startstep">
-                <div className="mono num">2 — just work</div>
+                <div className="mono num">2 · just work</div>
                 <p>Every prompt and agent turn flows to the board and gets distilled into live context. Nothing to log.</p>
               </div>
               <div className="startstep">
-                <div className="mono num">3 — open the board</div>
+                <div className="mono num">3 · open the board</div>
                 <p>Paste your access token once. Watch the team&rsquo;s status, pending work, and handoffs update live.</p>
                 <Link href="/dashboard" className="btn solid" style={{ marginTop: 6 }}>Open the dashboard →</Link>
               </div>

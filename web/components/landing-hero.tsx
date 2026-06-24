@@ -17,7 +17,7 @@ function splitGlyphs(text: string): string[] {
   return out;
 }
 
-// Pure-CSS per-glyph blur-in (keyframes + animation-delay) — no JS gating, so
+// Pure-CSS per-glyph blur-in (keyframes + animation-delay): no JS gating, so
 // it's immune to hydration/runtime quirks and runs the moment the page paints.
 const HEADLINE = "The context your team\nactually shares.";
 
@@ -61,8 +61,8 @@ export function LandingHero() {
             <div className="lhero-rule" style={{ animationDelay: "1.35s" }} />
 
             <p className="sub lhero-sub lhero-fade" style={{ animationDelay: "1.6s" }}>
-              Every teammate&rsquo;s AI agent already narrates what it&rsquo;s doing. Reins distills it &mdash;
-              live &mdash; into one shared brain. A lead glances at status; a peer grabs what&rsquo;s pending.
+              Every teammate&rsquo;s AI agent already narrates what it&rsquo;s doing. Reins distills it
+              live into one shared brain. A lead glances at status; a peer grabs what&rsquo;s pending.
             </p>
 
             <div className="lhero-cta lhero-fade" style={{ animationDelay: "1.82s" }}>
