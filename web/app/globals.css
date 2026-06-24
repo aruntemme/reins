@@ -252,23 +252,69 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 
 .dashtop { padding: 48px 0 30px; }
 
-/* hero — text block, then a full-width soft-rounded hero image */
-.lhero { border-bottom: 1px solid var(--line); }
-.lhero-inner { padding: 84px 0 48px; }
-.lhero-title { font-size: clamp(44px, 6.6vw, 86px); }
-.lhero-sub { max-width: 600px; margin-top: 24px; font-size: 19px; }
-
-.lhero-figure { margin: 0; padding: 0 24px 88px; }
-.lhero-image {
-  display: block; width: 100%; height: clamp(320px, 56vh, 600px);
-  object-fit: cover; object-position: center;
-  border-radius: 26px;
-  border: 1px solid var(--line);
-  box-shadow: 0 2px 0 rgba(27,26,23,0.02), 0 40px 80px -48px rgba(27,26,23,0.45);
+/* hero — full-bleed rounded image card, nav + headline overlaid (creed-style) */
+.lhero { padding: 12px; background: var(--bg); }
+.lhero-card {
+  position: relative; overflow: hidden; border-radius: 28px;
+  min-height: calc(100svh - 24px);
+  background: #2a2014;
+  display: flex; flex-direction: column;
 }
-@media (max-width: 680px){ .lhero-figure { padding: 0 16px 56px; } .lhero-image { border-radius: 18px; } }
-.lhero-sub code { font-family: var(--font-mono); font-size: .85em; background: #00000008; padding: 1px 5px; border-radius: 4px; }
-.lhero-cta { display: flex; align-items: center; gap: 16px; margin-top: 36px; flex-wrap: wrap; }
+.lhero-art {
+  position: absolute; inset: 0; z-index: 0;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+}
+.lhero-wash {
+  position: absolute; inset: 0; z-index: 1;
+  background:
+    radial-gradient(130% 78% at 50% 40%, rgba(18,12,5,0.60) 0%, rgba(18,12,5,0.30) 38%, rgba(18,12,5,0.06) 62%, transparent 78%),
+    linear-gradient(180deg, rgba(18,12,5,0.46) 0%, rgba(18,12,5,0.14) 26%, transparent 52%),
+    linear-gradient(0deg, rgba(18,12,5,0.34) 0%, transparent 26%);
+}
+.lhero-fg { position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; padding: 20px clamp(18px, 4vw, 44px) 40px; }
+
+.lhero-nav { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 0; }
+.brand.light { color: #fff; }
+.brand.light .mark rect { fill: rgba(255,255,255,0.14); }
+.navlinks { display: flex; align-items: center; gap: 24px; font-family: var(--font-mono); font-size: 13px; }
+.navlinks.light a { color: rgba(255,255,255,0.82); }
+.navlinks.light a:hover { color: #fff; }
+@media (max-width: 680px){ .navlinks a:not(.btn) { display: none; } }
+
+.lhero-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-bottom: 6vh; }
+.lhero-title {
+  color: #fff; font-weight: 600; letter-spacing: -0.025em; line-height: 1.02;
+  font-size: clamp(40px, 7vw, 92px); margin: 0;
+  text-shadow: 0 2px 40px rgba(20,14,6,0.35);
+}
+.lhero-line { display: block; white-space: nowrap; }
+.lhero-glyph {
+  display: inline-block; white-space: pre;
+  opacity: 0; animation: glyphIn 0.6s cubic-bezier(0.16,1,0.3,1) both;
+}
+@keyframes glyphIn {
+  from { opacity: 0; filter: blur(8px); transform: translateY(10px); }
+  to   { opacity: 1; filter: blur(0);   transform: translateY(0); }
+}
+.lhero-fade { opacity: 0; animation: heroFade 0.62s cubic-bezier(0.16,1,0.3,1) both; }
+@keyframes heroFade {
+  from { opacity: 0; filter: blur(10px); transform: translateY(10px); }
+  to   { opacity: 1; filter: blur(0);    transform: translateY(0); }
+}
+.lhero-rule {
+  height: 1px; width: 300px; margin: 30px auto 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4) 18%, rgba(255,255,255,0.4) 82%, transparent);
+  opacity: 0; transform: scaleX(0); transform-origin: center;
+  animation: heroRule 0.54s cubic-bezier(0.16,1,0.3,1) both;
+}
+@keyframes heroRule { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+.lhero-sub { max-width: 560px; margin: 26px auto 0; font-size: 18px; color: rgba(255,255,255,0.92); text-shadow: 0 1px 20px rgba(20,14,6,0.4); }
+.lhero-cta { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) {
+  .lhero-glyph, .lhero-fade, .lhero-rule { animation: none; opacity: 1; filter: none; transform: none; }
+}
+.installcmd.light { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.28); color: #fff; backdrop-filter: blur(6px); }
+.installcmd.light::before { color: rgba(255,255,255,0.55); }
 .btn.lg { padding: 13px 22px; font-size: 14px; }
 .installcmd {
   font-family: var(--font-mono); font-size: 13px; color: var(--ink-2);

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TopBar } from "@/components/ui";
+import { LandingHero } from "@/components/landing-hero";
 
 export const metadata = {
   title: "Reins — live shared context for AI-agent teams",
@@ -12,42 +12,7 @@ const GITHUB = "https://github.com/aruntemme/reins";
 export default function Landing() {
   return (
     <>
-      <TopBar
-        hideLive
-        right={
-          <nav className="navlinks">
-            <a href="#why">Why</a>
-            <a href="#pipeline">Pipeline</a>
-            <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
-            <Link href="/dashboard" className="btn solid">Open dashboard →</Link>
-          </nav>
-        }
-      />
-
-      {/* ── Hero ─────────────────────────────────────────── */}
-      <section className="lhero">
-        <div className="lhero-inner wrap">
-          <div className="label eyebrow" style={{ marginBottom: 22 }}>
-            <span className="sq" /> live context · for agent teams
-          </div>
-          <h1 className="display lhero-title">
-            The context your team<br />actually <span className="hl">shares</span>.
-          </h1>
-          <p className="sub lhero-sub">
-            Every teammate&rsquo;s AI agent already narrates what it&rsquo;s doing. Reins captures that
-            stream and distills it — live — into one shared brain. A lead glances at status; a peer
-            grabs what&rsquo;s pending. No standups, no stale <code>context.md</code>.
-          </p>
-          <div className="lhero-cta">
-            <Link href="/dashboard" className="btn solid lg">Open the dashboard →</Link>
-            <code className="installcmd">npx reins-hook install</code>
-          </div>
-        </div>
-        <figure className="lhero-figure">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/hero.jpg" alt="A rider taking the reins across golden fields at sunrise" className="lhero-image" />
-        </figure>
-      </section>
+      <LandingHero />
 
       <main>
         {/* ── Why ────────────────────────────────────────── */}
