@@ -86,6 +86,16 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Workspace { id: string; name: string }
 export interface Me { auth: boolean; workspace: Workspace | null; admin?: boolean }
 
+export interface Token {
+  id: string;
+  kind: "ingest" | "access" | "admin";
+  prefix: string;
+  label: string | null;
+  created_at: number;
+  last_used: number | null;
+  revoked: 0 | 1;
+}
+
 export interface OgStatus {
   enabled: boolean;
   network?: string;
@@ -139,6 +149,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, access }),
     }),
+  tokens: () => j<{ tokens: Token[] }>("/api/admin/tokens"),
+  revokeToken: (id: string) =>
+    j<{ ok: boolean }>(`/api/admin/tokens/${encodeURIComponent(id)}/revoke`, { method: "POST" }),
 };
 
 export function timeAgo(ts: number): string {

@@ -451,3 +451,32 @@ export function setSnapshotAnchor(rootHash: string, anchoredTx: string): boolean
   const r = db.prepare("UPDATE snapshots SET anchored_tx = ? WHERE id = ?").run(anchoredTx, row.id);
   return r.changes > 0;
 }
+
+// ── Workspace cleanup ─────────────────────────────────────────
+/** Move every project from one workspace to another. Returns how many moved. */
+export function reassignProjects(fromWs: string, toWs: string): number {
+  const r = db
+    .prepare("UPDATE projects SET workspace_id = ? WHERE workspace_id = ?")
+    .run(toWs, fromWs);
+  return r.changes;
+}
+
+/** How many projects a workspace still owns — used to guard deletion. */
+export function countProjects(workspaceId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM projects WHERE workspace_id = ?")
+    .get(workspaceId) as { n: number };
+  return row.n;
+}
+
+/**
+ * Delete a workspace and its tokens. Refuses (returns false) while the
+ * workspace still owns projects, so callers must merge/move them first and we
+ * never orphan project rows.
+ */
+export function deleteWorkspace(id: string): boolean {
+  if (countProjects(id) > 0) return false;
+  db.prepare("DELETE FROM tokens WHERE workspace_id = ?").run(id);
+  const r = db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+  return r.changes > 0;
+}
