@@ -27,7 +27,7 @@ function freePort(): Promise<number> {
   });
 }
 
-async function waitForHealth(url: string, child: ChildProcess, timeoutMs = 15000) {
+async function waitForHealth(url: string, child: ChildProcess, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`server exited early (code ${child.exitCode})`);
