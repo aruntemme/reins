@@ -5,11 +5,13 @@ type Tool = { name: string; icon: string; live?: boolean };
 // Logos from the creed agent set, plus Koda's and pi's own favicons.
 const TOOLS: Tool[] = [
   { name: "Claude Code", icon: "claudecode.svg", live: true },
-  { name: "Codex", icon: "codex.svg" },
+  // Concrete, tested adapters ship in the CLI (cli/adapters). Codex and OpenCode
+  // are live; pi, Hermes, and Koda ride the generic adapter or MCP for now.
+  { name: "Codex", icon: "codex.svg", live: true },
+  { name: "OpenCode", icon: "opencode.svg", live: true },
   { name: "pi", icon: "pi.svg" },
   { name: "Hermes", icon: "hermes.svg" },
   { name: "Koda", icon: "koda.png" },
-  { name: "OpenCode", icon: "opencode.svg" },
 ];
 
 export function ToolsSection() {
@@ -18,7 +20,8 @@ export function ToolsSection() {
       <div className="wrap">
         <Reveal as="h2" className="lsection-title" text="Bring your own agent." />
         <p className="sub lsection-lead">
-          Today Reins captures from Claude Code. Support for more agents is on the way.
+          Reins captures from Claude Code, Codex, and OpenCode today. Any other agent that can run a
+          shell command works through the generic adapter, with more first-class adapters on the way.
         </p>
 
         <div className="label tools-label"><span className="sq" /> agents</div>
