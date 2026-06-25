@@ -35,7 +35,7 @@ export function LandingHero() {
             <Link href="/" className="brand"><Mark /> reins</Link>
             <nav className="navlinks">
               <a href="#why">Why</a>
-              <a href="#pipeline">Pipeline</a>
+              <a href="#how">How</a>
               <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
               <Link href="/dashboard" className="btn solid">Open dashboard</Link>
             </nav>

@@ -69,7 +69,7 @@ export function HowItWorks() {
   const active = mode === "overview" ? OVERVIEW : STAGES.find((s) => s.id === mode)!;
 
   return (
-    <section id="how" className="lsection">
+    <section id="how" className="lsection alt">
       <div className="wrap">
         <Reveal as="h2" className="lsection-title" text="See how the pieces fit." />
         <p className="sub lsection-lead">
