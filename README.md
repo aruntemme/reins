@@ -11,7 +11,7 @@ what a teammate's agent is doing, so people duplicate work, edit the same files 
 and fall back to standups and a `context.md` that goes stale within a day.
 
 Reins watches what each agent is doing, summarizes it into a short per-person and per-team status,
-and makes that status available in two places: a dashboard a admin can read, and an MCP server any
+and makes that status available in two places: a dashboard the team can read, and an MCP server any
 teammate's agent can query before it starts work.
 
 It is a small project, built for the 0G Zero Cup. The capture, the distillation, and the
@@ -76,8 +76,10 @@ The pipeline is built around teams of people who each run a coding agent. What i
 - Optional on-chain anchoring on 0G Chain: every snapshot root hash can be committed as a tamper-evident,
   publicly auditable transaction.
 - Optional Slack and Discord digests of each rollup for the humans who want a glance.
-- Token management for admins (list and revoke from the dashboard) on top of multi-tenant auth
-  (workspaces and tokens), and a simple deploy to Vercel plus a small VM.
+- Real accounts on top of the multi-tenant model: sign up to get your own workspace, log in with
+  email and password, invite teammates with a link, and roles (owner, admin, member). Tokens still
+  authenticate hooks and agents, and admins can list and revoke them from the dashboard.
+- A simple deploy to Vercel plus a small VM, which snapshots the database before each release.
 
 ## Roadmap
 
@@ -89,6 +91,10 @@ The pipeline is built around teams of people who each run a coding agent. What i
 - Embedding-based retrieval. Scoping ranks by lexical overlap today; swap in embeddings for semantic recall.
 - Richer on-chain provenance. Anchoring writes a witness transaction today; a small contract could index
   the full history of a workspace's snapshot hashes.
+
+Todos:
+
+- Email for invites and password resets. Both work over one-time links today; sending them by email is next.
 
 ## Quick start
 
@@ -118,8 +124,9 @@ npx reins-hook install --url http://localhost:4319 --me yourname
 # then run /hooks in Claude Code to approve it
 ```
 
-Every prompt and agent turn now flows into Reins. See [`hooks/README.md`](hooks/README.md) for flags
-(`--global`, `--project`, `--key`) and the `status` and `uninstall` commands.
+Every prompt and agent turn now flows into Reins. On a shared instance, pass the ingest token from
+your dashboard with `--token`. See [`hooks/README.md`](hooks/README.md) for flags (`--global`,
+`--project`, `--token`) and the `status` and `uninstall` commands.
 
 ## Pull context from an agent (MCP)
 
@@ -148,13 +155,16 @@ Tools:
 
 ## Auth and deploy
 
-Local dev runs as a single open instance (`REINS_AUTH=off`). For a shared instance, turn on
-multi-tenant auth: workspaces are the tenant boundary, ingest tokens authenticate hooks and agents,
-access tokens authenticate dashboard viewers (httpOnly session cookie), and admin tokens mint or
-revoke tokens. Bootstrap with `npm run admin -- create-workspace "Team"`.
+Local dev runs as a single open instance (`REINS_AUTH=off`). For a shared instance, turn it on
+(`REINS_AUTH=on`). People sign up to get their own workspace, log in with email and password, and
+invite teammates with a one-time link; roles are owner, admin, and member. Workspaces are the tenant
+boundary. Tokens still authenticate machines: ingest for hooks and agents, access for viewers, admin
+to mint or revoke. Invites and resets use one-time links for now; email is not wired yet. Admin
+commands include `create-workspace`, `claim-workspace`, `reset-link`, `list-workspaces`, and `revoke`.
 
-The dashboard deploys to Vercel and the server with its SQLite database to a small VM. The dashboard
-proxies `/api/*` to the backend so the browser stays first party. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+The dashboard deploys to Vercel and the server with its SQLite database to a small VM. Each deploy
+backs up the database first, on the box and off it. The dashboard proxies `/api/*` to the backend so
+the browser stays first party. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
 
 ## Configuration
 
