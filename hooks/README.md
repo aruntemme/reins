@@ -19,6 +19,8 @@ Claude Code to approve it (or restart).
 
 | Flag | Default | Meaning |
 |------|---------|---------|
+| `--agent <name>` | `claude-code` | Which agent harness (see below) |
+| `--source <id>` | the agent's id | Override the source label events carry |
 | `--url <url>` | `http://localhost:4319` | Reins server |
 | `--me <name>` | git email → `$USER` | Who you are |
 | `--project <id>` | folder name | Project scope |
@@ -30,8 +32,56 @@ Other commands: `npx reins-hook status`, `npx reins-hook uninstall [--global]`.
 > Running from this repo before publishing to npm? Use `npx ./cli install …`
 > (or `node cli/bin.mjs install …`). The CLI source is in [`../cli`](../cli).
 
-## Other agents
+## Bring your own agent (`--agent`)
 
-Any agent that can run a shell command on prompt/stop can feed Reins — just POST
-the same JSON to `/api/ingest`. Cursor, Windsurf, or a plain script all work.
-Agents with MCP can also push via the `reins_note` tool instead of a hook.
+A whole team on mixed coding agents can share one Reins context. `--agent`
+copies the right adapter to `~/.reins/adapters/`, sets `REINS_SOURCE`, and merges
+the command into your settings (foreign hooks are left untouched). Known agents:
+
+| `--agent` | Source | Integration |
+|-----------|--------|-------------|
+| `claude-code` | `claude-code` | Native Claude Code hook (default) |
+| `codex` | `codex` | Codex CLI `notify` program (concrete) |
+| `opencode` | `opencode` | OpenCode plugin/event bus (concrete) |
+| `aider` | `aider` | Aider `--notifications-command` + chat history (concrete) |
+| `generic` | `agent` | Universal: any agent that can run a shell command |
+
+```bash
+npx reins-hook install --agent codex --me asha
+npx reins-hook install --agent opencode --me rui
+npx reins-hook install --agent aider --me lee
+npx reins-hook install --agent generic --source my-bot --me asha
+```
+
+Each adapter exposes a pure mapping function (`mapCodex`, `mapOpencode`,
+`mapAider`, `mapGeneric`) and a guarded `main` that reads its agent's payload and
+ships an `intent`/`progress`/`summary` event with the right `source`.
+
+### Wiring each agent's trigger
+
+The installer records the command in settings.json; point the agent's own
+trigger at the printed command (it lives under `~/.reins`):
+
+- **Codex** — in `~/.codex/config.toml` set
+  `notify = ["node", "/Users/you/.reins/adapters/codex.mjs"]`. Codex passes the
+  event JSON as the first argument; the adapter also reads stdin as a fallback.
+- **OpenCode** — add a tiny plugin that subscribes to the event bus and pipes the
+  event JSON to `node ~/.reins/adapters/opencode.mjs`.
+- **Aider** — run aider with
+  `--notifications-command "node /Users/you/.reins/adapters/aider.mjs"`. With no
+  stdin payload the adapter reads the latest assistant turn from
+  `.aider.chat.history.md` (override with `--history` / `AIDER_CHAT_HISTORY`).
+- **Generic** — have your agent run
+  `node ~/.reins/adapters/generic.mjs --source my-bot --kind intent` and pipe a
+  JSON object (e.g. `{"prompt":"..."}`) or pass `--text "..."`. Configure which
+  field holds the text with `--fields` / `REINS_TEXT_FIELDS` (a comma list of
+  dot-paths).
+
+## Other agents (generic + MCP)
+
+For agents without a first-class adapter (pi, Hermes, Koda, Cursor, Windsurf,
+or a plain script): use the **generic** adapter above, or just POST the same JSON
+to `/api/ingest`. Agents with MCP can push via the `reins_note` tool instead of a
+hook. The OpenAdapter-family agents (pi, Koda, Hermes) are MCP-capable, so the
+`reins_note` path is the recommended integration until their concrete adapters
+land.
