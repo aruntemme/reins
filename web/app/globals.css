@@ -158,6 +158,9 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
 .chip {
   font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2);
   background: #f6f3ec; border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px;
+  /* Long unbroken tokens (e.g. file paths) must stay inside the card, not spill
+     past its edge: allow the chip to shrink and break the text where needed. */
+  max-width: 100%; min-width: 0; overflow-wrap: anywhere;
 }
 .chip.warn { background: #fbf1e3; border-color: #f0dcc0; color: #9a6a2c; }
 

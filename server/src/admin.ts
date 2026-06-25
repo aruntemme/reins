@@ -6,9 +6,12 @@
  *   npm run admin -- list-workspaces
  *   npm run admin -- list-tokens <workspaceId>
  *   npm run admin -- revoke <tokenId>
+ *   npm run admin -- claim-workspace <workspaceId> <email> [role=owner]
+ *   npm run admin -- reset-link <email>
  *
  * Tokens are shown ONCE (only their hash is stored). Keep them safe.
  */
+import { randomBytes } from "node:crypto";
 import "./db.js";
 import {
   createWorkspace,
@@ -17,8 +20,21 @@ import {
   listTokens,
   revokeToken,
   getWorkspace,
+  createUser,
+  getUserByEmail,
+  addMembership,
+  createReset,
+  type Role,
 } from "./auth.js";
 import { reassignProjects, countProjects, deleteWorkspace } from "./db.js";
+
+// Build the human-facing reset link. When the deployment exposes a public URL we
+// emit an absolute link an operator can paste anywhere; otherwise a relative path
+// (the dashboard origin is implied) so we never print a misleading "localhost".
+function resetLink(code: string): string {
+  const base = process.env.REINS_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  return `${base ?? ""}/reset?code=${code}`;
+}
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -97,6 +113,50 @@ switch (cmd) {
     console.log(deleteWorkspace(id) ? `  deleted workspace ${id}` : "  not found");
     break;
   }
+  case "claim-workspace": {
+    const [ws, email, roleArg] = rest;
+    if (!ws || !email) die("usage: claim-workspace <workspaceId> <email> [role=owner]");
+    const role = (roleArg ?? "owner") as Role;
+    if (!["owner", "admin", "member"].includes(role))
+      die("  role must be one of: owner, admin, member");
+    const workspace = getWorkspace(ws);
+    if (!workspace) die(`no workspace "${ws}"`);
+
+    // Attach an account to an existing workspace. If the account does not exist
+    // yet (migrating a live workspace under a real login) we create it with a
+    // throwaway random password and hand back a one-time reset link so the human
+    // sets their own password — we never invent a password they could guess.
+    let user = getUserByEmail(email);
+    let link: string | undefined;
+    if (!user) {
+      const created = createUser(email, randomBytes(24).toString("hex"));
+      user = { ...created, password_hash: "" };
+      link = resetLink(createReset(user.id).code);
+    }
+    addMembership(user.id, ws, role);
+
+    console.log(`\n  Workspace "${workspace.name}" claimed.`);
+    console.log(`  workspace  ${ws}`);
+    console.log(`  email      ${user.email}`);
+    console.log(`  role       ${role}`);
+    if (link) {
+      console.log(`\n  New account created. Send this one-time link to set a password (expires in 7 days):`);
+      console.log(`  ${link}\n`);
+    } else {
+      console.log(`  ${dim("existing account — they keep their current password")}\n`);
+    }
+    break;
+  }
+  case "reset-link": {
+    const email = rest[0];
+    if (!email) die("usage: reset-link <email>");
+    const user = getUserByEmail(email);
+    if (!user) die(`  no account for "${email}"`);
+    const link = resetLink(createReset(user.id).code);
+    console.log(`\n  One-time password reset link for ${user.email} (expires in 7 days):`);
+    console.log(`  ${link}\n`);
+    break;
+  }
   default:
     console.log(`reins admin — commands:
   create-workspace "<name>"
@@ -105,7 +165,9 @@ switch (cmd) {
   list-tokens <workspaceId>
   revoke <tokenId>
   merge-workspace <fromId> <toId>
-  delete-workspace <id>`);
+  delete-workspace <id>
+  claim-workspace <workspaceId> <email> [role=owner]
+  reset-link <email>`);
 }
 
 function dim(s: string) {

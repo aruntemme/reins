@@ -5,6 +5,7 @@ import { api, timeAgo, type ProjectSummary } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar } from "@/components/ui";
+import { ProjectCreate } from "@/components/project-create";
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -52,7 +53,12 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> projects</div>
+        <div
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12 }}
+        >
+          <div className="label" style={{ marginBottom: 0 }}><span className="sq blue" /> projects</div>
+          <ProjectCreate onCreated={load} />
+        </div>
         {projects.length === 0 ? (
           <div className="card pad empty">
             {loaded

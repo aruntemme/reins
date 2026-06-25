@@ -64,6 +64,21 @@ test("install --agent codex writes a merged settings.json with REINS_SOURCE and 
   assert.ok(existsSync(join(home, ".reins", "lib", "capture.mjs")));
 });
 
+test("install --token wires the ingest token into the hook command as REINS_KEY", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-install-"));
+  runInstall(home, ["--token", "rk_ingest_deadbeef", "--project", "demo", "--url", "http://localhost:4350"]);
+  const ours = allCommands(settingsFor(home)).find((c) => c.includes("reins-hook.mjs"));
+  assert.ok(ours, "claude hook command must be written");
+  assert.match(ours, /REINS_KEY=rk_ingest_deadbeef/, "the --token value must ride as REINS_KEY (sent as x-reins-key)");
+});
+
+test("install --key remains a working alias for the ingest secret", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-install-"));
+  runInstall(home, ["--key", "legacy-secret"]);
+  const ours = allCommands(settingsFor(home)).find((c) => c.includes("reins-hook.mjs"));
+  assert.match(ours, /REINS_KEY=legacy-secret/);
+});
+
 test("install --agent generic --source uses the custom source label", () => {
   const home = mkdtempSync(join(tmpdir(), "reins-install-"));
   runInstall(home, ["--agent", "generic", "--source", "my-bot"]);

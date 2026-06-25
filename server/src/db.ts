@@ -123,6 +123,54 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots ON snapshots(project, created_at);
 CREATE INDEX IF NOT EXISTS idx_snapshots_root ON snapshots(root_hash);
+
+-- ── Accounts (human identity on top of workspaces) ──────────────
+-- A user signs up with email + password; signup also creates their first
+-- workspace and an owner membership. Tokens remain machine credentials.
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE,       -- normalized lowercase
+  password_hash TEXT NOT NULL,             -- scrypt$salt$hash
+  created_at    INTEGER NOT NULL,
+  last_login    INTEGER
+);
+
+-- Which workspaces a user belongs to and with what role. A user can belong to
+-- several workspaces; each workspace has at least one owner.
+CREATE TABLE IF NOT EXISTS memberships (
+  user_id       TEXT NOT NULL,
+  workspace_id  TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'member',  -- owner | admin | member
+  created_at    INTEGER NOT NULL,
+  PRIMARY KEY (user_id, workspace_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memberships_ws ON memberships(workspace_id);
+
+-- Link-based teammate invites (no email in v1): share /join?code=<code>.
+CREATE TABLE IF NOT EXISTS invites (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  role         TEXT NOT NULL DEFAULT 'member',
+  code_hash    TEXT NOT NULL UNIQUE,       -- sha256 of the one-time code
+  label        TEXT,
+  created_by   TEXT,
+  expires_at   INTEGER NOT NULL,
+  accepted_by  TEXT,
+  accepted_at  INTEGER,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code_hash);
+
+-- Link-based password resets (no email in v1): share /reset?code=<code>.
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  code_hash   TEXT NOT NULL UNIQUE,
+  expires_at  INTEGER NOT NULL,
+  used_at     INTEGER,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_resets_code ON password_resets(code_hash);
 `);
 
 // Migrate pre-auth databases: add projects.workspace_id if missing.

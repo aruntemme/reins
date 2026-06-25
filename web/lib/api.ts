@@ -84,7 +84,18 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface Workspace { id: string; name: string }
-export interface Me { auth: boolean; workspace: Workspace | null; admin?: boolean }
+export type Role = "owner" | "admin" | "member";
+export interface WorkspaceMembership { id: string; name: string; role: Role }
+export interface WorkspaceMember { userId: string; email: string; role: Role; createdAt: number }
+export interface Me {
+  auth: boolean;
+  workspace: Workspace | null;
+  admin?: boolean;
+  // Present when signed in with a real account (vs a pasted token).
+  user?: { email: string } | null;
+  workspaces?: WorkspaceMembership[];
+  role?: Role;
+}
 
 export interface Token {
   id: string;
@@ -152,6 +163,57 @@ export const api = {
   tokens: () => j<{ tokens: Token[] }>("/api/admin/tokens"),
   revokeToken: (id: string) =>
     j<{ ok: boolean }>(`/api/admin/tokens/${encodeURIComponent(id)}/revoke`, { method: "POST" }),
+
+  // ── Accounts ──────────────────────────────────────────────
+  signup: (email: string, password: string, workspaceName?: string) =>
+    j<{ ok: boolean; user: { email: string }; workspace: Workspace; tokens?: { ingest: string; access: string; admin: string } }>(
+      "/api/auth/signup",
+      { method: "POST", body: JSON.stringify({ email, password, workspaceName }) }
+    ),
+  login: (email: string, password: string) =>
+    j<{ ok: boolean; user: { email: string }; workspace: Workspace; workspaces: WorkspaceMembership[] }>(
+      "/api/auth/login",
+      { method: "POST", body: JSON.stringify({ email, password }) }
+    ),
+  switchWorkspace: (workspaceId: string) =>
+    j<{ ok: boolean; workspace: Workspace }>("/api/auth/switch", {
+      method: "POST",
+      body: JSON.stringify({ workspaceId }),
+    }),
+  joinWorkspace: (code: string) =>
+    j<{ ok: boolean; workspace: Workspace; role: Role }>("/api/auth/join", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+  invitePreview: (code: string) =>
+    j<{ workspace: string; role: Role; valid: boolean }>(`/api/invites/${encodeURIComponent(code)}`),
+  resetPassword: (code: string, password: string) =>
+    j<{ ok: boolean }>("/api/auth/reset", { method: "POST", body: JSON.stringify({ code, password }) }),
+
+  // ── Members + invites (workspace-scoped, owner/admin) ─────
+  members: (workspaceId: string) =>
+    j<{ members: WorkspaceMember[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`),
+  inviteLink: (workspaceId: string, role: Role, label?: string) =>
+    j<{ ok: boolean; code: string; url: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
+      method: "POST",
+      body: JSON.stringify({ role, label }),
+    }),
+  setMemberRole: (workspaceId: string, userId: string, role: Role) =>
+    j<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}/role`, {
+      method: "POST",
+      body: JSON.stringify({ role }),
+    }),
+  removeMember: (workspaceId: string, userId: string) =>
+    j<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    }),
+
+  // ── Projects ──────────────────────────────────────────────
+  createProject: (id: string, name: string) =>
+    j<{ ok: boolean; project: ProjectSummary }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ id, name }),
+    }),
 };
 
 export function timeAgo(ts: number): string {

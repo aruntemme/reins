@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { UserMenu } from "@/components/user-menu";
 
 export function Mark({ size = 26 }: { size?: number }) {
   // reins mascot: a friendly gradient blob with eyes.
@@ -48,6 +49,8 @@ export function TopBar({
               {live ? "live" : "offline"}
             </span>
           )}
+          {/* Renders only for real account sessions; hidden for token sessions. */}
+          <UserMenu />
         </div>
       </div>
     </div>
