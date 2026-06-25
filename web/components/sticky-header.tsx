@@ -25,9 +25,10 @@ export function StickyHeader() {
       <nav className="floatnav-links">
         <a href="#why">Why</a>
         <a href="#how">How</a>
+        <Link href="/signin?demo=1">Demo</Link>
         <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
       </nav>
-      <Link href="/dashboard" className="btn solid floatnav-cta">Open dashboard</Link>
+      <Link href="/login" className="btn solid floatnav-cta">Log in</Link>
     </div>
   );
 }
