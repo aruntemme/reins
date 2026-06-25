@@ -76,6 +76,13 @@ export const env = {
     // anchor. Off by default — it spends gas on every rollup when on.
     anchorEnabled: str("OG_ANCHOR", "off").toLowerCase() === "on",
   },
+
+  // Outbound notification webhooks. When a rollup is synthesized we post a
+  // concise digest to whichever of these is configured. Empty = disabled.
+  integrations: {
+    slackWebhook: str("REINS_SLACK_WEBHOOK"),
+    discordWebhook: str("REINS_DISCORD_WEBHOOK"),
+  },
 };
 
 function ogKey(): string {
