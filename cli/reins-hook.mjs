@@ -3,22 +3,23 @@
  * Reins capture hook for Claude Code.
  *
  * Wire it up in .claude/settings.json (see hooks/README.md). It reads the hook
- * payload on stdin and ships an intent/progress signal to the Reins server.
- * It NEVER blocks your agent: short timeout, always exits 0.
+ * payload on stdin and ships an intent/progress/summary signal to the Reins
+ * server. It NEVER blocks your agent: short timeout, always exits 0.
+ *
+ * This is a thin Claude-Code adapter over the shared capture core in
+ * ./lib/capture.mjs — other agent harnesses ship their own adapter over the
+ * same core.
  *
  * Env:
  *   REINS_URL      default http://localhost:4319
  *   REINS_PROJECT  default = basename of cwd
  *   REINS_MEMBER   default = git user.email | $USER
  *   REINS_KEY      shared ingest secret (optional)
+ *   REINS_SOURCE   capture source label (default "claude-code")
  */
-import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import os from "node:os";
-
-const URL = (process.env.REINS_URL || "http://localhost:4319").replace(/\/$/, "");
-const KEY = process.env.REINS_KEY || "";
+import { resolveMember, lastAssistantText, sendEvent } from "./lib/capture.mjs";
 
 function readStdin() {
   try {
@@ -28,79 +29,34 @@ function readStdin() {
   }
 }
 
-function member() {
-  if (process.env.REINS_MEMBER) return process.env.REINS_MEMBER;
-  try {
-    const email = execSync("git config user.email", { stdio: ["ignore", "pipe", "ignore"] })
-      .toString()
-      .trim();
-    if (email) return email;
-  } catch {}
-  return os.userInfo().username || "unknown";
+/** Map a Claude Code hook payload to a common Reins event ({kind, text}). */
+export function mapClaudeHook(hook) {
+  const evt = hook.hook_event_name || "";
+  if (evt === "UserPromptSubmit") return { kind: "intent", text: (hook.prompt || "").trim() };
+  if (evt === "Stop" || evt === "SubagentStop")
+    return { kind: "summary", text: lastAssistantText(hook.transcript_path || "") };
+  if (hook.prompt) return { kind: "progress", text: String(hook.prompt).trim() };
+  return { kind: "progress", text: `${evt} event` };
 }
 
-function lastAssistantText(transcriptPath) {
-  try {
-    const lines = readFileSync(transcriptPath, "utf8").trim().split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const row = JSON.parse(lines[i]);
-      const msg = row.message ?? row;
-      if (msg?.role !== "assistant") continue;
-      const content = msg.content;
-      const txt = Array.isArray(content)
-        ? content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
-        : typeof content === "string"
-          ? content
-          : "";
-      if (txt.trim()) return txt.trim();
-    }
-  } catch {}
-  return "";
+// When imported (tests/adapters), don't run the hook body.
+const isMain = import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  const hook = readStdin();
+  const project = process.env.REINS_PROJECT || basename(hook.cwd || process.cwd()) || "default";
+  const { kind, text } = mapClaudeHook(hook);
+
+  if (!text) process.exit(0);
+
+  sendEvent({
+    url: process.env.REINS_URL,
+    key: process.env.REINS_KEY,
+    project,
+    member: resolveMember(),
+    kind,
+    text,
+    session: hook.session_id,
+    source: process.env.REINS_SOURCE || "claude-code",
+    meta: { cwd: hook.cwd, event: hook.hook_event_name || "" },
+  }).finally(() => process.exit(0));
 }
-
-const hook = readStdin();
-const project =
-  process.env.REINS_PROJECT || basename(hook.cwd || process.cwd()) || "default";
-const evt = hook.hook_event_name || "";
-
-let kind = "progress";
-let text = "";
-
-if (evt === "UserPromptSubmit") {
-  kind = "intent";
-  text = (hook.prompt || "").trim();
-} else if (evt === "Stop" || evt === "SubagentStop") {
-  kind = "summary";
-  text = lastAssistantText(hook.transcript_path || "");
-} else if (hook.prompt) {
-  text = String(hook.prompt).trim();
-} else {
-  text = `${evt} event`;
-}
-
-if (!text) process.exit(0);
-if (text.length > 6000) text = text.slice(0, 6000);
-
-const body = JSON.stringify({
-  project,
-  member: member(),
-  kind,
-  text,
-  session: hook.session_id,
-  meta: { cwd: hook.cwd, event: evt },
-});
-
-const ctrl = new AbortController();
-const timer = setTimeout(() => ctrl.abort(), 1500);
-
-fetch(`${URL}/api/ingest`, {
-  method: "POST",
-  headers: { "content-type": "application/json", ...(KEY ? { "x-reins-key": KEY } : {}) },
-  body,
-  signal: ctrl.signal,
-})
-  .catch(() => {})
-  .finally(() => {
-    clearTimeout(timer);
-    process.exit(0);
-  });

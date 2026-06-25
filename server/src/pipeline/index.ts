@@ -27,6 +27,7 @@ export interface IngestInput {
   text: string;
   session?: string;
   meta?: unknown;
+  source?: string; // which agent harness captured this (default: claude-code)
   workspaceId?: string;
 }
 
@@ -47,6 +48,7 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
     text: input.text,
     session: input.session,
     meta: input.meta,
+    source: input.source,
   });
 
   bus.emitChange({ type: "ingest", project: input.project, member: input.member });

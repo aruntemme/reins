@@ -22,6 +22,7 @@ const IngestBody = z.object({
   text: z.string().min(1),
   session: z.string().optional(),
   meta: z.unknown().optional(),
+  source: z.string().max(40).optional(), // capturing agent harness (default claude-code)
 });
 
 api.post("/ingest", requireIngest, async (req, res) => {
