@@ -8,6 +8,7 @@ import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
 import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
 import { storageStats } from "../llm/og-storage.js";
+import { anchorStats } from "../llm/og-chain.js";
 import { env, usesOG, usesRouter } from "../env.js";
 import { requireIngest, requireViewer, authorizeProject } from "../middleware.js";
 
@@ -135,5 +136,13 @@ api.get("/og/status", requireViewer, async (_req, res) => {
           lastError: storageStats.lastError || undefined,
         }
       : null,
+    // On-chain anchoring audit trail: every snapshot root committed to 0G Chain.
+    anchor: {
+      enabled: env.og.anchorEnabled,
+      anchors: anchorStats.anchors,
+      lastTx: anchorStats.lastTx || undefined,
+      explorer: env.og.explorer,
+      lastError: anchorStats.lastError || undefined,
+    },
   });
 });
