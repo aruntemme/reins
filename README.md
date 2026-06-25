@@ -79,7 +79,7 @@ The pipeline is built around teams of people who each run a coding agent. What i
 - Real accounts on top of the multi-tenant model: sign up to get your own workspace, log in with
   email and password, invite teammates with a link, and roles (owner, admin, member). Tokens still
   authenticate hooks and agents, and admins can list and revoke them from the dashboard.
-- A simple deploy to Vercel plus a small VM, which snapshots the database before each release.
+- A simple deploy to Vercel plus a small VM.
 
 ## Roadmap
 
@@ -162,9 +162,8 @@ boundary. Tokens still authenticate machines: ingest for hooks and agents, acces
 to mint or revoke. Invites and resets use one-time links for now; email is not wired yet. Admin
 commands include `create-workspace`, `claim-workspace`, `reset-link`, `list-workspaces`, and `revoke`.
 
-The dashboard deploys to Vercel and the server with its SQLite database to a small VM. Each deploy
-backs up the database first, on the box and off it. The dashboard proxies `/api/*` to the backend so
-the browser stays first party. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+The dashboard deploys to Vercel and the server with its SQLite database to a small VM. The dashboard
+proxies `/api/*` to the backend so the browser stays first party. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
 
 ## Configuration
 
