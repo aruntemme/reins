@@ -198,10 +198,12 @@ export function getMembership(userId: string, workspaceId: string): { role: Role
 }
 
 /** Workspaces a user belongs to, with role and name. */
-export function listMemberships(userId: string): { workspaceId: string; name: string; role: Role }[] {
+export function listMemberships(userId: string): { id: string; name: string; role: Role }[] {
+  // `id` is the workspace id — named to match the Workspace/WorkspaceMembership
+  // shape the web client consumes (the switcher reads `.id`).
   return db
     .prepare(
-      `SELECT m.workspace_id AS workspaceId, w.name AS name, m.role AS role
+      `SELECT m.workspace_id AS id, w.name AS name, m.role AS role
        FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
        WHERE m.user_id = ? ORDER BY m.created_at`
     )

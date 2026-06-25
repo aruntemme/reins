@@ -187,11 +187,11 @@ auth.post("/auth/login", (req, res) => {
     return res.status(403).json({ error: "account has no workspace" });
   }
   touchUserLogin(row.id);
-  setSessionCookie(res, signUserSession(row.id, primary.workspaceId, primary.role));
+  setSessionCookie(res, signUserSession(row.id, primary.id, primary.role));
   res.json({
     ok: true,
     user: { email: row.email },
-    workspace: getWorkspace(primary.workspaceId),
+    workspace: getWorkspace(primary.id),
     workspaces: memberships,
   });
 });

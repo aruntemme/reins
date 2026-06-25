@@ -43,7 +43,7 @@ test("memberships: add, role, list, last-owner count, remove", () => {
   assert.equal(a.getMembership(owner.id, ws.id)?.role, "owner");
   assert.equal(a.countOwners(ws.id), 1);
   assert.equal(a.listMembers(ws.id).length, 2);
-  assert.deepEqual(a.listMemberships(owner.id).map((m) => m.workspaceId), [ws.id]);
+  assert.deepEqual(a.listMemberships(owner.id).map((m) => m.id), [ws.id]);
 
   assert.equal(a.setMemberRole(member.id, ws.id, "admin"), true);
   assert.equal(a.getMembership(member.id, ws.id)?.role, "admin");
