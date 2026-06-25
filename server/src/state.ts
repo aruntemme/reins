@@ -75,10 +75,10 @@ export function memberDetail(project: string, member: string) {
     .map((p) => ({ id: p.id, text: p.text, status: p.status, claimedBy: p.claimed_by, createdAt: p.created_at }));
   const events = db
     .prepare(
-      "SELECT kind, text, significance, created_at FROM events WHERE project = ? AND member = ? ORDER BY created_at DESC LIMIT 12"
+      "SELECT kind, text, significance, source, created_at FROM events WHERE project = ? AND member = ? ORDER BY created_at DESC LIMIT 12"
     )
     .all(project, member)
-    .map((e: any) => ({ kind: e.kind, text: e.text, significance: e.significance, at: e.created_at }));
+    .map((e: any) => ({ kind: e.kind, text: e.text, significance: e.significance, source: e.source, at: e.created_at }));
   return { ...base, projectId: project, timeline, pending, events };
 }
 

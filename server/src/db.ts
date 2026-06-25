@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS events (
   session     TEXT,
   meta        TEXT,                       -- json
   significance TEXT,                      -- noise | minor | major (set by triage)
+  source      TEXT NOT NULL DEFAULT 'claude-code',  -- which agent harness captured this
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_project ON events(project, created_at);
@@ -106,6 +107,22 @@ CREATE TABLE IF NOT EXISTS rollup (
   risks       TEXT NOT NULL DEFAULT '[]',  -- json
   updated_at  INTEGER NOT NULL
 );
+
+-- Append-only ledger of every context-pack snapshot written to 0G Storage.
+-- The rollup table holds only the latest pointer per project; this keeps the
+-- full history. Cross-instance sync (C) reads/writes it; chain anchoring (D)
+-- fills anchored_tx with the on-chain anchor transaction.
+CREATE TABLE IF NOT EXISTS snapshots (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  project      TEXT NOT NULL,
+  root_hash    TEXT NOT NULL,             -- 0G Storage Merkle root (content address)
+  tx_hash      TEXT NOT NULL DEFAULT '',  -- 0G Storage upload tx
+  anchored_tx  TEXT NOT NULL DEFAULT '',  -- 0G Chain anchor tx (set by anchoring)
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots ON snapshots(project, created_at);
+CREATE INDEX IF NOT EXISTS idx_snapshots_root ON snapshots(root_hash);
 `);
 
 // Migrate pre-auth databases: add projects.workspace_id if missing.
@@ -124,6 +141,13 @@ for (const [col, ddl] of [
   ["anchored_at", "ALTER TABLE rollup ADD COLUMN anchored_at INTEGER NOT NULL DEFAULT 0"],
 ] as const) {
   if (!rollupCols.some((c) => c.name === col)) db.exec(ddl);
+}
+
+// Source attribution: pre-source databases get the column with the historical
+// default so old events read as Claude Code (the only harness before S0).
+const eventCols = db.prepare("PRAGMA table_info(events)").all() as { name: string }[];
+if (!eventCols.some((c) => c.name === "source")) {
+  db.exec("ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'claude-code'");
 }
 
 export const now = () => Date.now();
@@ -225,11 +249,12 @@ export function insertEvent(e: {
   text: string;
   session?: string;
   meta?: unknown;
+  source?: string;
 }): string {
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO events (id, project, member, kind, text, session, meta, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO events (id, project, member, kind, text, session, meta, source, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     e.project,
@@ -238,6 +263,7 @@ export function insertEvent(e: {
     e.text,
     e.session ?? null,
     e.meta ? JSON.stringify(e.meta) : null,
+    (e.source || "claude-code").slice(0, 40),
     now()
   );
   return id;
@@ -374,4 +400,54 @@ export function setRollupProvenance(project: string, rootHash: string, txHash: s
     `UPDATE rollup SET root_hash = @root_hash, tx_hash = @tx_hash, anchored_at = @anchored_at
      WHERE project = @project`
   ).run({ project, root_hash: rootHash, tx_hash: txHash, anchored_at: now() });
+}
+
+// ── Snapshot ledger (history of 0G Storage context-pack writes) ──
+export interface SnapshotRow {
+  id: string;
+  workspace_id: string;
+  project: string;
+  root_hash: string;
+  tx_hash: string;
+  anchored_tx: string;
+  created_at: number;
+}
+
+/** Append a snapshot pointer to the ledger. Returns the new row id. */
+export function recordSnapshot(s: {
+  workspaceId?: string;
+  project: string;
+  rootHash: string;
+  txHash?: string;
+}): string {
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO snapshots (id, workspace_id, project, root_hash, tx_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, s.workspaceId ?? "default", s.project, s.rootHash, s.txHash ?? "", now());
+  return id;
+}
+
+/** Most recent snapshots for a project, newest first. */
+export function listSnapshots(project: string, limit = 20): SnapshotRow[] {
+  return db
+    .prepare("SELECT * FROM snapshots WHERE project = ? ORDER BY created_at DESC LIMIT ?")
+    .all(project, limit) as SnapshotRow[];
+}
+
+/** The latest snapshot for a project, or undefined if none recorded. */
+export function latestSnapshot(project: string): SnapshotRow | undefined {
+  return db
+    .prepare("SELECT * FROM snapshots WHERE project = ? ORDER BY created_at DESC LIMIT 1")
+    .get(project) as SnapshotRow | undefined;
+}
+
+/** Record a 0G Chain anchor tx against the most recent snapshot with this root hash. */
+export function setSnapshotAnchor(rootHash: string, anchoredTx: string): boolean {
+  const row = db
+    .prepare("SELECT id FROM snapshots WHERE root_hash = ? ORDER BY created_at DESC LIMIT 1")
+    .get(rootHash) as { id: string } | undefined;
+  if (!row) return false;
+  const r = db.prepare("UPDATE snapshots SET anchored_tx = ? WHERE id = ?").run(anchoredTx, row.id);
+  return r.changes > 0;
 }
