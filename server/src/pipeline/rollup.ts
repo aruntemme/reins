@@ -4,6 +4,8 @@ import {
   getProject,
   saveRollup,
   setRollupProvenance,
+  recordSnapshot,
+  projectWorkspace,
   resolveMember,
   createHandoff,
 } from "../db.js";
@@ -80,6 +82,9 @@ ${pendingBlock}`,
     void putSnapshot(buildContextPack(project))
       .then(({ rootHash, txHash }) => {
         setRollupProvenance(project, rootHash, txHash);
+        // Append to the snapshot ledger (history of every 0G Storage write).
+        // Cross-instance sync reads it; chain anchoring fills anchored_tx.
+        recordSnapshot({ workspaceId: projectWorkspace(project) ?? "default", project, rootHash, txHash });
         bus.emitChange({ type: "rollup.updated", project });
         console.log(`[0g-storage] ${project} context pack -> ${rootHash}`);
       })
