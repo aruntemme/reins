@@ -3,81 +3,52 @@ import { useState } from "react";
 import { Reveal } from "./reveal";
 
 /**
- * Interactive "how it works" diagram. A single responsive SVG schematic shows
- * the whole loop — your agent → hook → Reins → dashboard, and any agent reading
- * the shared context back over MCP. By default everything animates together
- * (the overview "overlay"); picking Hooks / Dashboard / MCP focuses that path
- * and dims the rest. Packets ride the wires via SMIL <animateMotion>, so motion
- * stays glued to the curves at any width. Honors prefers-reduced-motion in CSS.
+ * "How it works" — a refined loop diagram. Four nodes on a clean baseline
+ * (agent → hook → reins → dashboard) with gradient, animated connectors, and an
+ * elegant MCP return arc that carries shared context back to the agent. Picking
+ * Hooks / Dashboard / MCP focuses that path (the rest dims) and swaps a big
+ * detail panel with a live mini-simulation of that piece. Honors
+ * prefers-reduced-motion in CSS.
  */
 
 type Mode = "overview" | "hooks" | "dashboard" | "mcp";
 
-const STAGES: {
-  id: Exclude<Mode, "overview">;
-  dot: string; // square color class
-  name: string;
-  blurb: string;
-  detail: React.ReactNode;
-}[] = [
+const STAGES: { id: Exclude<Mode, "overview">; dot: string; name: string; blurb: string }[] = [
   {
     id: "hooks",
     dot: "",
     name: "Hooks",
     blurb:
-      "A tiny hook reads what your coding agent already emits — every prompt and every turn — and streams it to Reins. Nothing to write, no extra step in your flow.",
-    detail: (
-      <pre className="hiw-code">npx reins-hook install \
-  --url https://reins.selfintro.in --me you</pre>
-    ),
+      "A tiny hook reads what your coding agent already emits — every prompt and every turn — and streams it to Reins. Nothing to write, no step added to your flow.",
   },
   {
     id: "dashboard",
     dot: "blue",
     name: "Dashboard",
     blurb:
-      "Reins distills the raw stream into a live board: each teammate's headline and status, what's pending, handoffs, and the risks worth a glance — not a pile of logs.",
-    detail: (
-      <div className="hiw-mini card">
-        <div className="hiw-mini-row"><span className="sq active" /> asha · shipping auth routes</div>
-        <div className="hiw-mini-row"><span className="sq blocked" /> ravi · blocked on schema</div>
-        <div className="hiw-mini-bar"><i style={{ width: "72%" }} /></div>
-      </div>
-    ),
+      "Reins distills the raw stream into a live board: each teammate's headline and status, what's pending, the handoffs, and the risks worth a glance — not a pile of logs.",
   },
   {
     id: "mcp",
     dot: "active",
     name: "MCP",
     blurb:
-      "Any agent pulls the current shared context back over MCP, scoped to the member and question — so everyone reads from the same place instead of guessing.",
-    detail: (
-      <pre className="hiw-code">→ reins_context(member: "asha")
-← headline, pending, handoffs, risks</pre>
-    ),
+      "Any agent pulls the current shared context back over MCP — scoped to the member and question — so everyone reads from the same place instead of guessing.",
   },
 ];
 
-const OVERVIEW = {
-  name: "The whole loop",
-  blurb:
-    "Work flows in from every agent, gets distilled into one shared view, and flows back out to any agent that asks. Pick a piece to see how it works.",
-};
-
 export function HowItWorks() {
   const [mode, setMode] = useState<Mode>("overview");
-  const active = mode === "overview" ? OVERVIEW : STAGES.find((s) => s.id === mode)!;
 
   return (
     <section id="how" className="lsection alt">
       <div className="wrap">
         <Reveal as="h2" className="lsection-title" text="See how the pieces fit." />
         <p className="sub lsection-lead">
-          Three moving parts, one loop. Hover the diagram, or pick a piece to watch just that path
-          light up.
+          Three moving parts, one loop. Pick a piece to watch just that path light up — and see what
+          it actually does.
         </p>
 
-        {/* selector chips */}
         <div className="hiw-chips" role="tablist" aria-label="How it works">
           <button
             role="tab"
@@ -92,7 +63,7 @@ export function HowItWorks() {
               key={s.id}
               role="tab"
               aria-selected={mode === s.id}
-              className={`hiw-chip ${mode === s.id ? "on" : ""}`}
+              className={`hiw-chip on-${s.id} ${mode === s.id ? "on" : ""}`}
               onClick={() => setMode(s.id)}
             >
               <span className={`sq ${s.dot}`} /> {s.name}
@@ -104,81 +75,114 @@ export function HowItWorks() {
           <Diagram mode={mode} onPick={setMode} />
         </div>
 
-        {/* caption that tracks the selection */}
-        <div className="hiw-caption">
-          <div className="hiw-cap-text">
-            <div className="label">
-              <span className={`sq ${mode === "overview" ? "" : active === OVERVIEW ? "" : (active as (typeof STAGES)[number]).dot}`} />
-              {active.name}
-            </div>
-            <p>{active.blurb}</p>
-          </div>
-          <div className="hiw-cap-detail">
-            {mode !== "overview" && (active as (typeof STAGES)[number]).detail}
-          </div>
+        <div className="hiw-panel" key={mode}>
+          {mode === "overview" ? <OverviewPanel onPick={setMode} /> : <FocusPanel mode={mode} />}
         </div>
       </div>
     </section>
   );
 }
 
-/* ── the schematic ──────────────────────────────────────────────────────── */
+/* ── diagram ─────────────────────────────────────────────────────────────── */
 
 function Diagram({ mode, onPick }: { mode: Mode; onPick: (m: Mode) => void }) {
   return (
     <svg
       className="hiw-svg"
       data-focus={mode}
-      viewBox="0 0 1040 400"
+      viewBox="0 0 1040 300"
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Agent activity flows through a hook into Reins, out to the dashboard, and back to any agent over MCP."
+      aria-label="Agent activity flows through a hook into Reins and out to the dashboard; any agent reads the shared context back over MCP."
     >
       <defs>
-        <marker id="hiw-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" className="hiw-arrowhead" />
+        <marker id="hiw-tip" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9" className="hiw-tip" />
         </marker>
+        <linearGradient id="gCap" gradientUnits="userSpaceOnUse" x1="220" y1="0" x2="286" y2="0">
+          <stop offset="0" stopColor="var(--accent)" stopOpacity="0.15" />
+          <stop offset="1" stopColor="var(--accent)" />
+        </linearGradient>
+        <linearGradient id="gCap2" gradientUnits="userSpaceOnUse" x1="456" y1="0" x2="522" y2="0">
+          <stop offset="0" stopColor="var(--accent)" stopOpacity="0.15" />
+          <stop offset="1" stopColor="var(--accent)" />
+        </linearGradient>
+        <linearGradient id="gDash" gradientUnits="userSpaceOnUse" x1="712" y1="0" x2="778" y2="0">
+          <stop offset="0" stopColor="var(--blue)" stopOpacity="0.15" />
+          <stop offset="1" stopColor="var(--blue)" />
+        </linearGradient>
+        <linearGradient id="gMcp" gradientUnits="userSpaceOnUse" x1="617" y1="156" x2="125" y2="156">
+          <stop offset="0" stopColor="var(--active)" stopOpacity="0.12" />
+          <stop offset="1" stopColor="var(--active)" />
+        </linearGradient>
       </defs>
 
-      {/* wires (static) — referenced by packets via mpath */}
-      <path id="wCap" className="hiw-wire wire-cap" d="M 224 150 H 512" markerEnd="url(#hiw-arrow)" />
-      <path id="wDash" className="hiw-wire wire-dash" d="M 724 150 H 812" markerEnd="url(#hiw-arrow)" />
-      <path id="wMcp" className="hiw-wire wire-mcp" d="M 618 236 C 618 360, 330 372, 136 208" markerEnd="url(#hiw-arrow)" />
+      {/* MCP return arc (drawn first, behind the row) */}
+      <g className="grp-mcp">
+        <path id="aMcp" className="hiw-arc-base" d="M 617 156 C 617 252, 125 252, 125 156" />
+        <path className="hiw-arc-flow" d="M 617 156 C 617 252, 125 252, 125 156" stroke="url(#gMcp)" markerEnd="url(#hiw-tip)" />
+        <Dot pathId="aMcp" cls="dot-mcp" dur={3.2} />
+        <g
+          className="hiw-arc-label pick"
+          transform="translate(371 244)"
+          onClick={() => onPick("mcp")}
+          tabIndex={0}
+          role="button"
+          aria-label="MCP: read shared context back"
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick("mcp"); } }}
+        >
+          <rect x={-44} y={-15} width={88} height={30} rx={15} />
+          <text x={2} y={5} textAnchor="middle">mcp · read back</text>
+        </g>
+      </g>
 
-      {/* packets */}
-      <Packets pathId="wCap" cls="pkt-cap" n={3} dur={2.4} />
-      <Packets pathId="wDash" cls="pkt-dash" n={2} dur={1.5} />
-      <Packets pathId="wMcp" cls="pkt-mcp" n={3} dur={3.0} />
+      {/* straight connectors */}
+      <Wire id="wCap" cls="cap" grad="url(#gCap)" d="M 220 100 H 286" dur={2.0} />
+      <Wire id="wCap2" cls="cap" grad="url(#gCap2)" d="M 456 100 H 522" dur={2.0} delay={0.5} />
+      <Wire id="wDash" cls="dash" grad="url(#gDash)" d="M 712 100 H 778" dur={1.5} />
 
       {/* nodes */}
-      <Node x={48} y={90} w={176} h={116} cls="node-agent" kicker="your editor" title="agent" sub="Claude Code, Codex, …" />
-      <Node x={296} y={107} w={140} h={88} cls="node-hook" kicker="capture" title="hook" sub="reads each turn" onClick={() => onPick("hooks")} />
-      <Node x={512} y={64} w={212} h={172} cls="node-reins" kicker="distill" title="reins" sub="triage · extract · rollup" big />
-      <Node x={812} y={82} w={184} h={140} cls="node-dash" kicker="glance" title="dashboard" sub="status · pending · risks" onClick={() => onPick("dashboard")} />
-      <Node x={512} y={300} w={212} h={84} cls="node-mcp" kicker="read back" title="mcp" sub="shared context, on demand" onClick={() => onPick("mcp")} />
+      <Node x={30} y={44} w={190} h={112} cls="node-agent" icon="agent" kicker="your editor" title="agent" sub="Claude Code, Codex, …" />
+      <Node x={286} y={44} w={170} h={112} cls="node-hook" icon="hook" kicker="capture" title="hook" sub="reads each turn" onClick={() => onPick("hooks")} />
+      <Node x={522} y={44} w={190} h={112} cls="node-reins" icon="reins" kicker="distill" title="reins" sub="triage · extract · rollup" accent />
+      <Node x={778} y={44} w={190} h={112} cls="node-dash" icon="dash" kicker="glance" title="dashboard" sub="status · pending · risks" onClick={() => onPick("dashboard")} />
     </svg>
   );
 }
 
-function Packets({ pathId, cls, n, dur }: { pathId: string; cls: string; n: number; dur: number }) {
+function Wire({ id, cls, grad, d, dur, delay = 0 }: { id: string; cls: string; grad: string; d: string; dur: number; delay?: number }) {
   return (
-    <>
-      {Array.from({ length: n }).map((_, i) => (
-        <rect key={i} className={`hiw-pkt ${cls}`} x={-6} y={-6} width={11} height={11} rx={3}>
-          <animateMotion dur={`${dur}s`} repeatCount="indefinite" begin={`${(dur / n) * i}s`} rotate="auto">
-            <mpath xlinkHref={`#${pathId}`} />
-          </animateMotion>
-        </rect>
-      ))}
-    </>
+    <g className={`grp-${cls === "dash" ? "dash" : "cap"}`}>
+      <path className="hiw-wire-base" d={d} />
+      <path id={id} className={`hiw-wire-flow wire-${cls}`} d={d} stroke={grad} markerEnd="url(#hiw-tip)" />
+      <Dot pathId={id} cls={`dot-${cls}`} dur={dur} delay={delay} />
+    </g>
   );
 }
 
+function Dot({ pathId, cls, dur, delay = 0 }: { pathId: string; cls: string; dur: number; delay?: number }) {
+  return (
+    <circle className={`hiw-dot ${cls}`} r={4.5} cx={0} cy={0}>
+      <animateMotion dur={`${dur}s`} repeatCount="indefinite" begin={`${delay}s`}>
+        <mpath xlinkHref={`#${pathId}`} />
+      </animateMotion>
+    </circle>
+  );
+}
+
+const ICONS: Record<string, React.ReactNode> = {
+  // 20×20 line glyphs, stroke = currentColor
+  agent: <path d="M3 4 L9 10 L3 16 M11 16 H17" />,
+  hook: <path d="M10 3 V11 A4 4 0 1 1 6 7" />,
+  reins: <path d="M10 2 L13.5 10 L10 18 L6.5 10 Z" />,
+  dash: <path d="M3 3 H9 V9 H3 Z M11 3 H17 V9 H11 Z M3 11 H9 V17 H3 Z M11 11 H17 V17 H11 Z" />,
+};
+
 function Node({
-  x, y, w, h, cls, kicker, title, sub, big, onClick,
+  x, y, w, h, cls, icon, kicker, title, sub, accent, onClick,
 }: {
   x: number; y: number; w: number; h: number; cls: string;
-  kicker: string; title: string; sub: string; big?: boolean; onClick?: () => void;
+  icon: string; kicker: string; title: string; sub: string; accent?: boolean; onClick?: () => void;
 }) {
   return (
     <g
@@ -189,10 +193,106 @@ function Node({
       role={onClick ? "button" : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
     >
-      <rect className="hiw-node-box" x={0} y={0} width={w} height={h} rx={14} />
-      <text className="hiw-kicker" x={16} y={26}>{kicker}</text>
-      <text className="hiw-title" x={16} y={big ? 64 : 56}>{title}</text>
-      <text className="hiw-sub" x={16} y={big ? 90 : 78}>{sub}</text>
+      <rect className="hiw-node-box" x={0} y={0} width={w} height={h} rx={16} />
+      <g className="hiw-ico" transform="translate(18 18)">{ICONS[icon]}</g>
+      <text className="hiw-kicker" x={46} y={32}>{kicker}</text>
+      <text className={`hiw-title ${accent ? "big" : ""}`} x={18} y={74}>{title}</text>
+      <text className="hiw-sub" x={18} y={96}>{sub}</text>
     </g>
+  );
+}
+
+/* ── panels ──────────────────────────────────────────────────────────────── */
+
+function OverviewPanel({ onPick }: { onPick: (m: Exclude<Mode, "overview">) => void }) {
+  return (
+    <div className="hiw-over">
+      {STAGES.map((s) => (
+        <button key={s.id} className={`hiw-over-card on-${s.id}`} onClick={() => onPick(s.id)}>
+          <div className="label"><span className={`sq ${s.dot}`} /> {s.name}</div>
+          <p>{s.blurb}</p>
+          <span className="hiw-over-go mono">see how →</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FocusPanel({ mode }: { mode: Exclude<Mode, "overview"> }) {
+  const stage = STAGES.find((s) => s.id === mode)!;
+  return (
+    <div className={`hiw-focus focus-${mode}`}>
+      <div className="hiw-focus-copy">
+        <div className="label"><span className={`sq ${stage.dot}`} /> {stage.name}</div>
+        <p>{stage.blurb}</p>
+      </div>
+      <div className="hiw-focus-sim">
+        {mode === "hooks" && <HooksSim />}
+        {mode === "dashboard" && <DashboardSim />}
+        {mode === "mcp" && <McpSim />}
+      </div>
+    </div>
+  );
+}
+
+function HooksSim() {
+  const events: [string, string, string][] = [
+    ["prompt", "", "add password reset routes"],
+    ["edit", "f-edit", "routes/auth.ts  + reset"],
+    ["run", "f-run", "npm test  ·  48 passed"],
+    ["commit", "f-commit", "auth: one-time reset links"],
+  ];
+  return (
+    <div className="card hiw-sim">
+      <div className="hiw-sim-head"><span className="sq active live-dot" /> capturing · agent activity</div>
+      <div className="hiw-stream">
+        {events.map(([tag, mod, text], i) => (
+          <div className="hiw-ev" style={{ animationDelay: `${0.15 + i * 0.5}s` }} key={i}>
+            <span className={`hiw-ev-tag ${mod}`}>{tag}</span>
+            <span className="hiw-ev-text">{text}</span>
+          </div>
+        ))}
+      </div>
+      <pre className="hiw-code mono">npx reins-hook install --me you</pre>
+    </div>
+  );
+}
+
+function DashboardSim() {
+  const rows: [string, string, string, number][] = [
+    ["active", "asha", "shipping auth routes", 78],
+    ["blocked", "ravi", "blocked on schema merge", 40],
+    ["idle", "mei", "wrapped up the digest job", 100],
+  ];
+  return (
+    <div className="card hiw-sim">
+      <div className="hiw-sim-head"><span className="sq blue" /> team · live board</div>
+      <div className="hiw-board">
+        {rows.map(([st, who, head, pct], i) => (
+          <div className="hiw-brow" style={{ animationDelay: `${0.12 + i * 0.22}s` }} key={who}>
+            <span className={`sq ${st}`} />
+            <span className="hiw-bwho">{who}</span>
+            <span className="hiw-bhead">{head}</span>
+            <span className="hiw-bbar"><i style={{ width: `${pct}%`, animationDelay: `${0.3 + i * 0.22}s` }} /></span>
+          </div>
+        ))}
+      </div>
+      <div className="hiw-rollup mono">rollup · 1 collision (auth.ts) · 1 risk</div>
+    </div>
+  );
+}
+
+function McpSim() {
+  return (
+    <div className="card hiw-sim">
+      <div className="hiw-sim-head"><span className="sq active" /> mcp · shared context</div>
+      <pre className="hiw-code mono hiw-req">→ reins_context(member: "asha", q: "auth")</pre>
+      <div className="hiw-resp">
+        <div className="hiw-resp-row" style={{ animationDelay: ".25s" }}><b>headline</b> shipping password reset</div>
+        <div className="hiw-resp-row" style={{ animationDelay: ".5s" }}><b>pending</b> wire reset email · token TTL</div>
+        <div className="hiw-resp-row" style={{ animationDelay: ".75s" }}><b>handoffs</b> ravi → asha · schema ready</div>
+        <div className="hiw-resp-row" style={{ animationDelay: "1s" }}><b>risks</b> both touching auth.ts</div>
+      </div>
+    </div>
   );
 }
