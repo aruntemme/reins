@@ -28,6 +28,36 @@ test("merge-workspace logic: reassignProjects moves all projects from->to", () =
   assert.equal(db.getProject("gamma").workspace_id, to.id);
 });
 
+test("move-project moves one project (and its snapshots), leaving siblings put", () => {
+  const home = auth.createWorkspace("Home");
+  const demo = auth.createWorkspace("Demo");
+
+  db.ensureProject("real", "Real", home.id);
+  db.ensureProject("seedling", "Seedling", home.id);
+  db.recordSnapshot({ workspaceId: home.id, project: "seedling", rootHash: "0xabc" });
+
+  const ok = db.moveProject("seedling", demo.id);
+  assert.equal(ok, true);
+
+  // The moved project and its snapshot ledger now live in demo...
+  assert.equal(db.getProject("seedling").workspace_id, demo.id);
+  assert.equal(db.listSnapshots("seedling")[0]!.workspace_id, demo.id);
+  // ...while the sibling stays in home.
+  assert.equal(db.getProject("real").workspace_id, home.id);
+  assert.equal(db.countProjects(home.id), 1);
+  assert.equal(db.countProjects(demo.id), 1);
+});
+
+test("move-project rejects an unknown project or target workspace", () => {
+  const ws = auth.createWorkspace("Target");
+  db.ensureProject("here", "Here", ws.id);
+
+  assert.equal(db.moveProject("ghost", ws.id), false, "unknown project");
+  assert.equal(db.moveProject("here", "no-such-ws"), false, "unknown workspace");
+  // The project must be untouched after a rejected move.
+  assert.equal(db.getProject("here").workspace_id, ws.id);
+});
+
 test("delete-workspace refuses while the workspace still owns projects", () => {
   const ws = auth.createWorkspace("Still Owns");
   db.ensureProject("owned", "Owned", ws.id);

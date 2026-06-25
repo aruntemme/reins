@@ -550,6 +550,25 @@ export function reassignProjects(fromWs: string, toWs: string): number {
   return r.changes;
 }
 
+/**
+ * Move a single project (and its snapshot ledger) to another workspace. Child
+ * rows — events, members, timeline, pending, handoffs, rollup — are keyed by
+ * project id alone, so they follow without touching; only `snapshots` carries
+ * its own workspace_id and is updated here. Returns false if the project or the
+ * target workspace doesn't exist. Runs in one transaction.
+ */
+export function moveProject(projectId: string, toWs: string): boolean {
+  const wsExists = db.prepare("SELECT 1 FROM workspaces WHERE id = ?").get(toWs);
+  if (!wsExists) return false;
+  if (!projectWorkspace(projectId)) return false;
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE projects SET workspace_id = ?, updated_at = ? WHERE id = ?").run(toWs, now(), projectId);
+    db.prepare("UPDATE snapshots SET workspace_id = ? WHERE project = ?").run(toWs, projectId);
+  });
+  tx();
+  return true;
+}
+
 /** How many projects a workspace still owns — used to guard deletion. */
 export function countProjects(workspaceId: string): number {
   const row = db

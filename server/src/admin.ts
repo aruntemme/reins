@@ -26,7 +26,7 @@ import {
   createReset,
   type Role,
 } from "./auth.js";
-import { reassignProjects, countProjects, deleteWorkspace } from "./db.js";
+import { reassignProjects, moveProject, projectWorkspace, countProjects, deleteWorkspace } from "./db.js";
 
 // Build the human-facing reset link. When the deployment exposes a public URL we
 // emit an absolute link an operator can paste anywhere; otherwise a relative path
@@ -119,6 +119,16 @@ switch (cmd) {
     console.log(`  ${dim(`run "delete-workspace ${fromId}" to remove the now-empty workspace`)}`);
     break;
   }
+  case "move-project": {
+    const [projectId, toWs] = rest;
+    if (!projectId || !toWs) die("usage: move-project <projectId> <toWorkspaceId>");
+    const from = projectWorkspace(projectId);
+    if (!from) die(`no project "${projectId}"`);
+    if (!getWorkspace(toWs)) die(`no workspace "${toWs}"`);
+    if (from === toWs) die(`  project ${projectId} is already in ${toWs}`);
+    console.log(moveProject(projectId, toWs) ? `  moved project ${projectId} from ${from} to ${toWs}` : "  move failed");
+    break;
+  }
   case "delete-workspace": {
     const id = rest[0];
     if (!id) die("usage: delete-workspace <id>");
@@ -181,6 +191,7 @@ switch (cmd) {
   list-tokens <workspaceId>
   revoke <tokenId>
   merge-workspace <fromId> <toId>
+  move-project <projectId> <toWorkspaceId>
   delete-workspace <id>
   claim-workspace <workspaceId> <email> [role=owner]
   reset-link <email>`);

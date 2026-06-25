@@ -7,8 +7,10 @@ import { TopBar } from "@/components/ui";
 import { CopyCommand } from "@/components/copy-command";
 
 const GITHUB = "https://github.com/aruntemme/reins";
-// Read-only-ish access token for the public demo workspace, so anyone can look around.
-const DEMO_TOKEN = "rk_access_417e294368663099cbae2471fedbf1bccdc96525a18c752d";
+// Access token for the public *demo* workspace (id 880523e5) — its own isolated
+// tenant with only the sample atlas/nimbus boards, so "Try the demo" never exposes
+// a real workspace. Public by design (it ships in client JS).
+const DEMO_TOKEN = "rk_access_4a3dd7fa7a48a1fb3c3dfdc1719bc864dfbdb171512aaea5";
 
 export default function SignIn() {
   const router = useRouter();
