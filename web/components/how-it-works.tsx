@@ -129,7 +129,7 @@ function Diagram({ mode, onPick }: { mode: Mode; onPick: (m: Mode) => void }) {
     <svg
       className="hiw-svg"
       data-focus={mode}
-      viewBox="0 0 1040 500"
+      viewBox="0 0 1040 400"
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Agent activity flows through a hook into Reins, out to the dashboard, and back to any agent over MCP."
@@ -141,9 +141,9 @@ function Diagram({ mode, onPick }: { mode: Mode; onPick: (m: Mode) => void }) {
       </defs>
 
       {/* wires (static) — referenced by packets via mpath */}
-      <path id="wCap" className="hiw-wire wire-cap" d="M 224 236 H 512" markerEnd="url(#hiw-arrow)" />
-      <path id="wDash" className="hiw-wire wire-dash" d="M 724 236 H 812" markerEnd="url(#hiw-arrow)" />
-      <path id="wMcp" className="hiw-wire wire-mcp" d="M 618 322 C 618 470, 330 482, 136 294" markerEnd="url(#hiw-arrow)" />
+      <path id="wCap" className="hiw-wire wire-cap" d="M 224 150 H 512" markerEnd="url(#hiw-arrow)" />
+      <path id="wDash" className="hiw-wire wire-dash" d="M 724 150 H 812" markerEnd="url(#hiw-arrow)" />
+      <path id="wMcp" className="hiw-wire wire-mcp" d="M 618 236 C 618 360, 330 372, 136 208" markerEnd="url(#hiw-arrow)" />
 
       {/* packets */}
       <Packets pathId="wCap" cls="pkt-cap" n={3} dur={2.4} />
@@ -151,11 +151,11 @@ function Diagram({ mode, onPick }: { mode: Mode; onPick: (m: Mode) => void }) {
       <Packets pathId="wMcp" cls="pkt-mcp" n={3} dur={3.0} />
 
       {/* nodes */}
-      <Node x={48} y={176} w={176} h={116} cls="node-agent" kicker="your editor" title="agent" sub="Claude Code, Codex, …" />
-      <Node x={296} y={193} w={140} h={88} cls="node-hook" kicker="capture" title="hook" sub="reads each turn" onClick={() => onPick("hooks")} />
-      <Node x={512} y={150} w={212} h={172} cls="node-reins" kicker="distill" title="reins" sub="triage · extract · rollup" big />
-      <Node x={812} y={168} w={184} h={140} cls="node-dash" kicker="glance" title="dashboard" sub="status · pending · risks" onClick={() => onPick("dashboard")} />
-      <Node x={512} y={388} w={212} h={92} cls="node-mcp" kicker="read back" title="mcp" sub="shared context, on demand" onClick={() => onPick("mcp")} />
+      <Node x={48} y={90} w={176} h={116} cls="node-agent" kicker="your editor" title="agent" sub="Claude Code, Codex, …" />
+      <Node x={296} y={107} w={140} h={88} cls="node-hook" kicker="capture" title="hook" sub="reads each turn" onClick={() => onPick("hooks")} />
+      <Node x={512} y={64} w={212} h={172} cls="node-reins" kicker="distill" title="reins" sub="triage · extract · rollup" big />
+      <Node x={812} y={82} w={184} h={140} cls="node-dash" kicker="glance" title="dashboard" sub="status · pending · risks" onClick={() => onPick("dashboard")} />
+      <Node x={512} y={300} w={212} h={84} cls="node-mcp" kicker="read back" title="mcp" sub="shared context, on demand" onClick={() => onPick("mcp")} />
     </svg>
   );
 }
