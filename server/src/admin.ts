@@ -16,7 +16,7 @@ import "./db.js";
 import {
   createWorkspace,
   mintToken,
-  listWorkspaces,
+  listWorkspacesDetailed,
   listTokens,
   revokeToken,
   getWorkspace,
@@ -69,8 +69,20 @@ switch (cmd) {
     break;
   }
   case "list-workspaces": {
-    const ws = listWorkspaces();
-    console.log(ws.length ? ws.map((w) => `  ${w.id}  ${w.name}`).join("\n") : "  (none)");
+    const ws = listWorkspacesDetailed();
+    if (!ws.length) {
+      console.log("  (none)");
+      break;
+    }
+    console.log(`  ${"ID".padEnd(10)} ${"PROJ".padStart(5)} ${"EVENTS".padStart(7)} ${"AGENTS".padStart(7)} ${"ACCTS".padStart(6)}  NAME`);
+    console.log(
+      ws
+        .map(
+          (w) =>
+            `  ${w.id.padEnd(10)} ${String(w.projects).padStart(5)} ${String(w.events).padStart(7)} ${String(w.members).padStart(7)} ${String(w.accounts).padStart(6)}  ${w.name}`
+        )
+        .join("\n")
+    );
     break;
   }
   case "list-tokens": {

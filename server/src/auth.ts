@@ -42,6 +42,39 @@ export function listWorkspaces(): { id: string; name: string }[] {
   return db.prepare("SELECT id, name FROM workspaces ORDER BY created_at").all() as any;
 }
 
+/**
+ * Workspaces with the counts that tell a live workspace apart from an empty
+ * duplicate: projects, events (captured activity), agent members, and human
+ * accounts. Used by `admin list-workspaces` so claiming the right one is
+ * unambiguous.
+ */
+export function listWorkspacesDetailed(): {
+  id: string;
+  name: string;
+  projects: number;
+  events: number;
+  members: number;
+  accounts: number;
+  created_at: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT
+         w.id   AS id,
+         w.name AS name,
+         w.created_at AS created_at,
+         (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS projects,
+         (SELECT COUNT(*) FROM events e
+            JOIN projects p ON p.id = e.project WHERE p.workspace_id = w.id) AS events,
+         (SELECT COUNT(*) FROM members m
+            JOIN projects p ON p.id = m.project WHERE p.workspace_id = w.id) AS members,
+         (SELECT COUNT(*) FROM memberships ms WHERE ms.workspace_id = w.id) AS accounts
+       FROM workspaces w
+       ORDER BY w.created_at`
+    )
+    .all() as any;
+}
+
 /** Mint a token; returns the plaintext ONCE (only its hash is stored). */
 export function mintToken(workspaceId: string, kind: TokenKind, label?: string): string {
   const token = generateToken(kind);
