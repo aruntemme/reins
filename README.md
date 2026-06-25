@@ -91,10 +91,7 @@ The pipeline is built around teams of people who each run a coding agent. What i
 - Embedding-based retrieval. Scoping ranks by lexical overlap today; swap in embeddings for semantic recall.
 - Richer on-chain provenance. Anchoring writes a witness transaction today; a small contract could index
   the full history of a workspace's snapshot hashes.
-
-Todos:
-
-- Email for invites and password resets. Both work over one-time links today; sending them by email is next.
+- Email for invites and resets. Both work over one-time links today; sending them by email is next.
 
 ## Quick start
 
