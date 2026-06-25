@@ -1,8 +1,14 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { db, now } from "./db.js";
 import { env } from "./env.js";
 
 export type TokenKind = "ingest" | "access" | "admin";
+export type Role = "owner" | "admin" | "member";
+
+// Owner/admin can manage members and tokens; member can view and act on projects.
+export function roleIsAdmin(role: Role | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
 
 // ── Session secret ────────────────────────────────────────────
 // Stable secret required to sign dashboard sessions. If none is configured
@@ -82,7 +88,21 @@ export function signSession(workspaceId: string, kind: TokenKind = "access"): st
   return `${payload}.${sig}`;
 }
 
-export function verifySession(cookie: string | undefined): { workspaceId: string; kind: TokenKind } | null {
+/** Sign a session for a logged-in user with an active workspace. */
+export function signUserSession(userId: string, workspaceId: string, role: Role): string {
+  const payload = b64(JSON.stringify({ uid: userId, ws: workspaceId, k: "user", role, iat: now() }));
+  const sig = createHmac("sha256", SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+export interface SessionInfo {
+  workspaceId: string;
+  kind: TokenKind | "user";
+  userId?: string;
+  role?: Role;
+}
+
+export function verifySession(cookie: string | undefined): SessionInfo | null {
   if (!cookie || !cookie.includes(".")) return null;
   const [payload, sig] = cookie.split(".");
   if (!payload || !sig) return null;
@@ -93,6 +113,13 @@ export function verifySession(cookie: string | undefined): { workspaceId: string
   try {
     const data = JSON.parse(unb64(payload));
     if (!data.ws || !getWorkspace(data.ws)) return null;
+    // User session: membership is authoritative, so a removed/role-changed member
+    // loses access (or gets the new role) without needing to re-login.
+    if (data.uid) {
+      const m = getMembership(data.uid, data.ws);
+      if (!m) return null;
+      return { workspaceId: data.ws, kind: "user", userId: data.uid, role: m.role };
+    }
     return { workspaceId: data.ws, kind: (data.k as TokenKind) ?? "access" };
   } catch {
     return null;
@@ -104,4 +131,180 @@ export function bearer(req: { header(name: string): string | undefined }): strin
   const auth = req.header("authorization");
   if (auth?.startsWith("Bearer ")) return auth.slice(7).trim();
   return req.header("x-reins-key") || undefined;
+}
+
+// ── Passwords (scrypt, dependency-free) ───────────────────────
+export function hashPassword(plain: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(plain, salt, 64).toString("hex");
+  return `scrypt$${salt}$${hash}`;
+}
+
+export function verifyPassword(plain: string, stored: string): boolean {
+  const parts = stored.split("$");
+  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+  const [, salt, hash] = parts;
+  const expected = Buffer.from(hash!, "hex");
+  const got = scryptSync(plain, salt!, 64);
+  return expected.length === got.length && timingSafeEqual(expected, got);
+}
+
+export const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+// ── Users ─────────────────────────────────────────────────────
+export interface User {
+  id: string;
+  email: string;
+}
+
+/** Create a user. Throws on duplicate email (unique constraint). */
+export function createUser(email: string, password: string): User {
+  const id = randomUUID();
+  const e = normalizeEmail(email);
+  db.prepare(
+    "INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)"
+  ).run(id, e, hashPassword(password), now());
+  return { id, email: e };
+}
+
+export function getUserByEmail(email: string): { id: string; email: string; password_hash: string } | undefined {
+  return db.prepare("SELECT id, email, password_hash FROM users WHERE email = ?").get(normalizeEmail(email)) as any;
+}
+
+export function getUserById(id: string): User | undefined {
+  return db.prepare("SELECT id, email FROM users WHERE id = ?").get(id) as any;
+}
+
+export function setUserPassword(userId: string, password: string): void {
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(password), userId);
+}
+
+export function touchUserLogin(userId: string): void {
+  db.prepare("UPDATE users SET last_login = ? WHERE id = ?").run(now(), userId);
+}
+
+// ── Memberships ───────────────────────────────────────────────
+export function addMembership(userId: string, workspaceId: string, role: Role): void {
+  db.prepare(
+    `INSERT INTO memberships (user_id, workspace_id, role, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, workspace_id) DO UPDATE SET role = excluded.role`
+  ).run(userId, workspaceId, role, now());
+}
+
+export function getMembership(userId: string, workspaceId: string): { role: Role } | undefined {
+  return db
+    .prepare("SELECT role FROM memberships WHERE user_id = ? AND workspace_id = ?")
+    .get(userId, workspaceId) as any;
+}
+
+/** Workspaces a user belongs to, with role and name. */
+export function listMemberships(userId: string): { workspaceId: string; name: string; role: Role }[] {
+  return db
+    .prepare(
+      `SELECT m.workspace_id AS workspaceId, w.name AS name, m.role AS role
+       FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
+       WHERE m.user_id = ? ORDER BY m.created_at`
+    )
+    .all(userId) as any;
+}
+
+/** Members of a workspace, with email and role. */
+export function listMembers(workspaceId: string): { userId: string; email: string; role: Role; createdAt: number }[] {
+  return db
+    .prepare(
+      `SELECT m.user_id AS userId, u.email AS email, m.role AS role, m.created_at AS createdAt
+       FROM memberships m JOIN users u ON u.id = m.user_id
+       WHERE m.workspace_id = ? ORDER BY m.created_at`
+    )
+    .all(workspaceId) as any;
+}
+
+export function setMemberRole(userId: string, workspaceId: string, role: Role): boolean {
+  const r = db
+    .prepare("UPDATE memberships SET role = ? WHERE user_id = ? AND workspace_id = ?")
+    .run(role, userId, workspaceId);
+  return r.changes > 0;
+}
+
+export function removeMembership(userId: string, workspaceId: string): boolean {
+  const r = db
+    .prepare("DELETE FROM memberships WHERE user_id = ? AND workspace_id = ?")
+    .run(userId, workspaceId);
+  return r.changes > 0;
+}
+
+/** How many owners a workspace has (guard against removing the last owner). */
+export function countOwners(workspaceId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM memberships WHERE workspace_id = ? AND role = 'owner'")
+    .get(workspaceId) as { n: number };
+  return row.n;
+}
+
+const DAY = 24 * 60 * 60 * 1000;
+
+// ── Invites (link-based, single-use) ──────────────────────────
+export function createInvite(
+  workspaceId: string,
+  role: Role,
+  createdBy: string | undefined,
+  label?: string,
+  ttlDays = 7
+): { id: string; code: string } {
+  const id = randomUUID();
+  const code = `inv_${randomBytes(18).toString("hex")}`;
+  db.prepare(
+    `INSERT INTO invites (id, workspace_id, role, code_hash, label, created_by, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, workspaceId, role, sha256(code), label ?? null, createdBy ?? null, now() + ttlDays * DAY, now());
+  return { id, code };
+}
+
+/** Read an invite by code for display (does not consume it). */
+export function getInvite(code: string): { workspaceId: string; role: Role; label?: string; valid: boolean } | null {
+  const row = db
+    .prepare("SELECT workspace_id, role, label, expires_at, accepted_at FROM invites WHERE code_hash = ?")
+    .get(sha256(code)) as any;
+  if (!row) return null;
+  const valid = !row.accepted_at && row.expires_at > now();
+  return { workspaceId: row.workspace_id, role: row.role, label: row.label ?? undefined, valid };
+}
+
+/** Consume an invite, adding the user to the workspace. Returns the membership or null. */
+export function acceptInvite(code: string, userId: string): { workspaceId: string; role: Role } | null {
+  const row = db
+    .prepare("SELECT id, workspace_id, role, expires_at, accepted_at FROM invites WHERE code_hash = ?")
+    .get(sha256(code)) as any;
+  if (!row || row.accepted_at || row.expires_at <= now()) return null;
+  db.prepare("UPDATE invites SET accepted_by = ?, accepted_at = ? WHERE id = ?").run(userId, now(), row.id);
+  addMembership(userId, row.workspace_id, row.role as Role);
+  return { workspaceId: row.workspace_id, role: row.role as Role };
+}
+
+export function listInvites(workspaceId: string): { id: string; role: Role; label?: string; expiresAt: number; accepted: boolean }[] {
+  return db
+    .prepare("SELECT id, role, label, expires_at AS expiresAt, accepted_at FROM invites WHERE workspace_id = ? ORDER BY created_at DESC")
+    .all(workspaceId)
+    .map((r: any) => ({ id: r.id, role: r.role, label: r.label ?? undefined, expiresAt: r.expiresAt, accepted: !!r.accepted_at }));
+}
+
+// ── Password resets (link-based, single-use) ──────────────────
+export function createReset(userId: string, ttlDays = 7): { code: string } {
+  const id = randomUUID();
+  const code = `res_${randomBytes(18).toString("hex")}`;
+  db.prepare(
+    "INSERT INTO password_resets (id, user_id, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(id, userId, sha256(code), now() + ttlDays * DAY, now());
+  return { code };
+}
+
+/** Consume a reset code and set the new password. Returns true on success. */
+export function useReset(code: string, newPassword: string): boolean {
+  const row = db
+    .prepare("SELECT id, user_id, expires_at, used_at FROM password_resets WHERE code_hash = ?")
+    .get(sha256(code)) as any;
+  if (!row || row.used_at || row.expires_at <= now()) return false;
+  setUserPassword(row.user_id, newPassword);
+  db.prepare("UPDATE password_resets SET used_at = ? WHERE id = ?").run(now(), row.id);
+  return true;
 }
