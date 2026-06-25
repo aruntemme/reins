@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Reveal } from "./reveal";
 
 /**
- * "How it works" — a refined loop diagram. Four nodes on a clean baseline
+ * "How it works": a small loop diagram. Boxes on a clean baseline
  * (agent → hook → reins → dashboard) with gradient, animated connectors, and an
  * elegant MCP return arc that carries shared context back to the agent. Picking
  * Hooks / Dashboard / MCP focuses that path (the rest dims) and swaps a big
@@ -19,21 +19,21 @@ const STAGES: { id: Exclude<Mode, "overview">; dot: string; name: string; blurb:
     dot: "",
     name: "Hooks",
     blurb:
-      "A tiny hook reads what your coding agent already emits — every prompt and every turn — and streams it to Reins. Nothing to write, no step added to your flow.",
+      "A small hook reads what your agent already writes, every prompt and every turn, and sends it to Reins. There's nothing for you to log.",
   },
   {
     id: "dashboard",
     dot: "blue",
     name: "Dashboard",
     blurb:
-      "Reins distills the raw stream into a live board: each teammate's headline and status, what's pending, the handoffs, and the risks worth a glance — not a pile of logs.",
+      "Reins turns that stream into a simple board: who's doing what, what's blocked, and what's free to pick up. Not a pile of logs.",
   },
   {
     id: "mcp",
     dot: "active",
     name: "MCP",
     blurb:
-      "Any agent pulls the current shared context back over MCP — scoped to the member and question — so everyone reads from the same place instead of guessing.",
+      "Any agent can ask Reins for the current context, scoped to a person and a question, so everyone reads from the same place.",
   },
 ];
 
@@ -45,8 +45,7 @@ export function HowItWorks() {
       <div className="wrap">
         <Reveal as="h2" className="lsection-title" text="See how the pieces fit." />
         <p className="sub lsection-lead">
-          Three moving parts, one loop. Pick a piece to watch just that path light up — and see what
-          it actually does.
+          Three small parts, one loop. Pick one to see what it does, and watch that path light up.
         </p>
 
         <div className="hiw-chips" role="tablist" aria-label="How it works">

@@ -400,13 +400,44 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .peek-wrap {
   position: absolute; left: 0; right: 0; bottom: 100%; height: 72px;
   overflow: hidden; pointer-events: none; z-index: 1;
-  display: flex; justify-content: center; align-items: flex-end;
+  display: flex; justify-content: center; align-items: flex-end; gap: 30px;
 }
 .peek {
-  width: 80px; height: 80px; pointer-events: auto; cursor: pointer;
+  width: 76px; height: 76px; pointer-events: auto; cursor: pointer;
   transition: transform 0.5s cubic-bezier(0.5, 0, 0.2, 1); will-change: transform;
 }
 .peek svg { width: 100%; height: 100%; display: block; pointer-events: none; }
+.peek-shake svg { animation: peekShake 0.5s ease; transform-origin: 50% 90%; }
+@keyframes peekShake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  20% { transform: translateX(-3px) rotate(-7deg); }
+  40% { transform: translateX(3px) rotate(7deg); }
+  60% { transform: translateX(-2px) rotate(-4deg); }
+  80% { transform: translateX(2px) rotate(4deg); }
+}
+@media (prefers-reduced-motion: reduce) { .peek-shake svg { animation: none; } }
+
+/* ── floating sticky header (landing) ───────────────────────────── */
+.floatnav {
+  position: fixed; top: 14px; left: 50%; z-index: 50;
+  transform: translate(-50%, -170%); opacity: 0; pointer-events: none;
+  display: flex; align-items: center; gap: 20px;
+  padding: 8px 9px 8px 18px; border-radius: 999px;
+  background: rgba(250,248,244,0.82); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); box-shadow: 0 12px 32px -14px rgba(27,26,23,0.32);
+  transition: transform .4s cubic-bezier(.5,0,.2,1), opacity .3s ease;
+}
+.floatnav.show { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.floatnav-brand { font-family: var(--font-display); font-weight: 700; font-size: 16px; letter-spacing: -0.02em; gap: 8px; }
+.floatnav-links { display: flex; gap: 18px; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); }
+.floatnav-links a { transition: color .15s; }
+.floatnav-links a:hover { color: var(--ink); }
+.floatnav-cta { padding: 7px 14px; }
+@media (max-width: 640px) {
+  .floatnav { gap: 12px; padding: 7px 8px 7px 14px; }
+  .floatnav-links { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .floatnav { transition: opacity .3s ease; } }
 .lfooter-in { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
 .lfooter .brand .mono { color: #faf8f4; }
 .lfooter-links { display: flex; gap: 20px; }

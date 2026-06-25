@@ -4,6 +4,7 @@ import { LandingHeroBounce } from "@/components/landing-hero-bounce";
 import { FooterPeek } from "@/components/footer-peek";
 import { ToolsSection } from "@/components/tools";
 import { HowItWorks } from "@/components/how-it-works";
+import { StickyHeader } from "@/components/sticky-header";
 import { Reveal } from "@/components/reveal";
 
 export const metadata = {
@@ -17,6 +18,9 @@ const GITHUB = "https://github.com/aruntemme/reins";
 export default function Landing() {
   return (
     <>
+      {/* Floating header that slides in after you scroll past the hero nav. */}
+      <StickyHeader />
+
       {/* Bouncing-mascot hero. To revert: swap back to <LandingHero />. */}
       <LandingHeroBounce />
 
