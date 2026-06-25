@@ -27,9 +27,18 @@ export default function SignIn() {
     }
   };
 
-  // If auth is off, or already signed in, skip straight to the board.
+  // If auth is off or already signed in, skip straight to the board. With
+  // ?demo=1 (the landing "Try the demo" CTA), enter the demo workspace in one click.
   useEffect(() => {
-    api.me().then((m) => { if (!m.auth || m.workspace) router.replace("/dashboard"); }).catch(() => {});
+    const demo = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demo") === "1";
+    api.me()
+      .then((m) => {
+        if (!m.auth || m.workspace) { router.replace("/dashboard"); return; }
+        if (demo) enter(DEMO_TOKEN);
+      })
+      .catch(() => { if (demo) enter(DEMO_TOKEN); });
+    // enter is stable enough for this one-shot mount effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const submit = (e: React.FormEvent) => { e.preventDefault(); enter(token); };

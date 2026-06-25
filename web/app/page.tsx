@@ -3,6 +3,8 @@ import { LandingHero } from "@/components/landing-hero";
 import { LandingHeroBounce } from "@/components/landing-hero-bounce";
 import { FooterPeek } from "@/components/footer-peek";
 import { ToolsSection } from "@/components/tools";
+import { HowItWorks } from "@/components/how-it-works";
+import { StickyHeader } from "@/components/sticky-header";
 import { Reveal } from "@/components/reveal";
 
 export const metadata = {
@@ -16,6 +18,9 @@ const GITHUB = "https://github.com/aruntemme/reins";
 export default function Landing() {
   return (
     <>
+      {/* Floating header that slides in after you scroll past the hero nav. */}
+      <StickyHeader />
+
       {/* Bouncing-mascot hero. To revert: swap back to <LandingHero />. */}
       <LandingHeroBounce />
 
@@ -46,30 +51,8 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ── Pipeline ───────────────────────────────────── */}
-        <section id="pipeline" className="lsection alt">
-          <div className="wrap">
-            <Reveal as="h2" className="lsection-title" text="A lot of noise in. A short status out." />
-            <p className="sub lsection-lead">
-              Raw agent activity is mostly noise. Each event goes through a few small steps that keep
-              what matters and drop the rest, so you get a short status instead of a pile of logs.
-            </p>
-            <div className="steps">
-              {[
-                ["01", "triage", "Gate the noise. Most low-content events stop here."],
-                ["02", "extract", "Pull structured facts: intent, actions, files, decisions, blockers."],
-                ["03", "reconcile", "Merge into each person's living context: headline, status, pending, handoffs."],
-                ["04", "rollup", "Synthesize the whole team: status, goal-alignment, collisions, risks."],
-              ].map(([n, t, d]) => (
-                <div className="step" key={n}>
-                  <div className="stepnum mono">{n}</div>
-                  <div className="steplabel">{t}</div>
-                  <p>{d}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        {/* ── How it works (interactive) ─────────────────── */}
+        <HowItWorks />
 
         {/* ── Works with your agent ──────────────────────── */}
         <ToolsSection />
@@ -106,7 +89,7 @@ export default function Landing() {
           <div className="brand"><span className="mono" style={{ fontSize: 15 }}>reins</span></div>
           <div className="lfooter-links mono">
             <a href="#why">why</a>
-            <a href="#pipeline">pipeline</a>
+            <a href="#how">how it works</a>
             <a href={GITHUB} target="_blank" rel="noreferrer">github</a>
             <a href="https://www.npmjs.com/package/reins-hook" target="_blank" rel="noreferrer">npm</a>
             <Link href="/dashboard">dashboard</Link>

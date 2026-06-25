@@ -20,11 +20,13 @@ function splitGlyphs(text: string): string[] {
   return out;
 }
 
-// Three mascots in shades of the brand gold: one bright, the primary, one deep.
+// Four mascots in shades of the brand gold: one bright, the primary, one deep,
+// and a pale one for good measure.
 const BALLS = [
   { id: "blobA", from: "#ffe89a", to: "#ffcf4d" }, // bright
   { id: "blobB", from: "#ffd96b", to: "#e9c245" }, // primary
   { id: "blobC", from: "#e6bb46", to: "#c49327" }, // deep
+  { id: "blobD", from: "#fff1c4", to: "#f4d97a" }, // pale
 ];
 
 type Mood = "idle" | "held" | "happy" | "squish";
@@ -109,9 +111,10 @@ function BouncingMascots() {
       { x: W * 0.7, y: H * 0.3, vx: -10, vy: 0, sx: 1, sy: 1 },
       { x: W * 0.78, y: H * 0.16, vx: 14, vy: 0, sx: 1, sy: 1 },
       { x: W * 0.74, y: H * 0.44, vx: 4, vy: 0, sx: 1, sy: 1 },
+      { x: W * 0.86, y: H * 0.26, vx: -6, vy: 0, sx: 1, sy: 1 },
     ];
-    const squish = [0, 0, 0];
-    const happy = [0, 0, 0];
+    const squish = [0, 0, 0, 0];
+    const happy = [0, 0, 0, 0];
 
     const applySize = () => {
       S = size(); r = S / 2;
@@ -330,9 +333,9 @@ export function LandingHeroBounce() {
             <Link href="/" className="brand"><Mark /> reins</Link>
             <nav className="navlinks">
               <a href="#why">Why</a>
-              <a href="#pipeline">Pipeline</a>
+              <a href="#how">How</a>
               <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
-              <Link href="/dashboard" className="btn solid">Open dashboard</Link>
+              <Link href="/login" className="btn solid">Log in</Link>
             </nav>
           </header>
 
@@ -361,7 +364,8 @@ export function LandingHeroBounce() {
               </p>
 
               <div className="lhero-cta lhero-fade" style={{ animationDelay: "1.82s" }}>
-                <Link href="/dashboard" className="btn solid lg">Open the dashboard</Link>
+                <Link href="/login" className="btn solid lg">Log in</Link>
+                <Link href="/signin?demo=1" className="btn lg">Try the demo</Link>
                 <CopyCommand text="npx reins-hook install" />
               </div>
             </div>

@@ -12,10 +12,11 @@ export default function Dashboard() {
   const [llm, setLlm] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
-  // Gate: if auth is on and there's no session, bounce to /signin immediately.
+  // Gate: if auth is on and there's no session, bounce to /login (the account
+  // entry). The token-paste /signin page is reachable via "Try the demo".
   useEffect(() => {
     api.me().then((m) => {
-      if (m.auth && !m.workspace && typeof window !== "undefined") window.location.href = "/signin";
+      if (m.auth && !m.workspace && typeof window !== "undefined") window.location.href = "/login";
     }).catch(() => {});
   }, []);
 
