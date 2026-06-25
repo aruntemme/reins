@@ -33,7 +33,11 @@ import { reassignProjects, countProjects, deleteWorkspace } from "./db.js";
 // (the dashboard origin is implied) so we never print a misleading "localhost".
 function resetLink(code: string): string {
   const base = process.env.REINS_PUBLIC_URL?.trim().replace(/\/+$/, "");
-  return `${base ?? ""}/reset?code=${code}`;
+  // The /reset PAGE is served by the dashboard frontend, NOT the API host. Emit
+  // an absolute dashboard URL when REINS_PUBLIC_URL is set; otherwise make the
+  // ambiguity loud so nobody pastes the path onto the API domain (which 404s).
+  if (base) return `${base}/reset?code=${code}`;
+  return `<dashboard-url>/reset?code=${code}   (set REINS_PUBLIC_URL to your dashboard origin, e.g. https://reinshq.vercel.app, to emit a clickable link — do NOT open this on the API host)`;
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
