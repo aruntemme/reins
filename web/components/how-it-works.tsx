@@ -83,106 +83,63 @@ export function HowItWorks() {
   );
 }
 
-/* ── diagram ─────────────────────────────────────────────────────────────── */
+/* ── diagram (boxes + flowing packets) ───────────────────────────────────── */
 
 function Diagram({ mode, onPick }: { mode: Mode; onPick: (m: Mode) => void }) {
   return (
     <svg
       className="hiw-svg"
       data-focus={mode}
-      viewBox="0 0 1040 300"
+      viewBox="0 0 1040 400"
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Agent activity flows through a hook into Reins and out to the dashboard; any agent reads the shared context back over MCP."
+      aria-label="Agent activity flows through a hook into Reins, out to the dashboard, and back to any agent over MCP."
     >
       <defs>
-        <marker id="hiw-tip" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-          <path d="M0,1 L9,5 L0,9" className="hiw-tip" />
+        <marker id="hiw-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" className="hiw-arrowhead" />
         </marker>
-        <linearGradient id="gCap" gradientUnits="userSpaceOnUse" x1="220" y1="0" x2="286" y2="0">
-          <stop offset="0" stopColor="var(--accent)" stopOpacity="0.15" />
-          <stop offset="1" stopColor="var(--accent)" />
-        </linearGradient>
-        <linearGradient id="gCap2" gradientUnits="userSpaceOnUse" x1="456" y1="0" x2="522" y2="0">
-          <stop offset="0" stopColor="var(--accent)" stopOpacity="0.15" />
-          <stop offset="1" stopColor="var(--accent)" />
-        </linearGradient>
-        <linearGradient id="gDash" gradientUnits="userSpaceOnUse" x1="712" y1="0" x2="778" y2="0">
-          <stop offset="0" stopColor="var(--blue)" stopOpacity="0.15" />
-          <stop offset="1" stopColor="var(--blue)" />
-        </linearGradient>
-        <linearGradient id="gMcp" gradientUnits="userSpaceOnUse" x1="617" y1="156" x2="125" y2="156">
-          <stop offset="0" stopColor="var(--active)" stopOpacity="0.12" />
-          <stop offset="1" stopColor="var(--active)" />
-        </linearGradient>
       </defs>
 
-      {/* MCP return arc (drawn first, behind the row) */}
-      <g className="grp-mcp">
-        <path id="aMcp" className="hiw-arc-base" d="M 617 156 C 617 252, 125 252, 125 156" />
-        <path className="hiw-arc-flow" d="M 617 156 C 617 252, 125 252, 125 156" stroke="url(#gMcp)" markerEnd="url(#hiw-tip)" />
-        <Dot pathId="aMcp" cls="dot-mcp" dur={3.2} />
-        <g
-          className="hiw-arc-label pick"
-          transform="translate(371 244)"
-          onClick={() => onPick("mcp")}
-          tabIndex={0}
-          role="button"
-          aria-label="MCP: read shared context back"
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick("mcp"); } }}
-        >
-          <rect x={-44} y={-15} width={88} height={30} rx={15} />
-          <text x={2} y={5} textAnchor="middle">mcp · read back</text>
-        </g>
-      </g>
+      {/* wires (static) — referenced by packets via mpath */}
+      <path id="wCap" className="hiw-wire wire-cap" d="M 224 150 H 512" markerEnd="url(#hiw-arrow)" />
+      <path id="wDash" className="hiw-wire wire-dash" d="M 724 150 H 812" markerEnd="url(#hiw-arrow)" />
+      <path id="wMcp" className="hiw-wire wire-mcp" d="M 618 236 C 618 360, 330 372, 136 208" markerEnd="url(#hiw-arrow)" />
 
-      {/* straight connectors */}
-      <Wire id="wCap" cls="cap" grad="url(#gCap)" d="M 220 100 H 286" dur={2.0} />
-      <Wire id="wCap2" cls="cap" grad="url(#gCap2)" d="M 456 100 H 522" dur={2.0} delay={0.5} />
-      <Wire id="wDash" cls="dash" grad="url(#gDash)" d="M 712 100 H 778" dur={1.5} />
+      {/* packets */}
+      <Packets pathId="wCap" cls="pkt-cap" n={3} dur={2.4} />
+      <Packets pathId="wDash" cls="pkt-dash" n={2} dur={1.5} />
+      <Packets pathId="wMcp" cls="pkt-mcp" n={3} dur={3.0} />
 
       {/* nodes */}
-      <Node x={30} y={44} w={190} h={112} cls="node-agent" icon="agent" kicker="your editor" title="agent" sub="Claude Code, Codex, …" />
-      <Node x={286} y={44} w={170} h={112} cls="node-hook" icon="hook" kicker="capture" title="hook" sub="reads each turn" onClick={() => onPick("hooks")} />
-      <Node x={522} y={44} w={190} h={112} cls="node-reins" icon="reins" kicker="distill" title="reins" sub="triage · extract · rollup" accent />
-      <Node x={778} y={44} w={190} h={112} cls="node-dash" icon="dash" kicker="glance" title="dashboard" sub="status · pending · risks" onClick={() => onPick("dashboard")} />
+      <Node x={48} y={90} w={176} h={116} cls="node-agent" kicker="your editor" title="agent" sub="Claude Code, Codex, …" />
+      <Node x={296} y={107} w={140} h={88} cls="node-hook" kicker="capture" title="hook" sub="reads each turn" onClick={() => onPick("hooks")} />
+      <Node x={512} y={64} w={212} h={172} cls="node-reins" kicker="distill" title="reins" sub="triage · extract · rollup" big />
+      <Node x={812} y={82} w={184} h={140} cls="node-dash" kicker="glance" title="dashboard" sub="status · pending · risks" onClick={() => onPick("dashboard")} />
+      <Node x={512} y={300} w={212} h={84} cls="node-mcp" kicker="read back" title="mcp" sub="shared context, on demand" onClick={() => onPick("mcp")} />
     </svg>
   );
 }
 
-function Wire({ id, cls, grad, d, dur, delay = 0 }: { id: string; cls: string; grad: string; d: string; dur: number; delay?: number }) {
+function Packets({ pathId, cls, n, dur }: { pathId: string; cls: string; n: number; dur: number }) {
   return (
-    <g className={`grp-${cls === "dash" ? "dash" : "cap"}`}>
-      <path className="hiw-wire-base" d={d} />
-      <path id={id} className={`hiw-wire-flow wire-${cls}`} d={d} stroke={grad} markerEnd="url(#hiw-tip)" />
-      <Dot pathId={id} cls={`dot-${cls}`} dur={dur} delay={delay} />
-    </g>
+    <>
+      {Array.from({ length: n }).map((_, i) => (
+        <rect key={i} className={`hiw-pkt ${cls}`} x={-6} y={-6} width={11} height={11} rx={3}>
+          <animateMotion dur={`${dur}s`} repeatCount="indefinite" begin={`${(dur / n) * i}s`} rotate="auto">
+            <mpath xlinkHref={`#${pathId}`} />
+          </animateMotion>
+        </rect>
+      ))}
+    </>
   );
 }
-
-function Dot({ pathId, cls, dur, delay = 0 }: { pathId: string; cls: string; dur: number; delay?: number }) {
-  return (
-    <circle className={`hiw-dot ${cls}`} r={4.5} cx={0} cy={0}>
-      <animateMotion dur={`${dur}s`} repeatCount="indefinite" begin={`${delay}s`}>
-        <mpath xlinkHref={`#${pathId}`} />
-      </animateMotion>
-    </circle>
-  );
-}
-
-const ICONS: Record<string, React.ReactNode> = {
-  // 20×20 line glyphs, stroke = currentColor
-  agent: <path d="M3 4 L9 10 L3 16 M11 16 H17" />,
-  hook: <path d="M10 3 V11 A4 4 0 1 1 6 7" />,
-  reins: <path d="M10 2 L13.5 10 L10 18 L6.5 10 Z" />,
-  dash: <path d="M3 3 H9 V9 H3 Z M11 3 H17 V9 H11 Z M3 11 H9 V17 H3 Z M11 11 H17 V17 H11 Z" />,
-};
 
 function Node({
-  x, y, w, h, cls, icon, kicker, title, sub, accent, onClick,
+  x, y, w, h, cls, kicker, title, sub, big, onClick,
 }: {
   x: number; y: number; w: number; h: number; cls: string;
-  icon: string; kicker: string; title: string; sub: string; accent?: boolean; onClick?: () => void;
+  kicker: string; title: string; sub: string; big?: boolean; onClick?: () => void;
 }) {
   return (
     <g
@@ -193,11 +150,10 @@ function Node({
       role={onClick ? "button" : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
     >
-      <rect className="hiw-node-box" x={0} y={0} width={w} height={h} rx={16} />
-      <g className="hiw-ico" transform="translate(18 18)">{ICONS[icon]}</g>
-      <text className="hiw-kicker" x={46} y={32}>{kicker}</text>
-      <text className={`hiw-title ${accent ? "big" : ""}`} x={18} y={74}>{title}</text>
-      <text className="hiw-sub" x={18} y={96}>{sub}</text>
+      <rect className="hiw-node-box" x={0} y={0} width={w} height={h} rx={14} />
+      <text className="hiw-kicker" x={16} y={26}>{kicker}</text>
+      <text className="hiw-title" x={16} y={big ? 64 : 56}>{title}</text>
+      <text className="hiw-sub" x={16} y={big ? 90 : 78}>{sub}</text>
     </g>
   );
 }
