@@ -522,9 +522,10 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 }
 .hiw-node .hiw-sub { font-family: var(--font-mono); font-size: 12px; fill: var(--ink-2); }
 .hiw-node.pick { cursor: pointer; }
-.hiw-node.pick:hover .hiw-node-box,
-.hiw-node.pick:focus-visible .hiw-node-box { stroke: var(--line-2); }
-.hiw-node.pick:focus-visible { outline: none; }
+.hiw-node.pick:hover .hiw-node-box { stroke: var(--line-2); }
+/* No focus ring on the diagram nodes — the chips carry the accessible state. */
+.hiw-node:focus,
+.hiw-node:focus-visible { outline: none; }
 .hiw-node.node-reins .hiw-node-box { fill: #fffdf6; stroke: var(--accent); }
 .hiw-node.node-reins .hiw-title { font-size: 30px; }
 
@@ -547,10 +548,11 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .hiw-svg[data-focus="mcp"] :is(.node-hook, .node-dash, .wire-cap, .wire-dash, .pkt-cap, .pkt-dash) {
   opacity: .2;
 }
-/* lift the focused node a touch — each in its own brand colour, with a soft tint */
-.hiw-svg[data-focus="hooks"] .node-hook .hiw-node-box { stroke: var(--accent); stroke-width: 2; fill: #fffdf4; }
-.hiw-svg[data-focus="dashboard"] .node-dash .hiw-node-box { stroke: var(--blue); stroke-width: 2; fill: #f5f8ff; }
-.hiw-svg[data-focus="mcp"] .node-mcp .hiw-node-box { stroke: var(--active); stroke-width: 2; fill: #f3faf6; }
+/* Focused node: just a soft brand-tinted fill — no heavy border. Focus reads
+   from the rest dimming and the coloured wire/packets, not an outline. */
+.hiw-svg[data-focus="hooks"] .node-hook .hiw-node-box { fill: #fffdf4; }
+.hiw-svg[data-focus="dashboard"] .node-dash .hiw-node-box { fill: #f5f8ff; }
+.hiw-svg[data-focus="mcp"] .node-mcp .hiw-node-box { fill: #f3faf6; }
 
 /* caption */
 .hiw-caption {
