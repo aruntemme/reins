@@ -12,6 +12,8 @@ dist/
 # deploy secrets
 deploy/lightsail/reins-key.pem
 deploy/lightsail/.env.deploy
+# off-box DB backups pulled by ship.sh (live data — never commit)
+deploy/lightsail/backups/
 
 .0g-key
 *.tsbuildinfo
