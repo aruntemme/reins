@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ingest } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, getProject, setHandoffStatus } from "../db.js";
+import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending } from "../db.js";
 import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
 import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
@@ -54,6 +54,24 @@ api.get("/projects/:id/members/:member", requireViewer, (req, res) => {
   const detail = memberDetail(req.params.id!, req.params.member!);
   if (!detail) return res.status(404).json({ error: "not found" });
   res.json(detail);
+});
+
+// Open pending items for a project — the queue an autonomous agent watches.
+// Returns only status 'open' (unclaimed) so a claimer never double-claims.
+api.get("/projects/:id/pending", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
+  const pending = listPending(req.params.id!)
+    .filter((p) => p.status === "open")
+    .map((p) => ({
+      id: p.id,
+      member: p.member,
+      text: p.text,
+      status: p.status,
+      claimedBy: p.claimed_by,
+      createdAt: p.created_at,
+    }));
+  res.json({ pending });
 });
 
 // ── Mutations from the dashboard ──────────────────────────────

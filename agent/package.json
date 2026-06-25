@@ -1,0 +1,26 @@
+{
+  "name": "reins-agent",
+  "version": "0.1.0",
+  "description": "Autonomous claimer agent for Reins — watches up-for-grabs pending work, claims it, resolves it, and reports back tagged source:auto. No human in the loop.",
+  "type": "module",
+  "bin": {
+    "reins-agent": "./reins-agent.mjs"
+  },
+  "files": [
+    "reins-agent.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "reins",
+    "agent",
+    "autonomous",
+    "ai-agents",
+    "context",
+    "team"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
