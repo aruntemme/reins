@@ -3,6 +3,7 @@ import { LandingHero } from "@/components/landing-hero";
 import { LandingHeroBounce } from "@/components/landing-hero-bounce";
 import { FooterPeek } from "@/components/footer-peek";
 import { ToolsSection } from "@/components/tools";
+import { HowItWorks } from "@/components/how-it-works";
 import { Reveal } from "@/components/reveal";
 
 export const metadata = {
@@ -71,6 +72,9 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* ── How it works (interactive) ─────────────────── */}
+        <HowItWorks />
+
         {/* ── Works with your agent ──────────────────────── */}
         <ToolsSection />
 
@@ -107,6 +111,7 @@ export default function Landing() {
           <div className="lfooter-links mono">
             <a href="#why">why</a>
             <a href="#pipeline">pipeline</a>
+            <a href="#how">how it works</a>
             <a href={GITHUB} target="_blank" rel="noreferrer">github</a>
             <a href="https://www.npmjs.com/package/reins-hook" target="_blank" rel="noreferrer">npm</a>
             <Link href="/dashboard">dashboard</Link>

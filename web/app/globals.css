@@ -490,3 +490,91 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 }
 .invite-check input { width: 16px; height: 16px; accent-color: var(--ink); cursor: pointer; }
 .invite-modal .tokeninput { width: 100%; }
+
+/* ── how it works (interactive diagram) ─────────────────────────── */
+.hiw-chips { display: flex; flex-wrap: wrap; gap: 9px; margin: 26px 0 18px; }
+.hiw-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: .02em;
+  color: var(--ink-2); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 8px 15px;
+  cursor: pointer; transition: border-color .18s, color .18s, background .18s, box-shadow .18s;
+}
+.hiw-chip:hover { border-color: var(--line-2); color: var(--ink); }
+.hiw-chip.on { color: var(--ink); border-color: var(--ink); box-shadow: 0 1px 0 var(--ink); }
+.hiw-chip .sq { width: 8px; height: 8px; border-radius: 2px; }
+
+.hiw-stage { padding: 18px; overflow: hidden; }
+.hiw-svg { width: 100%; height: auto; display: block; }
+
+/* nodes */
+.hiw-node-box {
+  fill: var(--panel); stroke: var(--line-2); stroke-width: 1.5;
+  transition: opacity .3s, stroke .3s, fill .3s;
+}
+.hiw-node .hiw-kicker {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em;
+  text-transform: uppercase; fill: var(--ink-3);
+}
+.hiw-node .hiw-title {
+  font-family: var(--font-display), sans-serif; font-weight: 600;
+  font-size: 26px; letter-spacing: -0.01em; fill: var(--ink);
+}
+.hiw-node .hiw-sub { font-family: var(--font-mono); font-size: 12px; fill: var(--ink-2); }
+.hiw-node.pick { cursor: pointer; }
+.hiw-node.pick:hover .hiw-node-box,
+.hiw-node.pick:focus-visible .hiw-node-box { stroke: var(--ink); }
+.hiw-node.pick:focus-visible { outline: none; }
+.hiw-node.node-reins .hiw-node-box { fill: #fffdf6; stroke: var(--accent); }
+.hiw-node.node-reins .hiw-title { font-size: 30px; }
+
+/* wires + arrowheads */
+.hiw-wire { fill: none; stroke: var(--line-2); stroke-width: 2; transition: opacity .3s, stroke .3s; }
+.hiw-arrowhead { fill: var(--line-2); }
+.wire-cap { stroke: var(--accent); }
+.wire-dash { stroke: var(--blue); }
+.wire-mcp { stroke: var(--active); stroke-dasharray: 5 6; }
+
+/* packets riding the wires */
+.hiw-pkt { transition: opacity .3s; }
+.pkt-cap { fill: var(--accent); }
+.pkt-dash { fill: var(--blue); }
+.pkt-mcp { fill: var(--active); }
+
+/* focus: dim everything that isn't the chosen path */
+.hiw-svg[data-focus="hooks"] :is(.node-dash, .node-mcp, .wire-dash, .wire-mcp, .pkt-dash, .pkt-mcp),
+.hiw-svg[data-focus="dashboard"] :is(.node-agent, .node-hook, .node-mcp, .wire-cap, .wire-mcp, .pkt-cap, .pkt-mcp),
+.hiw-svg[data-focus="mcp"] :is(.node-hook, .node-dash, .wire-cap, .wire-dash, .pkt-cap, .pkt-dash) {
+  opacity: .2;
+}
+/* lift the focused node a touch */
+.hiw-svg[data-focus="hooks"] .node-hook .hiw-node-box,
+.hiw-svg[data-focus="dashboard"] .node-dash .hiw-node-box,
+.hiw-svg[data-focus="mcp"] .node-mcp .hiw-node-box { stroke: var(--ink); stroke-width: 2; }
+
+/* caption */
+.hiw-caption {
+  margin-top: 22px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: start;
+}
+.hiw-cap-text p { margin: 10px 0 0; color: var(--ink-2); font-size: 15.5px; max-width: 52ch; }
+.hiw-cap-detail { min-height: 1px; }
+.hiw-code {
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; color: var(--ink);
+  background: #fffdf9; border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.hiw-mini { padding: 14px 16px; display: grid; gap: 9px; }
+.hiw-mini-row { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--ink-2); }
+.hiw-mini-row .sq { width: 9px; height: 9px; border-radius: 2px; }
+.hiw-mini-bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 2px; }
+.hiw-mini-bar i { display: block; height: 100%; background: var(--blue); border-radius: 4px; animation: hiwFill 1.1s ease both; }
+@keyframes hiwFill { from { width: 0; } }
+
+@media (max-width: 760px) {
+  .hiw-caption { grid-template-columns: 1fr; gap: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hiw-pkt animateMotion { animation: none; }
+  .hiw-pkt { display: none; }
+  .hiw-mini-bar i { animation: none; }
+}
