@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ingest } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending } from "../db.js";
+import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending, ensureProject, projectWorkspace } from "../db.js";
 import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
 import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
@@ -73,6 +73,32 @@ api.get("/projects/:id/pending", requireViewer, (req, res) => {
       createdAt: p.created_at,
     }));
   res.json({ pending });
+});
+
+// Create a project explicitly from the dashboard, scoped to the active workspace.
+// (Projects are usually auto-created on first ingest; this lets a human pre-create
+// one without sending an event.)
+const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/; // lowercase slug, dash-separated
+api.post("/projects", requireViewer, (req, res) => {
+  const body = z.object({ id: z.string(), name: z.string().trim().min(1).max(80) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const id = body.data.id.trim().toLowerCase();
+  if (!PROJECT_SLUG.test(id)) {
+    return res.status(400).json({ error: "id must be a slug (lowercase letters, numbers, dashes)" });
+  }
+  const ws = env.authEnabled ? req.workspaceId! : "default";
+  // A project id is global; if it already lives in another workspace, refuse so we
+  // never silently rebind or expose it across tenants.
+  const owner = projectWorkspace(id);
+  if (owner && owner !== ws) {
+    return res.status(409).json({ error: "a project with that id already exists" });
+  }
+  ensureProject(id, body.data.name, ws);
+  const p = getProject(id);
+  res.json({
+    ok: true,
+    project: { id: p.id, name: p.name, goal: p.goal ?? null, members: 0, active: 0, updatedAt: p.updated_at },
+  });
 });
 
 // ── Mutations from the dashboard ──────────────────────────────

@@ -1,16 +1,19 @@
 import type { Request, Response, NextFunction } from "express";
 import { env } from "./env.js";
-import { bearer, verifyToken, verifySession } from "./auth.js";
+import { bearer, verifyToken, verifySession, roleIsAdmin } from "./auth.js";
 import { projectWorkspace } from "./db.js";
+import type { Role } from "./auth.js";
 
 export const COOKIE = "reins_sess";
 
-// req.workspaceId is set by the gates below.
+// req.workspaceId (+ user identity for user sessions) is set by the gates below.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       workspaceId?: string;
+      userId?: string;
+      userRole?: Role;
     }
   }
 }
@@ -58,16 +61,28 @@ export function requireViewer(req: Request, res: Response, next: NextFunction) {
   return res.status(401).json({ error: "authentication required" });
 }
 
-/** Admin-only operations (mint/revoke tokens). Accepts an admin session or admin token. */
+/**
+ * Admin-only operations (mint/revoke tokens, manage members). Accepts an admin
+ * token session, an admin token, OR a logged-in user whose membership role is
+ * owner/admin — so a human owner can administer the workspace from the dashboard
+ * without holding the raw admin token.
+ */
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!env.authEnabled) {
     req.workspaceId = "default";
     return next();
   }
   const sess = verifySession(readCookie(req, COOKIE));
-  if (sess && sess.kind === "admin") {
+  if (sess && (sess.kind === "admin" || (sess.kind === "user" && roleIsAdmin(sess.role)))) {
     req.workspaceId = sess.workspaceId;
+    req.userId = sess.userId;
+    req.userRole = sess.role;
     return next();
+  }
+  // A logged-in human who lacks owner/admin is authenticated but not authorized:
+  // 403 (forbidden), distinct from the 401 we return when no credential is present.
+  if (sess && sess.kind === "user") {
+    return res.status(403).json({ error: "owner or admin role required" });
   }
   const info = verifyToken(bearer(req));
   if (info && info.kind === "admin") {
@@ -75,6 +90,24 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return next();
   }
   return res.status(401).json({ error: "admin token required" });
+}
+
+/**
+ * Gate for actions that require a logged-in human account (not a machine token):
+ * switching the active workspace, joining via an invite. The session must carry a
+ * userId. Sets req.workspaceId + req.userId for the handler.
+ */
+export function requireUser(req: Request, res: Response, next: NextFunction) {
+  // A human account is required regardless of whether multi-tenant auth is on;
+  // there is no "user" concept without a real signed-in session.
+  const sess = verifySession(readCookie(req, COOKIE));
+  if (sess && sess.kind === "user" && sess.userId) {
+    req.workspaceId = sess.workspaceId;
+    req.userId = sess.userId;
+    req.userRole = sess.role;
+    return next();
+  }
+  return res.status(401).json({ error: "login required" });
 }
 
 /** Guard: the project must belong to the caller's workspace. Returns false + responds on failure. */
