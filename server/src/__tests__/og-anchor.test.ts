@@ -39,10 +39,11 @@ test(
   "anchorRootHash sends a real 0G testnet tx and records it on the latest snapshot",
   { timeout: 120_000 },
   async (t) => {
-    if (!ogConfigured) {
-      // Honest skip: no funded key present in this environment.
-      t.skip("0G wallet not configured (no OG_PRIVATE_KEY / server/.0g-key)");
-      return;
+    // Honest skip unless live 0G tests are explicitly enabled. This sends a real
+    // testnet tx (spends gas), so it is opt-in via OG_STORAGE=on (the same switch
+    // that enables the real 0G round-trip test) plus a funded wallet. No fake fallback.
+    if (process.env.OG_STORAGE !== "on" || !ogConfigured) {
+      return t.skip("real 0G anchor needs OG_STORAGE=on and a funded 0G wallet");
     }
 
     // Confirm we're talking to the real 0G Galileo testnet, not a fake.

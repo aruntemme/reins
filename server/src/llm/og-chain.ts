@@ -57,13 +57,19 @@ export async function anchorRootHash(rootHash: string): Promise<AnchorResult> {
     });
 
     // We have a tx hash the moment it's broadcast; that's the anchor. Best-effort
-    // wait for one confirmation, but never hang the caller on a slow testnet.
+    // wait for one confirmation, but never hang the caller on a slow testnet and
+    // never keep a short-lived process (test/CLI) alive just for the confirmation:
+    // the cap timer is unref'd and cleared once the wait settles.
+    const capTimer = setTimeout(() => {}, 60_000);
+    if (typeof capTimer.unref === "function") capTimer.unref();
     void Promise.race([
       tx.wait(1),
-      new Promise((resolve) => setTimeout(resolve, 60_000)),
-    ]).catch(() => {
-      /* confirmation is opportunistic; the broadcast tx hash is the record */
-    });
+      new Promise((resolve) => setTimeout(resolve, 60_000).unref?.()),
+    ])
+      .catch(() => {
+        /* confirmation is opportunistic; the broadcast tx hash is the record */
+      })
+      .finally(() => clearTimeout(capTimer));
 
     setSnapshotAnchor(rootHash, tx.hash);
     anchorStats.anchors++;
