@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { TopBar } from "@/components/ui";
 import { CopyCommand } from "@/components/copy-command";
@@ -38,13 +39,21 @@ export default function SignIn() {
       <TopBar />
       <main className="wrap">
         <div className="signin">
-          <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> sign in</div>
+          <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> token sign in</div>
           <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Enter your workspace.</h1>
-          <p className="sub" style={{ maxWidth: 480, marginBottom: 24 }}>
+          <p className="sub" style={{ maxWidth: 480, marginBottom: 16 }}>
             Reins is multi-tenant: each team runs in its own isolated workspace. Already have an
             <b> access token</b> (an <code>rk_access_…</code>) for one? Paste it below. It’s exchanged
             for a secure session; nothing is stored in the browser.
           </p>
+
+          <div className="signin-note" style={{ marginBottom: 24 }}>
+            <b>Have an account?</b> This page is for pasting an access or agent token. To log in with
+            your email and password, use{" "}
+            <Link href="/login" className="hl" style={{ color: "var(--ink)" }}>Log in</Link>{" "}
+            or{" "}
+            <Link href="/signup" className="hl" style={{ color: "var(--ink)" }}>Sign up</Link>.
+          </div>
 
           <div className="signin-note">
             <b>This is a public demo instance.</b> Take a look around with the demo workspace below.
