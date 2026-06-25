@@ -6,6 +6,7 @@ import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
 import { Invite } from "@/components/invite";
+import { ManageTokens } from "@/components/admin";
 
 export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -51,6 +52,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
                       <span className="hcount"><span className="sq blocked" /> {proj.handoffs.length} open handoff{proj.handoffs.length > 1 ? "s" : ""}</span>
                     )}
                     <Invite projectId={id} />
+                    <ManageTokens />
                   </span>
                 </div>
                 {proj.members.length === 0 ? (

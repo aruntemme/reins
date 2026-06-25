@@ -3,11 +3,12 @@ import { z } from "zod";
 import { ingest } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, getProject, setHandoffStatus } from "../db.js";
+import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending } from "../db.js";
 import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
 import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
 import { storageStats } from "../llm/og-storage.js";
+import { anchorStats } from "../llm/og-chain.js";
 import { env, usesOG, usesRouter } from "../env.js";
 import { requireIngest, requireViewer, authorizeProject } from "../middleware.js";
 
@@ -54,6 +55,24 @@ api.get("/projects/:id/members/:member", requireViewer, (req, res) => {
   const detail = memberDetail(req.params.id!, req.params.member!);
   if (!detail) return res.status(404).json({ error: "not found" });
   res.json(detail);
+});
+
+// Open pending items for a project — the queue an autonomous agent watches.
+// Returns only status 'open' (unclaimed) so a claimer never double-claims.
+api.get("/projects/:id/pending", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
+  const pending = listPending(req.params.id!)
+    .filter((p) => p.status === "open")
+    .map((p) => ({
+      id: p.id,
+      member: p.member,
+      text: p.text,
+      status: p.status,
+      claimedBy: p.claimed_by,
+      createdAt: p.created_at,
+    }));
+  res.json({ pending });
 });
 
 // ── Mutations from the dashboard ──────────────────────────────
@@ -135,5 +154,13 @@ api.get("/og/status", requireViewer, async (_req, res) => {
           lastError: storageStats.lastError || undefined,
         }
       : null,
+    // On-chain anchoring audit trail: every snapshot root committed to 0G Chain.
+    anchor: {
+      enabled: env.og.anchorEnabled,
+      anchors: anchorStats.anchors,
+      lastTx: anchorStats.lastTx || undefined,
+      explorer: env.og.explorer,
+      lastError: anchorStats.lastError || undefined,
+    },
   });
 });

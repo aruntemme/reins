@@ -58,31 +58,37 @@ If no inference backend is configured, Reins still captures raw events but does 
 
 The pipeline is built around teams of people who each run a coding agent. What is working now:
 
-- Capture from Claude Code through a hook, installed with one command.
+- Capture from several coding agents through one hook core: Claude Code, plus adapters for Codex,
+  OpenCode, and Aider, and a generic adapter for any agent that can run a shell command. Every event
+  is attributed to the agent that produced it, so a team on mixed tools shares one context.
 - Distillation on 0G Compute: triage, extract, reconcile, and a debounced team rollup.
 - A current status per person (headline, goal, what they are working on, recent timeline, pending items).
 - A team rollup for a lead: summary, goal alignment, file collisions, and risks.
 - Handoffs and @mentions, created automatically when two agents touch the same file or one is blocked on another's work.
 - A live dashboard over SSE, and an MCP server so any teammate's agent can read or write the shared context.
-- Verifiable, portable snapshots on 0G Storage, including `reins_pull_context` to rebuild context from a hash.
-- Multi-tenant auth (workspaces and tokens) and a simple deploy to Vercel plus a small VM.
+- An autonomous agent that watches up-for-grabs work and claims then resolves it through the MCP and
+  HTTP write paths, so items get picked up without a person typing.
+- Smarter retrieval: the MCP context tool can scope to a member or a query and trim to a token budget,
+  so an agent pulls only what is relevant to its task.
+- Verifiable, portable snapshots on 0G Storage, including `reins_pull_context` to rebuild context from a
+  hash, and cross-instance sync (`reins_sync_push` / `reins_sync_pull`) so two instances share context
+  by handing over a single root hash, with no shared server.
+- Optional on-chain anchoring on 0G Chain: every snapshot root hash can be committed as a tamper-evident,
+  publicly auditable transaction.
+- Optional Slack and Discord digests of each rollup for the humans who want a glance.
+- Token management for admins (list and revoke from the dashboard) on top of multi-tenant auth
+  (workspaces and tokens), and a simple deploy to Vercel plus a small VM.
 
 ## Roadmap
 
-- More agent harnesses. Today capture is wired for Claude Code. Add hooks for other coding agents
-  (Cursor, opencode, pi, Aider, codex, koda and more) so a team on mixed tools still shares
-  one context.
-- Agents and sub-agents without a human in the loop. Capture from agents running in autonomous loops,
-  and from sub-agents that a parent agent fans out, so the shared context keeps updating even when
-  nobody is typing.
-- Agents that act on the context. Let an agent claim and resolve pending work through the MCP write
-  tools, so up-for-grabs items get picked up without a person.
-- Cross-instance sync over 0G Storage. Two teams hand over a single root hash to share context,
-  with no shared server.
-- Optional on-chain anchoring on 0G Chain, so the history of snapshot hashes is a tamper-evident
-  audit trail.
-- Smarter retrieval that ranks and trims context, so an agent pulls only what is relevant to its task.
-- Digests to Slack or Discord for the humans who still want a glance.
+- More agent harnesses still. Concrete adapters exist for Claude Code, Codex, OpenCode, and Aider;
+  pi, Hermes, and Koda are wired through the generic adapter and the MCP note path for now and will
+  get first-class adapters.
+- Sub-agents without a human in the loop. The autonomous agent claims and resolves work today; next is
+  capturing from sub-agents that a parent agent fans out, so context keeps updating during deep loops.
+- Embedding-based retrieval. Scoping ranks by lexical overlap today; swap in embeddings for semantic recall.
+- Richer on-chain provenance. Anchoring writes a witness transaction today; a small contract could index
+  the full history of a workspace's snapshot hashes.
 
 ## Quick start
 

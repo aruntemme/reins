@@ -72,6 +72,16 @@ export const env = {
     storageRpc: str("OG_STORAGE_RPC") || str("OG_RPC_URL", "https://evmrpc-testnet.0g.ai"),
     explorer: str("OG_EXPLORER", "https://chainscan-galileo.0g.ai"),
     storageExplorer: str("OG_STORAGE_EXPLORER", "https://storagescan-galileo.0g.ai"),
+    // Commit each snapshot's Merkle root to the 0G chain as a tamper-evident
+    // anchor. Off by default — it spends gas on every rollup when on.
+    anchorEnabled: str("OG_ANCHOR", "off").toLowerCase() === "on",
+  },
+
+  // Outbound notification webhooks. When a rollup is synthesized we post a
+  // concise digest to whichever of these is configured. Empty = disabled.
+  integrations: {
+    slackWebhook: str("REINS_SLACK_WEBHOOK"),
+    discordWebhook: str("REINS_DISCORD_WEBHOOK"),
   },
 };
 

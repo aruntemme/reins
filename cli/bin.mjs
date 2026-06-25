@@ -11,17 +11,37 @@
  * the hook config into the chosen settings.json without clobbering other hooks.
  * Dependency-free: only Node built-ins, so `npx` has nothing to install.
  */
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_SRC = join(HERE, "reins-hook.mjs");
+const LIB_SRC = join(HERE, "lib");
+const ADAPTERS_SRC = join(HERE, "adapters");
 const INSTALL_DIR = join(os.homedir(), ".reins");
 const INSTALLED_HOOK = join(INSTALL_DIR, "reins-hook.mjs");
+const INSTALLED_LIB = join(INSTALL_DIR, "lib");
+const INSTALLED_ADAPTERS = join(INSTALL_DIR, "adapters");
 const EVENTS = ["UserPromptSubmit", "Stop"];
-const MARKER = "reins-hook.mjs"; // identifies our hook commands when merging
+// Our hook commands all run a file under ~/.reins, so the install path is the
+// reliable marker for "this is ours" when merging (covers both the Claude hook
+// and every adapter, without clobbering foreign hooks).
+const MARKER = INSTALL_DIR;
+
+/**
+ * Concrete, tested adapters. Each maps to a file under ~/.reins/adapters and the
+ * `source` label its events carry. "claude-code" is special: it is the native
+ * hook, not an adapter, and stays the default when --agent is absent.
+ */
+const AGENTS = {
+  "claude-code": { source: "claude-code", file: INSTALLED_HOOK },
+  codex: { source: "codex", file: join(INSTALLED_ADAPTERS, "codex.mjs") },
+  opencode: { source: "opencode", file: join(INSTALLED_ADAPTERS, "opencode.mjs") },
+  aider: { source: "aider", file: join(INSTALLED_ADAPTERS, "aider.mjs") },
+  generic: { source: "agent", file: join(INSTALLED_ADAPTERS, "generic.mjs") },
+};
 
 const c = {
   b: (s) => `\x1b[1m${s}\x1b[0m`,
@@ -59,12 +79,27 @@ function readJson(path) {
 }
 
 function buildCommand(opts) {
+  const agent = AGENTS[opts.agent || "claude-code"];
   const env = [];
   if (opts.url) env.push(`REINS_URL=${opts.url}`);
   if (opts.me) env.push(`REINS_MEMBER=${opts.me}`);
   if (opts.project) env.push(`REINS_PROJECT=${opts.project}`);
   if (opts.key) env.push(`REINS_KEY=${opts.key}`);
-  return `${env.join(" ")}${env.length ? " " : ""}node ${INSTALLED_HOOK}`.trim();
+  // The source label rides as an env var so the adapter (and the Claude hook,
+  // which already reads REINS_SOURCE) stamps every event with the right origin.
+  env.push(`REINS_SOURCE=${opts.source || agent.source}`);
+  return `${env.join(" ")} node ${agent.file}`.trim();
+}
+
+/** Recursively copy a directory of .mjs sources into the install dir. */
+function copyDir(src, dest) {
+  mkdirSync(dest, { recursive: true });
+  for (const name of readdirSync(src, { withFileTypes: true })) {
+    const from = join(src, name.name);
+    const to = join(dest, name.name);
+    if (name.isDirectory()) copyDir(from, to);
+    else copyFileSync(from, to);
+  }
 }
 
 /** Insert/replace our hook entry in one event array, leaving foreign hooks intact. */
@@ -95,18 +130,28 @@ async function checkServer(url) {
 }
 
 async function install(args) {
+  const agent = (args.agent && String(args.agent)) || "claude-code";
+  if (!AGENTS[agent]) {
+    console.error(c.red(`! unknown --agent "${agent}". Known: ${Object.keys(AGENTS).join(", ")}`));
+    process.exit(1);
+  }
   const opts = {
     url: args.url || "http://localhost:4319",
     me: args.me || args.member,
     project: args.project,
     key: args.key,
+    agent,
+    source: args.source && String(args.source),
   };
   const global = !!args.global;
   const path = settingsPath(global);
 
-  // 1) copy the hook to a stable location
+  // 1) copy the hook + shared lib + adapters to a stable location so the
+  //    installed command resolves its relative imports (../lib, ./_shared).
   mkdirSync(INSTALL_DIR, { recursive: true });
   copyFileSync(HOOK_SRC, INSTALLED_HOOK);
+  copyDir(LIB_SRC, INSTALLED_LIB);
+  if (existsSync(ADAPTERS_SRC)) copyDir(ADAPTERS_SRC, INSTALLED_ADAPTERS);
 
   // 2) merge into settings.json
   mkdirSync(dirname(path), { recursive: true });
@@ -118,7 +163,8 @@ async function install(args) {
 
   // 3) report
   console.log(`\n  ${c.green("✓")} Reins hook installed`);
-  console.log(`  ${c.dim("hook")}      ${INSTALLED_HOOK}`);
+  console.log(`  ${c.dim("agent")}     ${agent} ${c.dim(`(source: ${opts.source || AGENTS[agent].source})`)}`);
+  console.log(`  ${c.dim("command")}   ${AGENTS[agent].file}`);
   console.log(`  ${c.dim("settings")}  ${path} ${c.dim(global ? "(global — all repos)" : "(this repo)")}`);
   console.log(`  ${c.dim("events")}    ${EVENTS.join(", ")}`);
   console.log(`  ${c.dim("as")}        ${opts.me || c.yellow("(auto: git email → $USER)")}`);
@@ -130,7 +176,14 @@ async function install(args) {
   else if (health.unreachable) console.log(`  ${c.yellow("!")} couldn't reach ${opts.url} — start the Reins server, or pass the right --url`);
   else console.log(`  ${c.yellow("!")} server returned ${health.status} at ${opts.url}`);
 
-  console.log(`\n  ${c.b("Last step:")} in Claude Code run ${c.cyan("/hooks")} to approve the new hook (or restart).`);
+  if (agent === "claude-code") {
+    console.log(`\n  ${c.b("Last step:")} in Claude Code run ${c.cyan("/hooks")} to approve the new hook (or restart).`);
+  } else {
+    // The settings.json entry is the unified record of the wiring; the actual
+    // trigger for a non-Claude agent lives in that agent's own config. Tell the
+    // truth about where to point it.
+    console.log(`\n  ${c.b("Last step:")} point ${agent}'s notify/plugin at the command above. See ${c.cyan("hooks/README.md")} for the exact line.`);
+  }
   console.log(`  ${c.dim("Then just work — your prompts and turns flow to the Reins board.")}\n`);
 }
 
@@ -182,6 +235,9 @@ function help() {
     npx reins-hook uninstall [--global]
 
   ${c.b("install options")}
+    --agent <name>     which agent harness (default claude-code)
+                       known: ${Object.keys(AGENTS).join(", ")}
+    --source <id>      override the source label events carry
     --url <url>        Reins server (default http://localhost:4319)
     --me <name>        who you are (default: git email → $USER)
     --project <id>     project scope (default: folder name)
@@ -192,6 +248,8 @@ function help() {
   ${c.b("Examples")}
     npx reins-hook install --url https://reins.yourco.com --me asha
     npx reins-hook install --global --me asha --project web-app
+    npx reins-hook install --agent codex --me asha
+    npx reins-hook install --agent generic --source my-bot --me asha
 `);
 }
 

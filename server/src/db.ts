@@ -208,6 +208,47 @@ export function ensureMember(project: string, member: string, displayName?: stri
   }
 }
 
+/**
+ * Write a member's distilled state. Used by cross-instance sync (C) to merge a
+ * pulled context pack: ensureMember creates the row if this instance has never
+ * seen the teammate, then we UPDATE only the fields the pack carried (undefined
+ * leaves the existing column untouched, so a merge never wipes local detail).
+ * working_on is stored as a JSON string to match the schema.
+ */
+export function upsertMemberState(
+  project: string,
+  member: string,
+  s: { name?: string; status?: string; headline?: string; goal?: string; workingOn?: string[] }
+) {
+  ensureMember(project, member, s.name);
+  const sets: string[] = [];
+  const args: any = { project, member, updated_at: now() };
+  if (s.name !== undefined) {
+    sets.push("display_name = @display_name");
+    args.display_name = s.name;
+  }
+  if (s.status !== undefined) {
+    sets.push("status = @status");
+    args.status = s.status;
+  }
+  if (s.headline !== undefined) {
+    sets.push("headline = @headline");
+    args.headline = s.headline;
+  }
+  if (s.goal !== undefined) {
+    sets.push("goal = @goal");
+    args.goal = s.goal;
+  }
+  if (s.workingOn !== undefined) {
+    sets.push("working_on = @working_on");
+    args.working_on = JSON.stringify(s.workingOn ?? []);
+  }
+  sets.push("updated_at = @updated_at");
+  db.prepare(
+    `UPDATE members SET ${sets.join(", ")} WHERE project = @project AND member = @member`
+  ).run(args);
+}
+
 export function touchMember(project: string, member: string) {
   db.prepare(
     "UPDATE members SET last_seen = ? WHERE project = ? AND member = ?"
@@ -449,5 +490,34 @@ export function setSnapshotAnchor(rootHash: string, anchoredTx: string): boolean
     .get(rootHash) as { id: string } | undefined;
   if (!row) return false;
   const r = db.prepare("UPDATE snapshots SET anchored_tx = ? WHERE id = ?").run(anchoredTx, row.id);
+  return r.changes > 0;
+}
+
+// ── Workspace cleanup ─────────────────────────────────────────
+/** Move every project from one workspace to another. Returns how many moved. */
+export function reassignProjects(fromWs: string, toWs: string): number {
+  const r = db
+    .prepare("UPDATE projects SET workspace_id = ? WHERE workspace_id = ?")
+    .run(toWs, fromWs);
+  return r.changes;
+}
+
+/** How many projects a workspace still owns — used to guard deletion. */
+export function countProjects(workspaceId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM projects WHERE workspace_id = ?")
+    .get(workspaceId) as { n: number };
+  return row.n;
+}
+
+/**
+ * Delete a workspace and its tokens. Refuses (returns false) while the
+ * workspace still owns projects, so callers must merge/move them first and we
+ * never orphan project rows.
+ */
+export function deleteWorkspace(id: string): boolean {
+  if (countProjects(id) > 0) return false;
+  db.prepare("DELETE FROM tokens WHERE workspace_id = ?").run(id);
+  const r = db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
   return r.changes > 0;
 }
