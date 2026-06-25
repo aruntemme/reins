@@ -139,7 +139,10 @@ async function install(args) {
     url: args.url || "http://localhost:4319",
     me: args.me || args.member,
     project: args.project,
-    key: args.key,
+    // --token is the ingest token from the dashboard invite / new-project flow;
+    // --key is the legacy single shared secret. Either becomes REINS_KEY, which
+    // the hook sends as x-reins-key (accepted as a bearer credential server-side).
+    key: args.token || args.key,
     agent,
     source: args.source && String(args.source),
   };
@@ -241,7 +244,8 @@ function help() {
     --url <url>        Reins server (default http://localhost:4319)
     --me <name>        who you are (default: git email → $USER)
     --project <id>     project scope (default: folder name)
-    --key <secret>     ingest key, if the server requires one
+    --token <token>    ingest token from the dashboard invite / new-project flow
+    --key <secret>     legacy single shared ingest secret (alias of --token)
     --global           install for ALL repos (~/.claude/settings.json)
                        (default: just this repo's ./.claude/settings.json)
 
