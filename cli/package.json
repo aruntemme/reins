@@ -1,6 +1,6 @@
 {
   "name": "reins-hook",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One-command installer for the Reins capture hook (Claude Code) — stream your AI-agent activity to a live shared team-context board.",
   "type": "module",
   "bin": {
