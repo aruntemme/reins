@@ -5,7 +5,14 @@ import "./db.js";
 import { env } from "./env.js";
 import { projectSnapshot, projectsList } from "./state.js";
 import { getProject, getRollup } from "./db.js";
-import { buildContextPack, renderContextPack, type ContextPack } from "./context-pack.js";
+import {
+  buildContextPack,
+  buildScopedContextPack,
+  scopePack,
+  renderContextPack,
+  type ContextPack,
+  type ScopeOptions,
+} from "./context-pack.js";
 import { getSnapshot, storageExplorerUrl } from "./llm/og-storage.js";
 import { syncPush, syncPull } from "./sync.js";
 
@@ -45,7 +52,7 @@ function text(s: string) {
  * integrity check). We fall back to the local DB only if Storage is off or the
  * project hasn't been distilled yet.
  */
-async function renderProject(id: string): Promise<string> {
+async function renderProject(id: string, scope: ScopeOptions = {}): Promise<string> {
   if (!getProject(id)) {
     return `No project "${id}". Known: ${projectsList().map((p) => p.id).join(", ") || "(none)"}`;
   }
@@ -56,28 +63,36 @@ async function renderProject(id: string): Promise<string> {
   if (env.og.storageEnabled && rootHash) {
     try {
       const pack = await getSnapshot<ContextPack>(rootHash);
-      return renderContextPack(pack, {
+      // Fetch the FULL pack from 0G Storage (so the Merkle root still verifies
+      // the whole thing), then scope it in-memory before render.
+      return renderContextPack(scopePack(pack, scope), {
         from: "0g-storage",
         rootHash,
         url: storageExplorerUrl(rootHash),
       });
     } catch (e: any) {
       // 0G Storage unreachable — fall back to local but say so plainly.
-      return renderContextPack(buildContextPack(id), {
+      return renderContextPack(buildScopedContextPack(id, scope), {
         from: "local",
         note: `could not reach 0G Storage for root ${rootHash}: ${e?.message ?? e}`,
       });
     }
   }
 
-  return renderContextPack(buildContextPack(id), { from: "local" });
+  return renderContextPack(buildScopedContextPack(id, scope), { from: "local" });
 }
 
 server.tool(
   "reins_context",
-  "Get the live shared context for a project: goal, team status, and pending work. Call this before starting work to know what teammates are doing.",
-  { project: z.string().describe("Project id") },
-  async ({ project }) => text(await renderProject(project))
+  "Get the live shared context for a project: goal, team status, and pending work. Call this before starting work to know what teammates are doing. Optionally SCOPE retrieval to only what's relevant to your task: pass `member` to focus on one teammate, `query` to rank team + pending by relevance to a task description, and/or `limit` (approx token budget) to trim. The goal and status summary are always kept.",
+  {
+    project: z.string().describe("Project id"),
+    member: z.string().optional().describe("Focus on this teammate (id or name): they rank first and survive trimming"),
+    query: z.string().optional().describe("Task description; ranks teammates + pending work by relevance to it"),
+    limit: z.number().int().positive().optional().describe("Approx token budget for the team + pending lists (chars/4); trims the rest"),
+  },
+  async ({ project, member, query, limit }) =>
+    text(await renderProject(project, { member, query, limit }))
 );
 
 server.tool(
