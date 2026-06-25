@@ -7,6 +7,7 @@ import { projectSnapshot, projectsList } from "./state.js";
 import { getProject, getRollup } from "./db.js";
 import { buildContextPack, renderContextPack, type ContextPack } from "./context-pack.js";
 import { getSnapshot, storageExplorerUrl } from "./llm/og-storage.js";
+import { syncPush, syncPull } from "./sync.js";
 
 // Write tools go through the HTTP server so distillation + live SSE fire in the
 // server process (the MCP server is a separate process sharing the same DB file).
@@ -189,6 +190,43 @@ server.tool(
   "Acknowledge or resolve a handoff directed at you (get ids from reins_handoffs). action: 'ack' = seen/on it, 'resolve' = done.",
   { project: z.string(), id: z.string(), action: z.enum(["ack", "resolve"]).default("ack") },
   async ({ project, id, action }) => text2(await post(`/api/handoffs/${id}/${action}`, { project }))
+);
+
+// ── Cross-instance sync over 0G Storage ──
+server.tool(
+  "reins_sync_push",
+  "Push a project's current shared-context pack to 0G Storage and get back its Merkle root hash. Share that hash with another team/instance so they can pull this exact, verifiable context with reins_sync_pull (no DB access needed).",
+  { project: z.string().describe("Project id to push") },
+  async ({ project }) => {
+    if (!getProject(project)) return text(`No project "${project}".`);
+    try {
+      const { rootHash, txHash } = await syncPush(project);
+      return text(
+        `Pushed "${project}" to 0G Storage.\nroot hash: ${rootHash}\nupload tx: ${txHash}\n${storageExplorerUrl(rootHash)}\n\nPull it elsewhere with: reins_sync_pull { rootHash: "${rootHash}" }`
+      );
+    } catch (e: any) {
+      return text(`Could not push "${project}" to 0G Storage: ${e?.message ?? e}`);
+    }
+  }
+);
+
+server.tool(
+  "reins_sync_pull",
+  "Pull a shared-context pack from 0G Storage by its Merkle root hash ALONE and merge it into this instance. Use to import a teammate's or another team's context. Merge is idempotent: pulling the same hash twice never duplicates anything.",
+  {
+    rootHash: z.string().describe("0G Storage Merkle root hash of a context pack"),
+    project: z.string().optional().describe("Local project id to merge into (defaults to the pack's own id)"),
+  },
+  async ({ rootHash, project }) => {
+    try {
+      const r = await syncPull(rootHash, project);
+      return text(
+        `Merged context from 0G Storage (root ${rootHash}) into "${r.project}": ${r.members} member(s), ${r.pending} pending item(s).`
+      );
+    } catch (e: any) {
+      return text(`Could not pull context from 0G Storage for root ${rootHash}: ${e?.message ?? e}`);
+    }
+  }
 );
 
 function text2(s: string) {
