@@ -96,10 +96,14 @@ function BouncingMascots() {
     const el = wrap.current;
     if (!el) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const mq = window.matchMedia("(max-width: 720px)");
+    let mobile = mq.matches;
 
     let W = el.clientWidth;
     let H = el.clientHeight;
-    const size = () => Math.max(78, Math.min(132, W * 0.097));
+    // On phones the blobs are smaller and play across the full width; on wider
+    // screens they stay larger and tuck into the open right side next to the copy.
+    const size = () => mobile ? Math.max(44, Math.min(68, W * 0.15)) : Math.max(78, Math.min(132, W * 0.097));
     let S = size();
     let r = S / 2;
 
@@ -107,12 +111,13 @@ function BouncingMascots() {
     const REST = 0.72;    // bounciness (gentle)
     const RELAUNCH = 980;
 
-    const state: B[] = [
-      { x: W * 0.7, y: H * 0.3, vx: -10, vy: 0, sx: 1, sy: 1 },
-      { x: W * 0.78, y: H * 0.16, vx: 14, vy: 0, sx: 1, sy: 1 },
-      { x: W * 0.74, y: H * 0.44, vx: 4, vy: 0, sx: 1, sy: 1 },
-      { x: W * 0.86, y: H * 0.26, vx: -6, vy: 0, sx: 1, sy: 1 },
-    ];
+    // Mobile spreads the four across the whole width; desktop clusters them right.
+    const initX = mobile ? [0.16, 0.4, 0.63, 0.85] : [0.7, 0.78, 0.74, 0.86];
+    const initY = [0.3, 0.16, 0.44, 0.26];
+    const initVX = [-10, 14, 4, -6];
+    const state: B[] = initX.map((fx, i) => ({
+      x: W * fx, y: H * initY[i]!, vx: initVX[i]!, vy: 0, sx: 1, sy: 1,
+    }));
     const squish = [0, 0, 0, 0];
     const happy = [0, 0, 0, 0];
 
@@ -121,7 +126,7 @@ function BouncingMascots() {
       ballEls.current.forEach((n) => { if (n) { n.style.width = `${S}px`; n.style.height = `${S}px`; } });
       shadowEls.current.forEach((n) => { if (n) n.style.width = `${S}px`; });
     };
-    const onResize = () => { W = el.clientWidth; H = el.clientHeight; applySize(); };
+    const onResize = () => { W = el.clientWidth; H = el.clientHeight; mobile = mq.matches; applySize(); };
     window.addEventListener("resize", onResize);
     applySize();
 
@@ -211,14 +216,17 @@ function BouncingMascots() {
     if (reduce) {
       // Static, grounded, evenly spaced — no motion.
       const ground = H * 0.84 - r;
-      state.forEach((b, i) => { b.x = W * (0.64 + i * 0.11); b.y = ground; b.vx = b.vy = 0; });
+      state.forEach((b, i) => {
+        b.x = mobile ? W * (0.13 + i * 0.25) : W * (0.64 + i * 0.11);
+        b.y = ground; b.vx = b.vy = 0;
+      });
       render();
     } else {
       const tick = (t: number) => {
         const dt = Math.min((t - last) / 1000, 0.032);
         last = t;
         const ground = H * 0.84 - r;
-        const leftWall = Math.max(r, W * 0.6);
+        const leftWall = mobile ? r : Math.max(r, W * 0.6);
 
         state.forEach((b, i) => {
           if (i === grabbed) return; // pointer controls it

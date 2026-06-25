@@ -61,21 +61,24 @@ export default function Landing() {
         <section id="start" className="lsection">
           <div className="wrap">
             <Reveal as="h2" className="lsection-title" text="Three steps. Everything in one place." />
+            <p className="sub lsection-lead">
+              Install once, keep working as usual, and open the board. There&rsquo;s nothing to log along the way.
+            </p>
             <div className="startgrid">
-              <div className="startstep">
-                <div className="mono num">1 · install the hook</div>
+              <div className="card pad startstep">
+                <div className="startstep-h"><span className="startstep-n">1</span> install the hook</div>
                 <pre className="code">npx reins-hook install \
   --url https://your-reins --me you</pre>
                 <p className="muted">Then run <code>/hooks</code> in Claude Code to approve it.</p>
               </div>
-              <div className="startstep">
-                <div className="mono num">2 · just work</div>
+              <div className="card pad startstep">
+                <div className="startstep-h"><span className="startstep-n">2</span> just work</div>
                 <p>Keep working as usual. Each prompt and turn flows in and gets summarized. There&rsquo;s nothing to log.</p>
               </div>
-              <div className="startstep">
-                <div className="mono num">3 · open the board</div>
+              <div className="card pad startstep">
+                <div className="startstep-h"><span className="startstep-n">3</span> open the board</div>
                 <p>Paste your access token once, and watch the team&rsquo;s status, pending work, and handoffs update live.</p>
-                <Link href="/dashboard" className="btn solid" style={{ marginTop: 6 }}>Open the dashboard</Link>
+                <Link href="/dashboard" className="btn solid startstep-cta">Open the dashboard</Link>
               </div>
             </div>
           </div>
