@@ -73,6 +73,13 @@ export const env = {
     explorer: str("OG_EXPLORER", "https://chainscan-galileo.0g.ai"),
     storageExplorer: str("OG_STORAGE_EXPLORER", "https://storagescan-galileo.0g.ai"),
   },
+
+  // Outbound notification webhooks. When a rollup is synthesized we post a
+  // concise digest to whichever of these is configured. Empty = disabled.
+  integrations: {
+    slackWebhook: str("REINS_SLACK_WEBHOOK"),
+    discordWebhook: str("REINS_DISCORD_WEBHOOK"),
+  },
 };
 
 function ogKey(): string {
