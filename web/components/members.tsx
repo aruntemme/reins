@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { api, timeAgo, type Member, type Role } from "@/lib/api";
+import { api, timeAgo, type WorkspaceMember, type Role } from "@/lib/api";
 import { Avatar } from "@/components/ui";
 import { CopyCommand } from "@/components/copy-command";
 
@@ -14,7 +14,7 @@ const ROLES: Role[] = ["owner", "admin", "member"];
  * but disabling here avoids a confusing failed request and keeps the UI honest.
  */
 export function Members({ workspaceId, currentEmail }: { workspaceId: string; currentEmail?: string }) {
-  const [members, setMembers] = useState<Member[] | null>(null);
+  const [members, setMembers] = useState<WorkspaceMember[] | null>(null);
   const [err, setErr] = useState("");
   // userId of the member whose remove is armed for a confirming second click.
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function Members({ workspaceId, currentEmail }: { workspaceId: string; cu
 
   const ownerCount = (members ?? []).filter((m) => m.role === "owner").length;
 
-  const changeRole = async (m: Member, role: Role) => {
+  const changeRole = async (m: WorkspaceMember, role: Role) => {
     if (role === m.role) return;
     setBusy(m.userId);
     setErr("");
@@ -54,7 +54,7 @@ export function Members({ workspaceId, currentEmail }: { workspaceId: string; cu
     setBusy(null);
   };
 
-  const remove = async (m: Member) => {
+  const remove = async (m: WorkspaceMember) => {
     setBusy(m.userId);
     setErr("");
     try {

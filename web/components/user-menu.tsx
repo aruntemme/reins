@@ -62,7 +62,7 @@ export function UserMenu() {
 
   const logout = async () => {
     try { await api.logout(); } catch { /* clear client state regardless */ }
-    window.location.href = "/signin";
+    window.location.href = "/login";
   };
 
   return (

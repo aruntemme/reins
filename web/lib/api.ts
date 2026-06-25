@@ -86,7 +86,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Workspace { id: string; name: string }
 export type Role = "owner" | "admin" | "member";
 export interface WorkspaceMembership { id: string; name: string; role: Role }
-export interface Member { userId: string; email: string; role: Role; createdAt: number }
+export interface WorkspaceMember { userId: string; email: string; role: Role; createdAt: number }
 export interface Me {
   auth: boolean;
   workspace: Workspace | null;
@@ -192,7 +192,7 @@ export const api = {
 
   // ── Members + invites (workspace-scoped, owner/admin) ─────
   members: (workspaceId: string) =>
-    j<{ members: Member[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`),
+    j<{ members: WorkspaceMember[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`),
   inviteLink: (workspaceId: string, role: Role, label?: string) =>
     j<{ ok: boolean; code: string; url: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
       method: "POST",

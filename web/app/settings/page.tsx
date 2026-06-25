@@ -18,7 +18,7 @@ export default function Settings() {
     api.me()
       .then((m) => {
         // No account session at all: send them to sign in.
-        if (m.auth && !m.user && typeof window !== "undefined") window.location.href = "/signin";
+        if (m.auth && !m.user && typeof window !== "undefined") window.location.href = "/login";
         setMe(m);
       })
       .catch(() => {})
