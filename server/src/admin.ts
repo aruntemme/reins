@@ -18,6 +18,7 @@ import {
   revokeToken,
   getWorkspace,
 } from "./auth.js";
+import { reassignProjects, countProjects, deleteWorkspace } from "./db.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -75,13 +76,36 @@ switch (cmd) {
     console.log(revokeToken(id) ? "  revoked" : "  not found");
     break;
   }
+  case "merge-workspace": {
+    const [fromId, toId] = rest;
+    if (!fromId || !toId) die("usage: merge-workspace <fromId> <toId>");
+    if (fromId === toId) die("  fromId and toId are the same workspace");
+    if (!getWorkspace(fromId)) die(`no workspace "${fromId}"`);
+    if (!getWorkspace(toId)) die(`no workspace "${toId}"`);
+    const moved = reassignProjects(fromId, toId);
+    console.log(`  moved ${moved} project${moved === 1 ? "" : "s"} from ${fromId} to ${toId}`);
+    console.log(`  ${dim(`run "delete-workspace ${fromId}" to remove the now-empty workspace`)}`);
+    break;
+  }
+  case "delete-workspace": {
+    const id = rest[0];
+    if (!id) die("usage: delete-workspace <id>");
+    if (!getWorkspace(id)) die(`no workspace "${id}"`);
+    const owned = countProjects(id);
+    if (owned > 0)
+      die(`  refusing: workspace ${id} still owns ${owned} project${owned === 1 ? "" : "s"}. Merge them first with "merge-workspace ${id} <toId>".`);
+    console.log(deleteWorkspace(id) ? `  deleted workspace ${id}` : "  not found");
+    break;
+  }
   default:
     console.log(`reins admin — commands:
   create-workspace "<name>"
   mint <workspaceId> <ingest|access|admin> [label]
   list-workspaces
   list-tokens <workspaceId>
-  revoke <tokenId>`);
+  revoke <tokenId>
+  merge-workspace <fromId> <toId>
+  delete-workspace <id>`);
 }
 
 function dim(s: string) {
