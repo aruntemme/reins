@@ -6,16 +6,16 @@ Live: [reinshq.vercel.app](https://reinshq.vercel.app) · install the hook: `npx
 
 ## What it is
 
-When a team codes with AI agents, each person's agent works on its own. Nobody can easily see
-what a teammate's agent is doing, so people duplicate work, edit the same files without knowing,
-and fall back to standups and a `context.md` that goes stale within a day.
+When a team codes with AI agents, each agent works on its own. Nobody can see what a teammate's
+agent is doing, so people duplicate work, edit the same files blind, and fall back to standups and a
+`context.md` that goes stale in a day.
 
-Reins watches what each agent is doing, summarizes it into a short per-person and per-team status,
-and makes that status available in two places: a dashboard the team can read, and an MCP server any
-teammate's agent can query before it starts work.
+Reins watches what each agent does, distills it into a short per-person and per-team status, and
+serves that in two places: a dashboard the team reads, and an MCP server any agent can query before
+it starts work.
 
-It is a small project, built for the 0G Zero Cup. The capture, the distillation, and the
-retrieval all work end to end today.
+A small project, built for the 0G Zero Cup. Capture, distillation, and retrieval all work end to end
+today.
 
 ## How it works
 
@@ -26,10 +26,9 @@ Claude Code hook  ->  reins server  ->  distill (triage, extract, reconcile, rol
                           |-- MCP server (reins_context, reins_pull_context, ...)
 ```
 
-A hook in each teammate's Claude Code posts their prompts and agent turns to the reins server.
-The server runs each event through a short pipeline and keeps a current status per person and per
-project. The dashboard streams updates over SSE, and the MCP server lets any agent pull the same
-status as plain markdown.
+A hook in each teammate's Claude Code posts their prompts and agent turns to the server, which runs
+each event through a short pipeline and keeps a current status per person and project. The dashboard
+streams updates over SSE; the MCP server lets any agent pull the same status as plain markdown.
 
 ## The distillation pipeline
 
@@ -49,36 +48,34 @@ If no inference backend is configured, Reins still captures raw events but does 
 
 - **Inference runs on 0G Compute.** The whole pipeline above calls the 0G Private Computer router,
   which is OpenAI compatible.
-- **Snapshots live on 0G Storage.** Each context snapshot is written to 0G Storage and addressed by
-  its Merkle root hash, so the shared context can be pulled and verified from anywhere, not only
-  from this server's database. The MCP `reins_pull_context` tool rebuilds a snapshot from a hash
-  alone, with no local state, which is something a plain database cannot do.
+- **Snapshots live on 0G Storage.** Each snapshot is addressed by its Merkle root hash, so the
+  shared context can be pulled and verified from anywhere, not just this server's database. The MCP
+  `reins_pull_context` tool rebuilds a snapshot from a hash alone, with no local state.
 
 ## What works today
 
-The pipeline is built around teams of people who each run a coding agent. What is working now:
-
 - Capture from several coding agents through one hook core: Claude Code, plus adapters for Codex,
   OpenCode, and Aider, and a generic adapter for any agent that can run a shell command. Every event
-  is attributed to the agent that produced it, so a team on mixed tools shares one context.
+  is attributed to its agent, so a team on mixed tools shares one context.
 - Distillation on 0G Compute: triage, extract, reconcile, and a debounced team rollup.
-- A current status per person (headline, goal, what they are working on, recent timeline, pending items).
-- A team rollup for a lead: summary, goal alignment, file collisions, and risks.
-- Handoffs and @mentions, created automatically when two agents touch the same file or one is blocked on another's work.
-- A live dashboard over SSE, and an MCP server so any teammate's agent can read or write the shared context.
-- An autonomous agent that watches up-for-grabs work and claims then resolves it through the MCP and
-  HTTP write paths, so items get picked up without a person typing.
-- Smarter retrieval: the MCP context tool can scope to a member or a query and trim to a token budget,
-  so an agent pulls only what is relevant to its task.
-- Verifiable, portable snapshots on 0G Storage, including `reins_pull_context` to rebuild context from a
-  hash, and cross-instance sync (`reins_sync_push` / `reins_sync_pull`) so two instances share context
-  by handing over a single root hash, with no shared server.
-- Optional on-chain anchoring on 0G Chain: every snapshot root hash can be committed as a tamper-evident,
-  publicly auditable transaction.
-- Optional Slack and Discord digests of each rollup for the humans who want a glance.
-- Real accounts on top of the multi-tenant model: sign up to get your own workspace, log in with
-  email and password, invite teammates with a link, and roles (owner, admin, member). Tokens still
-  authenticate hooks and agents, and admins can list and revoke them from the dashboard.
+- A current status per person (headline, goal, working on, timeline, pending items) and a team
+  rollup for a lead (summary, goal alignment, file collisions, risks).
+- Handoffs and @mentions, created automatically when two agents touch the same file or one is blocked
+  on another's work.
+- A live dashboard over SSE, and an MCP server so any agent can read or write the shared context.
+- An autonomous agent that watches up-for-grabs work and claims then resolves it over MCP and HTTP,
+  so items get picked up without a person typing.
+- Scoped retrieval: the MCP context tool narrows to a member or a query and trims to a token budget,
+  so an agent pulls only what its task needs.
+- Verifiable, portable snapshots on 0G Storage: `reins_pull_context` rebuilds context from a hash,
+  and `reins_sync_push` / `reins_sync_pull` let two instances share context by handing over one root
+  hash, with no shared server.
+- Optional on-chain anchoring on 0G Chain: every snapshot root hash can be committed as a
+  tamper-evident transaction.
+- Optional Slack and Discord digests of each rollup.
+- Real accounts on the multi-tenant model: sign up for a workspace, log in with email and password,
+  invite teammates with a link, and roles (owner, admin, member). Tokens still authenticate hooks and
+  agents, and admins list and revoke them from the dashboard.
 - A simple deploy to Vercel plus a small VM.
 
 ## Roadmap
@@ -152,14 +149,14 @@ Tools:
 
 ## Auth and deploy
 
-Local dev runs as a single open instance (`REINS_AUTH=off`). For a shared instance, turn it on
-(`REINS_AUTH=on`). People sign up to get their own workspace, log in with email and password, and
-invite teammates with a one-time link; roles are owner, admin, and member. Workspaces are the tenant
-boundary. Tokens still authenticate machines: ingest for hooks and agents, access for viewers, admin
-to mint or revoke. Invites and resets use one-time links for now; email is not wired yet. Admin
-commands include `create-workspace`, `claim-workspace`, `reset-link`, `list-workspaces`, and `revoke`.
+Local dev runs as a single open instance (`REINS_AUTH=off`); a shared instance turns it on
+(`REINS_AUTH=on`). People sign up for a workspace (the tenant boundary), log in with email and
+password, and invite teammates with a one-time link; roles are owner, admin, member. Tokens still
+authenticate machines: ingest for hooks and agents, access for viewers, admin to mint or revoke.
+Invites and resets use one-time links; email is not wired yet. Admin commands include
+`create-workspace`, `claim-workspace`, `reset-link`, `list-workspaces`, and `revoke`.
 
-The dashboard deploys to Vercel and the server with its SQLite database to a small VM. The dashboard
+The dashboard deploys to Vercel, the server and its SQLite database to a small VM. The dashboard
 proxies `/api/*` to the backend so the browser stays first party. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
 
 ## Configuration

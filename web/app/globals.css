@@ -385,11 +385,21 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .steplabel { font-family: var(--font-mono); font-size: 14px; letter-spacing: .02em; color: var(--ink); }
 .step p { margin: 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
 
-.startgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 40px; }
+.startgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; align-items: stretch; }
 @media (max-width: 820px){ .startgrid { grid-template-columns: 1fr; } }
-.startstep { display: grid; gap: 12px; align-content: start; }
-.startstep .num { color: var(--ink-3); font-size: 12px; letter-spacing: .04em; }
+.startstep { display: flex; flex-direction: column; gap: 14px; }
+.startstep-h {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 600; color: var(--ink);
+}
+.startstep-n {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700; line-height: 1;
+}
 .startstep p { margin: 0; color: var(--ink-2); font-size: 14.5px; line-height: 1.55; }
+/* keep the trailing action pinned to the card's bottom so the three align */
+.startstep .startstep-cta { margin-top: auto; align-self: flex-start; }
 .startstep .code, pre.code {
   font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); background: #f6f3ec;
   border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; white-space: pre-wrap; line-height: 1.5; margin: 0;
@@ -476,8 +486,8 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .lhb-card .navlinks a { color: #4a4030; }
 .lhb-card .navlinks a:hover { color: #1b1a17; }
 @media (max-width: 720px) {
-  .lhb-ball, .lhb-shadow { width: 66px; }
-  .lhb-ball { height: 66px; }
+  .lhb-ball, .lhb-shadow { width: 58px; }
+  .lhb-ball { height: 58px; }
 }
 
 /* ── "Bring your own agent" tools grid ──────────────────────── */
