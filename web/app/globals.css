@@ -652,6 +652,14 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .goal-sec-h { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 8px; }
 .goal-sec-h .mono { font-size: 12px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
 .goal-add { display: flex; gap: 8px; margin-bottom: 10px; }
+/* text inputs in the goals panel match the dashboard's .tokeninput look + focus */
+.goal-add input, .goal-additem input {
+  width: 100%; font-family: var(--font-display); font-size: 13.5px; color: var(--ink);
+  border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 11px;
+  background: var(--bg); outline: none; transition: .15s;
+}
+.goal-add input:focus, .goal-additem input:focus { border-color: var(--ink-3); background: #fff; }
+.goal-add input::placeholder, .goal-additem input::placeholder { color: var(--ink-3); }
 .goal-add input { flex: 1; }
 .tiny.solid { background: var(--ink); color: #fff; border-color: var(--ink); }
 
@@ -679,7 +687,6 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .goal-item .goal-x { margin-left: auto; border: none; background: none; color: var(--ink-3); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; opacity: 0; }
 .goal-item:hover .goal-x { opacity: 1; }
 .goal-additem { margin: 6px 0 2px; }
-.goal-additem input { width: 100%; font-size: 13px; padding: 5px 9px; }
 .goal-acts { display: flex; gap: 6px; margin-top: 8px; }
 
 /* goals: header reference + side-rail pane tweaks */
