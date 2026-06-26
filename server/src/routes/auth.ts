@@ -20,6 +20,8 @@ import {
   verifyPassword,
   addMembership,
   getMembership,
+  setMembershipMember,
+  effectiveMember,
   listMemberships,
   touchUserLogin,
   acceptInvite,
@@ -110,6 +112,7 @@ auth.get("/auth/me", (req, res) => {
       workspaces: listMemberships(sess.userId),
       role: sess.role,
       admin: roleIsAdmin(sess.role),
+      member: sess.member ?? null, // the capture identity this account acts as
     });
   }
   // Token-based session/bearer (machine credential).
@@ -194,6 +197,16 @@ auth.post("/auth/login", (req, res) => {
     workspace: getWorkspace(primary.id),
     workspaces: memberships,
   });
+});
+
+// Set the capture identity ("how your agent reports you") for the active
+// workspace, so the server can tie your account to your goals/activity. Empty
+// string clears it back to your email.
+auth.post("/auth/member", requireUser, (req, res) => {
+  const body = z.object({ member: z.string().trim().max(120) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  setMembershipMember(req.userId!, req.workspaceId!, body.data.member || null);
+  res.json({ ok: true, member: effectiveMember(req.userId!, req.workspaceId!) ?? null });
 });
 
 // Switch the active workspace for a logged-in account.

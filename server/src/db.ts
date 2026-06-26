@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS memberships (
   user_id       TEXT NOT NULL,
   workspace_id  TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'member',  -- owner | admin | member
+  member        TEXT,                            -- this account's capture identity in the ws (the hook's --me). Null => use email.
   created_at    INTEGER NOT NULL,
   PRIMARY KEY (user_id, workspace_id)
 );
@@ -236,6 +237,12 @@ CREATE INDEX IF NOT EXISTS idx_goal_proposals ON goal_proposals(project, status)
 const projCols = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
 if (!projCols.some((c) => c.name === "workspace_id")) {
   db.exec("ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'");
+}
+
+// Account ↔ capture-identity link: which project member id an account uses.
+const memCols = db.prepare("PRAGMA table_info(memberships)").all() as { name: string }[];
+if (!memCols.some((c) => c.name === "member")) {
+  db.exec("ALTER TABLE memberships ADD COLUMN member TEXT");
 }
 
 // 0G Storage provenance: each rollup snapshot is uploaded to 0G Storage and

@@ -64,65 +64,60 @@ test("proposal routes: accept needs the goal's authority; dismiss; tenant-isolat
     const wsId = signup.body.workspace.id as string;
     await owner.call("/api/projects", { method: "POST", body: JSON.stringify({ id: "roadmap", name: "Roadmap" }) });
 
-    // A team goal + item, and an individual goal + item (via HTTP).
+    // Owner sets a team goal + item.
     const team = await owner.call("/api/projects/roadmap/goals", { method: "POST", body: JSON.stringify({ scope: "team", title: "Ship", items: ["api"] }) });
     const teamId = team.body.id as string;
+
+    // Member joins; the individual goal is created BY THEM (so they own it).
     const memberEmail = `dev-${randomUUID().slice(0, 8)}@acme.test`;
-    const mine = await owner.call("/api/projects/roadmap/goals", { method: "POST", body: JSON.stringify({ scope: "individual", member: memberEmail, title: "Mine", items: ["draft"] }) });
-    const mineId = mine.body.id as string;
-
-    const list = (await owner.call("/api/projects/roadmap/goals")).body.goals;
-    const teamItem = list.find((g: any) => g.id === teamId).items[0].id as string;
-    const mineItem = list.find((g: any) => g.id === mineId).items[0].id as string;
-
-    // File proposals directly (stands in for the pipeline).
-    const teamProp = db.createGoalProposal({ project: "roadmap", goalId: teamId, itemId: teamItem, kind: "check_item", reason: "shipped api", evidence: "e1", member: memberEmail })!;
-    const mineProp = db.createGoalProposal({ project: "roadmap", goalId: mineId, itemId: mineItem, kind: "check_item", reason: "drafted", evidence: "e2", member: memberEmail })!;
-    assert.ok(teamProp && mineProp);
-
-    // Owner sees both pending.
-    const props = await owner.call("/api/projects/roadmap/goal-proposals");
-    assert.equal(props.status, 200);
-    assert.equal(props.body.proposals.length, 2);
-
-    // Member joins Acme.
     const invite = await owner.call(`/api/workspaces/${wsId}/invites`, { method: "POST", body: JSON.stringify({ role: "member" }) });
     const member = makeClient(url);
     const ms = await member.call("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: memberEmail, password: "memberpw-123" }) });
     const memberHomeWs = ms.body.workspace.id as string;
     await member.call("/api/auth/join", { method: "POST", body: JSON.stringify({ code: invite.body.code }) });
     await member.call("/api/auth/switch", { method: "POST", body: JSON.stringify({ workspaceId: wsId }) });
+    const mine = await member.call("/api/projects/roadmap/goals", { method: "POST", body: JSON.stringify({ scope: "individual", title: "Mine", items: ["draft"] }) });
+    const mineId = mine.body.id as string;
+
+    const list = (await owner.call("/api/projects/roadmap/goals")).body.goals;
+    const teamItem = list.find((g: any) => g.id === teamId).items[0].id as string;
+    const mineItem = list.find((g: any) => g.id === mineId).items[0].id as string;
+    // The member owns "Mine" — its member is their effective identity (email).
+    assert.equal(list.find((g: any) => g.id === mineId).member, memberEmail);
+
+    // File proposals directly (stands in for the pipeline).
+    const teamProp = db.createGoalProposal({ project: "roadmap", goalId: teamId, itemId: teamItem, kind: "check_item", reason: "shipped api", evidence: "e1", member: memberEmail })!;
+    const mineProp = db.createGoalProposal({ project: "roadmap", goalId: mineId, itemId: mineItem, kind: "check_item", reason: "drafted", evidence: "e2", member: memberEmail })!;
+    assert.ok(teamProp && mineProp);
+
+    // Scoping: the owner (admin) sees only the TEAM proposal, not the member's.
+    const ownerProps = (await owner.call("/api/projects/roadmap/goal-proposals")).body.proposals;
+    assert.deepEqual(ownerProps.map((p: any) => p.id), [teamProp], "admin sees team proposals, not a teammate's individual one");
+    // The member sees only THEIR individual proposal, not the team one.
+    const memberProps = (await member.call("/api/projects/roadmap/goal-proposals")).body.proposals;
+    assert.deepEqual(memberProps.map((p: any) => p.id), [mineProp], "member sees their own, not the team proposal");
 
     // Member CANNOT accept a TEAM-goal proposal (needs admin).
-    const memberAcceptTeam = await member.call(`/api/goal-proposals/${teamProp}/accept`, { method: "POST" });
-    assert.equal(memberAcceptTeam.status, 403, "team-goal proposal needs admin to accept");
+    assert.equal((await member.call(`/api/goal-proposals/${teamProp}/accept`, { method: "POST" })).status, 403);
+    // Owner (admin) CANNOT accept the member's individual proposal.
+    assert.equal((await owner.call(`/api/goal-proposals/${mineProp}/accept`, { method: "POST" })).status, 403, "admin can't act on a teammate's individual goal");
 
-    // Member CAN accept a proposal on an individual goal.
-    const memberAcceptMine = await member.call(`/api/goal-proposals/${mineProp}/accept`, { method: "POST" });
-    assert.equal(memberAcceptMine.status, 200);
-    const afterMine = (await owner.call("/api/projects/roadmap/goals")).body.goals.find((g: any) => g.id === mineId);
-    assert.equal(afterMine.items[0].done, true, "individual item now ticked");
+    // Each accepts what's theirs.
+    assert.equal((await member.call(`/api/goal-proposals/${mineProp}/accept`, { method: "POST" })).status, 200);
+    assert.equal((await owner.call(`/api/goal-proposals/${teamProp}/accept`, { method: "POST" })).status, 200);
+    const after = (await owner.call("/api/projects/roadmap/goals")).body.goals;
+    assert.equal(after.find((g: any) => g.id === mineId).items[0].done, true, "individual item ticked");
+    assert.equal(after.find((g: any) => g.id === teamId).items[0].done, true, "team item ticked");
 
-    // Owner accepts the team-goal proposal -> item ticked.
-    const ownerAcceptTeam = await owner.call(`/api/goal-proposals/${teamProp}/accept`, { method: "POST" });
-    assert.equal(ownerAcceptTeam.status, 200);
-    const afterTeam = (await owner.call("/api/projects/roadmap/goals")).body.goals.find((g: any) => g.id === teamId);
-    assert.equal(afterTeam.items[0].done, true);
-
-    // Nothing pending now.
-    assert.equal((await owner.call("/api/projects/roadmap/goal-proposals")).body.proposals.length, 0);
-
-    // A dismissed proposal: file one, dismiss it, it doesn't apply.
+    // Dismiss: the member drops one of their own; it doesn't apply.
     const d = db.createGoalProposal({ project: "roadmap", goalId: mineId, kind: "add_item", text: "extra", reason: "spotted", member: memberEmail })!;
-    const dismiss = await member.call(`/api/goal-proposals/${d}/dismiss`, { method: "POST" });
-    assert.equal(dismiss.status, 200);
+    assert.equal((await member.call(`/api/goal-proposals/${d}/dismiss`, { method: "POST" })).status, 200);
     const mineGoal = (await owner.call("/api/projects/roadmap/goals")).body.goals.find((g: any) => g.id === mineId);
     assert.ok(!mineGoal.items.some((i: any) => i.text === "extra"), "dismissed add_item was not applied");
 
     // Tenant isolation: from the member's own workspace, the proposals 404.
     await member.call("/api/auth/switch", { method: "POST", body: JSON.stringify({ workspaceId: memberHomeWs }) });
-    const cross = await member.call("/api/projects/roadmap/goal-proposals");
-    assert.equal(cross.status, 404);
+    assert.equal((await member.call("/api/projects/roadmap/goal-proposals")).status, 404);
   } finally {
     child.kill("SIGKILL");
   }

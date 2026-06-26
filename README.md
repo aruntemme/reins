@@ -78,8 +78,9 @@ If no inference backend is configured, Reins still captures raw events but does 
   tamper-evident transaction.
 - Optional Slack and Discord digests of each rollup.
 - Real accounts on the multi-tenant model: sign up for a workspace, log in with email and password,
-  invite teammates with a link, and roles (owner, admin, member). Tokens still authenticate hooks and
-  agents, and admins list and revoke them from the dashboard.
+  invite teammates with a link, and roles (owner, admin, member). Each account links to the identity its
+  agent reports as, so the server can tell whose goals and activity are whose. Tokens still authenticate
+  hooks and agents, and admins list and revoke them from the dashboard.
 - A simple deploy to Vercel plus a small VM.
 
 ## Roadmap

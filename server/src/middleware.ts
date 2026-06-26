@@ -14,6 +14,7 @@ declare global {
       workspaceId?: string;
       userId?: string;
       userRole?: Role;
+      member?: string; // the user session's capture identity (effective member)
     }
   }
 }
@@ -51,6 +52,9 @@ export function requireViewer(req: Request, res: Response, next: NextFunction) {
   const sess = verifySession(readCookie(req, COOKIE));
   if (sess) {
     req.workspaceId = sess.workspaceId;
+    req.userId = sess.userId;
+    req.userRole = sess.role;
+    req.member = sess.member;
     return next();
   }
   const info = verifyToken(bearer(req));
@@ -77,6 +81,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     req.workspaceId = sess.workspaceId;
     req.userId = sess.userId;
     req.userRole = sess.role;
+    req.member = sess.member;
     return next();
   }
   // A logged-in human who lacks owner/admin is authenticated but not authorized:
@@ -105,6 +110,7 @@ export function requireUser(req: Request, res: Response, next: NextFunction) {
     req.workspaceId = sess.workspaceId;
     req.userId = sess.userId;
     req.userRole = sess.role;
+    req.member = sess.member;
     return next();
   }
   return res.status(401).json({ error: "login required" });

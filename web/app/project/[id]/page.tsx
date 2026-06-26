@@ -21,14 +21,20 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
 
   useEffect(() => {
     api.me()
-      .then((m) => setViewer({ admin: !!m.admin || !m.auth, me: m.user?.email || (typeof localStorage !== "undefined" ? localStorage.getItem("reins-me") : "") || "" }))
+      .then((m) =>
+        setViewer({
+          admin: !!m.admin || !m.auth,
+          // The account's capture identity drives which goals are "mine"; falls
+          // back to a local name only in the auth-off dev instance.
+          me: m.member || m.user?.email || (typeof localStorage !== "undefined" ? localStorage.getItem("reins-me") : "") || "",
+        })
+      )
       .catch(() => {});
   }, []);
 
-  // A proposal is only shown to who can act on it: team-goal proposals to admins,
-  // an individual goal's proposals to that teammate. Avoids dumping someone's
-  // personal goal tracking onto the rest of the team.
-  const myProposals = proposals.filter((p) => (p.scope === "team" ? viewer.admin : p.member === viewer.me));
+  // Proposals are already scoped server-side to what this caller can act on
+  // (team -> admins, individual -> the owning teammate), so use them directly.
+  const myProposals = proposals;
 
   const load = useCallback(async () => {
     try {

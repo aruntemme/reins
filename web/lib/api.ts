@@ -130,6 +130,9 @@ export interface Me {
   user?: { email: string } | null;
   workspaces?: WorkspaceMembership[];
   role?: Role;
+  // The capture identity this account acts as in the active workspace (the hook's
+  // --me). Drives which goals/proposals are "yours". Null falls back to email.
+  member?: string | null;
 }
 
 export interface Token {
@@ -215,6 +218,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ workspaceId }),
     }),
+  setMember: (member: string) =>
+    j<{ ok: boolean; member: string | null }>("/api/auth/member", { method: "POST", body: JSON.stringify({ member }) }),
   joinWorkspace: (code: string) =>
     j<{ ok: boolean; workspace: Workspace; role: Role }>("/api/auth/join", {
       method: "POST",
