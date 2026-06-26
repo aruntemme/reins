@@ -14,6 +14,7 @@
  * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER, AIDER_CHAT_HISTORY.
  */
 import { readFileSync, existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { resolveMember, sendEvent } from "../lib/capture.mjs";
 import { readStdinJson, pick, resolveProject, parseFlags } from "./_shared.mjs";
 
@@ -63,7 +64,7 @@ export function lastAiderAssistant(md) {
   return after.join("\n").replace(/^[\s>]+|[\s>]+$/g, "").trim();
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const flags = parseFlags(process.argv.slice(2));
   let payload = readStdinJson();

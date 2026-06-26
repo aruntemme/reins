@@ -17,6 +17,7 @@
  *
  * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER.
  */
+import { pathToFileURL } from "node:url";
 import { resolveMember, sendEvent } from "../lib/capture.mjs";
 import { readStdinJson, resolveProject } from "./_shared.mjs";
 
@@ -51,7 +52,7 @@ export function mapCodex(payload = {}) {
   return { kind: "progress", text: "" };
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   // Codex passes the event JSON as the first CLI argument; fall back to stdin.
   let payload = {};

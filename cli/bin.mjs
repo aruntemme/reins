@@ -28,7 +28,10 @@ const EVENTS = ["UserPromptSubmit", "Stop"];
 // Our hook commands all run a file under ~/.reins, so the install path is the
 // reliable marker for "this is ours" when merging (covers both the Claude hook
 // and every adapter, without clobbering foreign hooks).
-const MARKER = INSTALL_DIR;
+// Hook commands embed a forward-slashed path (see buildCommand — valid for node
+// on every OS and survives bash, which strips Windows backslashes), so match on
+// the same normalized form.
+const MARKER = INSTALL_DIR.replace(/\\/g, "/");
 
 /**
  * Concrete, tested adapters. Each maps to a file under ~/.reins/adapters and the
@@ -104,7 +107,12 @@ function buildCommand(opts) {
   // The source label rides as an env var so the adapter (and the Claude hook,
   // which already reads REINS_SOURCE) stamps every event with the right origin.
   env.push(`REINS_SOURCE=${opts.source || agent.source}`);
-  return `${env.join(" ")} node ${agent.file}`.trim();
+  // Quote AND forward-slash the path. Claude Code runs hooks through bash, which
+  // strips the backslashes in a Windows path (C:\Users\… → C:Users…) and would
+  // also mishandle a path containing spaces. Forward slashes are valid for node
+  // on every platform, and the quotes keep spaces intact.
+  const file = agent.file.replace(/\\/g, "/");
+  return `${env.join(" ")} node "${file}"`.trim();
 }
 
 /** Recursively copy a directory of .mjs sources into the install dir. */
@@ -149,7 +157,10 @@ function mergeEvent(list, command) {
     const hooks = group?.hooks || [];
     return !hooks.some((h) => typeof h.command === "string" && h.command.includes(MARKER));
   });
-  kept.push({ hooks: [{ type: "command", command }] });
+  // shell: "bash" pins the interpreter so the POSIX `VAR=val node "…"` form runs
+  // identically on Windows (whose default hook shell would otherwise be cmd or
+  // PowerShell, which don't understand the env-prefix syntax).
+  kept.push({ hooks: [{ type: "command", command, shell: "bash" }] });
   return kept;
 }
 

@@ -18,6 +18,7 @@
  * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER, REINS_SOURCE,
  *      REINS_KIND, REINS_TEXT_FIELDS (comma list of dot-paths).
  */
+import { pathToFileURL } from "node:url";
 import { resolveMember, sendEvent } from "../lib/capture.mjs";
 import { readStdinJson, pick, resolveProject, parseFlags } from "./_shared.mjs";
 
@@ -43,7 +44,7 @@ export function mapGeneric(payload = {}, opts = {}) {
   return { kind, text };
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const flags = parseFlags(process.argv.slice(2));
   const payload = readStdinJson();
