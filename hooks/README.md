@@ -7,6 +7,9 @@ The hook streams two signals to the Reins server:
 
 It never blocks your session: 1.5s timeout, always exits 0.
 
+Cross-platform: the installed command quotes the script path with forward slashes
+and pins `shell: bash`, so it works on Windows (Git Bash) as well as macOS/Linux.
+
 ## Install (one command)
 
 ```bash

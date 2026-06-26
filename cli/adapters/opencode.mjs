@@ -14,6 +14,7 @@
  *
  * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER.
  */
+import { pathToFileURL } from "node:url";
 import { resolveMember, sendEvent } from "../lib/capture.mjs";
 import { readStdinJson, pick, resolveProject } from "./_shared.mjs";
 
@@ -49,7 +50,7 @@ export function mapOpencode(payload = {}) {
   return { kind, text };
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const payload = readStdinJson();
   const { kind, text } = mapOpencode(payload);

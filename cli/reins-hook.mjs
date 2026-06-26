@@ -19,6 +19,7 @@
  */
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resolveMember, lastAssistantText, sendEvent } from "./lib/capture.mjs";
 
 function readStdin() {
@@ -40,7 +41,10 @@ export function mapClaudeHook(hook) {
 }
 
 // When imported (tests/adapters), don't run the hook body.
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+// Use pathToFileURL so the comparison holds on Windows too, where the real URL
+// is file:///C:/… — a hand-built `file://${argv[1]}` never matches and the hook
+// body would silently never run.
+const isMain = import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const hook = readStdin();
   const project = process.env.REINS_PROJECT || basename(hook.cwd || process.cwd()) || "default";

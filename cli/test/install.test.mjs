@@ -39,10 +39,15 @@ function jsonAt(path) {
 
 /** Collect every command string across all hook events. */
 function allCommands(settings) {
+  return allHooks(settings).map((h) => h.command);
+}
+
+/** Collect every hook object (so tests can assert shell/type, not just command). */
+function allHooks(settings) {
   const out = [];
   for (const evt of Object.keys(settings.hooks || {})) {
     for (const group of settings.hooks[evt]) {
-      for (const h of group.hooks || []) out.push(h.command);
+      for (const h of group.hooks || []) out.push(h);
     }
   }
   return out;
@@ -76,6 +81,20 @@ test("install --agent codex writes a merged settings.json with REINS_SOURCE and 
   assert.ok(existsSync(join(home, ".reins", "adapters", "codex.mjs")));
   assert.ok(existsSync(join(home, ".reins", "adapters", "_shared.mjs")));
   assert.ok(existsSync(join(home, ".reins", "lib", "capture.mjs")));
+});
+
+test("the hook command quotes the script path and pins shell:bash (Windows-safe)", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-install-"));
+  runInstall(home, ["--me", "asha"]);
+  const ours = allHooks(settingsFor(home)).find((h) => h.command.includes("reins-hook.mjs"));
+  assert.ok(ours, "hook entry must exist");
+  // Path is wrapped in double quotes: ... node "<path>/reins-hook.mjs"
+  assert.match(ours.command, /node "[^"]*reins-hook\.mjs"/, "script path must be quoted");
+  // No backslashes in the embedded path (bash strips them on Windows).
+  const path = ours.command.match(/node "([^"]+)"/)[1];
+  assert.ok(!path.includes("\\"), "path must use forward slashes");
+  // Pin bash so the VAR=val env-prefix works on Windows too.
+  assert.equal(ours.shell, "bash", "hook must set shell: bash");
 });
 
 test("install --token wires the ingest token into the hook command as REINS_KEY", () => {
