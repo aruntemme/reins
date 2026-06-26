@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Reins on-box CI/CD periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
