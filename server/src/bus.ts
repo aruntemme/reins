@@ -7,6 +7,7 @@ export type ReinsEvent =
   | { type: "rollup.updated"; project: string }
   | { type: "handoff.changed"; project: string }
   | { type: "goal.updated"; project: string }
+  | { type: "goals.changed"; project: string }
   | { type: "ingest"; project: string; member: string };
 
 class Bus extends EventEmitter {

@@ -67,6 +67,26 @@ export interface ProjectSummary {
   updatedAt: number;
 }
 
+export type GoalScope = "team" | "individual";
+export type GoalStatus = "todo" | "in_progress" | "blocked" | "done";
+export interface GoalItem { id: string; text: string; done: boolean; origin: string; evidence: string | null }
+export interface GoalProgress { done: number; total: number; pct: number }
+export interface Goal {
+  id: string;
+  scope: GoalScope;
+  member: string | null;
+  parentId: string | null;
+  title: string;
+  blocked: boolean;
+  status: GoalStatus;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+  items: GoalItem[];
+  progress: GoalProgress;
+  rollup: GoalProgress;
+}
+
 export class AuthError extends Error {
   constructor() { super("auth required"); }
 }
@@ -214,6 +234,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ id, name }),
     }),
+
+  // ── Short-term goals ──────────────────────────────────────
+  goals: (id: string) => j<{ goals: Goal[] }>(`/api/projects/${encodeURIComponent(id)}/goals`),
+  addGoal: (id: string, g: { scope: GoalScope; title: string; member?: string; parentId?: string; items?: string[] }) =>
+    j<{ ok: boolean; id: string }>(`/api/projects/${encodeURIComponent(id)}/goals`, { method: "POST", body: JSON.stringify(g) }),
+  patchGoal: (goalId: string, patch: { title?: string; blocked?: boolean; parentId?: string | null }) =>
+    j<{ ok: boolean }>(`/api/goals/${goalId}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteGoal: (goalId: string) => j<{ ok: boolean }>(`/api/goals/${goalId}`, { method: "DELETE" }),
+  addGoalItem: (goalId: string, text: string) =>
+    j<{ ok: boolean; id: string }>(`/api/goals/${goalId}/items`, { method: "POST", body: JSON.stringify({ text }) }),
+  patchGoalItem: (itemId: string, patch: { text?: string; done?: boolean }) =>
+    j<{ ok: boolean }>(`/api/goal-items/${itemId}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteGoalItem: (itemId: string) => j<{ ok: boolean }>(`/api/goal-items/${itemId}`, { method: "DELETE" }),
 };
 
 export function timeAgo(ts: number): string {

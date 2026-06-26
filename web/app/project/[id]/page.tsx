@@ -1,17 +1,21 @@
 "use client";
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { api, timeAgo, type Project } from "@/lib/api";
+import { api, timeAgo, type Project, type Goal } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
 import { Invite } from "@/components/invite";
 import { ManageTokens } from "@/components/admin";
+import { GoalsDrawer, GoalsRef } from "@/components/goals";
 
 export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [proj, setProj] = useState<Project | null>(null);
   const [missing, setMissing] = useState(false);
+
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalsOpen, setGoalsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -22,8 +26,15 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     }
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
-  const live = useStream(id, load);
+  const loadGoals = useCallback(async () => {
+    try { setGoals((await api.goals(id)).goals); }
+    catch (e) { handleAuth(e); }
+  }, [id]);
+
+  // One change handler drives both the board and the goals pane off the same SSE.
+  const onChange = useCallback(() => { load(); loadGoals(); }, [load, loadGoals]);
+  useEffect(() => { load(); loadGoals(); }, [load, loadGoals]);
+  const live = useStream(id, onChange);
 
   if (missing) return (
     <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">No project “{id}”. <Link href="/dashboard" className="hl">Back</Link></div></div></main></>
@@ -40,7 +51,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
       />
       <main className="wrap">
         <div className="dash">
-          <DashHead proj={proj} onSaved={load} />
+          <DashHead proj={proj} goals={goals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
           <div className="cols">
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
@@ -64,16 +75,19 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
                 )}
               </div>
             </div>
-            <PendingRail proj={proj} onChange={load} />
+            <div className="rail">
+              <PendingRail proj={proj} onChange={onChange} />
+            </div>
           </div>
         </div>
       </main>
+      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} onChange={onChange} />
       <footer className="foot"><div className="wrap">project · {proj.id}</div></footer>
     </>
   );
 }
 
-function DashHead({ proj, onSaved }: { proj: Project; onSaved: () => void }) {
+function DashHead({ proj, goals, onSaved, onOpenGoals }: { proj: Project; goals: Goal[]; onSaved: () => void; onOpenGoals: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proj.goal);
   useEffect(() => setDraft(proj.goal), [proj.goal]);
@@ -108,6 +122,7 @@ function DashHead({ proj, onSaved }: { proj: Project; onSaved: () => void }) {
           </>
         )}
       </div>
+      <GoalsRef goals={goals} onOpen={onOpenGoals} />
     </div>
   );
 }
@@ -212,9 +227,8 @@ function PendingRail({ proj, onChange }: { proj: Project; onChange: () => void }
   const open = proj.pending.filter((p) => p.status !== "done");
 
   return (
-    <div className="rail">
-      <div className="card pend">
-        <div className="label"><span className="sq" /> pending · up for grabs</div>
+    <div className="card pend">
+      <div className="label"><span className="sq" /> pending · up for grabs</div>
         {open.length === 0 ? (
           <div className="empty">Nothing waiting. Clean board.</div>
         ) : (
@@ -237,7 +251,6 @@ function PendingRail({ proj, onChange }: { proj: Project; onChange: () => void }
             </div>
           ))
         )}
-      </div>
     </div>
   );
 }

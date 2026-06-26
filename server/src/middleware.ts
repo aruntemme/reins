@@ -110,6 +110,19 @@ export function requireUser(req: Request, res: Response, next: NextFunction) {
   return res.status(401).json({ error: "login required" });
 }
 
+/**
+ * Does the current request carry owner/admin authority in its workspace? Used by
+ * handlers (not as a gate) to allow elevated actions on an otherwise viewer-level
+ * route — e.g. creating a TEAM goal. Mirrors requireAdmin's acceptance set.
+ */
+export function isWorkspaceAdmin(req: Request): boolean {
+  if (!env.authEnabled) return true;
+  const sess = verifySession(readCookie(req, COOKIE));
+  if (sess && (sess.kind === "admin" || (sess.kind === "user" && roleIsAdmin(sess.role)))) return true;
+  const info = verifyToken(bearer(req));
+  return !!(info && info.kind === "admin");
+}
+
 /** Guard: the project must belong to the caller's workspace. Returns false + responds on failure. */
 export function authorizeProject(req: Request, res: Response, projectId: string): boolean {
   if (!env.authEnabled) return true;

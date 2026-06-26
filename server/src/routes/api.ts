@@ -4,13 +4,19 @@ import { ingest } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
 import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending, ensureProject, projectWorkspace } from "../db.js";
+import {
+  buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
+  addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
+} from "../db.js";
+import type { GoalRow } from "../db.js";
 import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
 import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
 import { storageStats } from "../llm/og-storage.js";
 import { anchorStats } from "../llm/og-chain.js";
 import { env, usesOG, usesRouter } from "../env.js";
-import { requireIngest, requireViewer, authorizeProject } from "../middleware.js";
+import type { Request, Response } from "express";
+import { requireIngest, requireViewer, authorizeProject, isWorkspaceAdmin } from "../middleware.js";
 
 export const api = Router();
 
@@ -145,6 +151,111 @@ api.post("/projects/:id/rollup", requireViewer, async (req, res) => {
   if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
   await runRollup(req.params.id!);
   res.json({ ok: true, rollup: projectSnapshot(req.params.id!)?.rollup ?? null });
+});
+
+// ── Short-term goals (declared layer beneath the project goal) ────
+// Common (team) goals are admin-authored; individual goals are open to any
+// teammate. Everyone in the workspace can read. Authorization is by the goal's
+// project, like every other read/write here.
+
+/** Resolve + authorize a goal: 404 if missing, tenant-checked, and team goals
+ *  require admin. Returns the goal or null (and responds) on failure. */
+function accessGoal(req: Request, res: Response, goal: GoalRow | undefined): GoalRow | null {
+  if (!goal) { res.status(404).json({ error: "not found" }); return null; }
+  if (!authorizeProject(req, res, goal.project)) return null;
+  if (goal.scope === "team" && !isWorkspaceAdmin(req)) {
+    res.status(403).json({ error: "owner or admin role required for a team goal" });
+    return null;
+  }
+  return goal;
+}
+
+api.get("/projects/:id/goals", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  res.json({ goals: buildGoalsView(req.params.id!) });
+});
+
+const GoalCreate = z.object({
+  scope: z.enum(["team", "individual"]),
+  title: z.string().trim().min(1).max(200),
+  member: z.string().trim().min(1).max(120).optional(),
+  parentId: z.string().optional(),
+  createdBy: z.string().trim().max(120).optional(),
+  items: z.array(z.string().trim().min(1).max(300)).max(50).optional(),
+});
+api.post("/projects/:id/goals", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  const body = GoalCreate.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const { scope, title, member, parentId, createdBy, items } = body.data;
+  if (scope === "team" && !isWorkspaceAdmin(req)) {
+    return res.status(403).json({ error: "owner or admin role required to add a team goal" });
+  }
+  if (scope === "individual" && !member) {
+    return res.status(400).json({ error: "an individual goal requires 'member'" });
+  }
+  if (parentId) {
+    const parent = getGoal(parentId);
+    if (!parent || parent.project !== req.params.id || parent.scope !== "team") {
+      return res.status(400).json({ error: "parentId must be a team goal in this project" });
+    }
+  }
+  if (scope === "individual" && member) ensureMember(req.params.id!, member);
+  const id = createGoal({
+    project: req.params.id!, scope, member: member ?? null,
+    parentId: parentId ?? null, title, createdBy: createdBy ?? member ?? null,
+  });
+  for (const text of items ?? []) addGoalItem({ goalId: id, text });
+  bus.emitChange({ type: "goals.changed", project: req.params.id! });
+  res.json({ ok: true, id });
+});
+
+api.patch("/goals/:goalId", requireViewer, (req, res) => {
+  const goal = accessGoal(req, res, getGoal(req.params.goalId!));
+  if (!goal) return;
+  const body = z
+    .object({ title: z.string().trim().min(1).max(200).optional(), blocked: z.boolean().optional(), parentId: z.string().nullable().optional() })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  updateGoal(goal.id, body.data);
+  bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true });
+});
+
+api.delete("/goals/:goalId", requireViewer, (req, res) => {
+  const goal = accessGoal(req, res, getGoal(req.params.goalId!));
+  if (!goal) return;
+  deleteGoal(goal.id);
+  bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true });
+});
+
+api.post("/goals/:goalId/items", requireViewer, (req, res) => {
+  const goal = accessGoal(req, res, getGoal(req.params.goalId!));
+  if (!goal) return;
+  const body = z.object({ text: z.string().trim().min(1).max(300) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const id = addGoalItem({ goalId: goal.id, text: body.data.text });
+  bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true, id });
+});
+
+api.patch("/goal-items/:itemId", requireViewer, (req, res) => {
+  const goal = accessGoal(req, res, goalItemGoal(req.params.itemId!));
+  if (!goal) return;
+  const body = z.object({ text: z.string().trim().min(1).max(300).optional(), done: z.boolean().optional() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  updateGoalItem(req.params.itemId!, body.data);
+  bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true });
+});
+
+api.delete("/goal-items/:itemId", requireViewer, (req, res) => {
+  const goal = accessGoal(req, res, goalItemGoal(req.params.itemId!));
+  if (!goal) return;
+  deleteGoalItem(req.params.itemId!);
+  bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true });
 });
 
 // ── 0G status (powering the dashboard's "running on 0G" surface) ──

@@ -644,3 +644,73 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
   .hiw-ev, .hiw-brow, .hiw-resp-row, .hiw-focus { opacity: 1; animation: none; }
   .hiw-bbar i, .live-dot { animation: none; }
 }
+
+/* ── Short-term goals pane ─────────────────────────────────── */
+.goals .empty.small { font-size: 13px; padding: 4px 0; }
+.goal-sec { margin-bottom: 16px; }
+.goal-sec:last-child { margin-bottom: 0; }
+.goal-sec-h { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 8px; }
+.goal-sec-h .mono { font-size: 12px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.goal-add { display: flex; gap: 8px; margin-bottom: 10px; }
+/* text inputs in the goals panel match the dashboard's .tokeninput look + focus */
+.goal-add input, .goal-additem input {
+  width: 100%; font-family: var(--font-display); font-size: 13.5px; color: var(--ink);
+  border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 11px;
+  background: var(--bg); outline: none; transition: .15s;
+}
+.goal-add input:focus, .goal-additem input:focus { border-color: var(--ink-3); background: #fff; }
+.goal-add input::placeholder, .goal-additem input::placeholder { color: var(--ink-3); }
+.goal-add input { flex: 1; }
+.tiny.solid { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+.goal-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--panel); }
+.goal-card:last-child { margin-bottom: 0; }
+.goal-card.blocked { border-color: var(--blocked); background: #fdf6ec; }
+.goal-card.done { opacity: .72; }
+.goal-top { display: flex; align-items: center; gap: 9px; }
+.goal-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--idle); }
+.goal-dot.in_progress { background: var(--active); }
+.goal-dot.blocked { background: var(--blocked); }
+.goal-dot.done { background: var(--blue); }
+.goal-title { flex: 1; font-size: 14.5px; font-weight: 550; color: var(--ink); line-height: 1.35; }
+.goal-owner { font-weight: 400; color: var(--ink-3); font-size: 12px; }
+.goal-pct { font-size: 12px; color: var(--ink-3); flex: none; }
+.goal-bar { height: 5px; border-radius: 999px; background: var(--line); overflow: hidden; margin: 9px 0 4px; }
+.goal-bar i { display: block; height: 100%; background: var(--active); border-radius: 999px; transition: width .3s ease; }
+.goal-card.done .goal-bar i { background: var(--blue); }
+.goal-card.blocked .goal-bar i { background: var(--blocked); }
+
+.goal-items { display: grid; gap: 2px; margin: 8px 0 4px; }
+.goal-item { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); padding: 2px 0; cursor: pointer; }
+.goal-item input { margin: 0; accent-color: var(--active); cursor: pointer; }
+.goal-item.done span { text-decoration: line-through; color: var(--ink-3); }
+.goal-item .goal-x { margin-left: auto; border: none; background: none; color: var(--ink-3); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; opacity: 0; }
+.goal-item:hover .goal-x { opacity: 1; }
+.goal-additem { margin: 6px 0 2px; }
+.goal-acts { display: flex; gap: 6px; margin-top: 8px; }
+
+/* goals: header reference + side-rail pane tweaks */
+.goals-ref { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 12px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 13px; color: var(--ink-2); text-decoration: none; width: fit-content; max-width: 100%; }
+.goals-ref:hover { border-color: var(--line-2); }
+.goals-ref .mono { font-size: 11px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.goals-ref b { color: var(--ink); font-weight: 600; }
+.goals-ref .warn b { color: var(--blocked); }
+.goals-ref { cursor: pointer; font-family: inherit; }
+.goals-ref .goals-ref-go { margin-left: auto; color: var(--blue); font-family: var(--font-mono); font-size: 12px; }
+.goals-ref-none { color: var(--ink-3); }
+
+/* ── Goals slide-in panel (separate from the board) ─────────── */
+.goals-drawer { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.goals-drawer.open { pointer-events: auto; }
+.goals-drawer-scrim { position: absolute; inset: 0; background: rgba(20, 17, 12, 0.32); opacity: 0; transition: opacity .22s ease; }
+.goals-drawer.open .goals-drawer-scrim { opacity: 1; }
+.goals-drawer-panel {
+  position: absolute; top: 0; right: 0; height: 100%; width: min(440px, 92vw);
+  background: var(--bg); border-left: 1px solid var(--line); box-shadow: -18px 0 48px rgba(40, 30, 12, 0.14);
+  display: flex; flex-direction: column; transform: translateX(100%);
+  transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.goals-drawer.open .goals-drawer-panel { transform: translateX(0); }
+.goals-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.goals-drawer-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
+.goals-embedded { background: none; }
