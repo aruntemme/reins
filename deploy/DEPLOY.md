@@ -33,7 +33,29 @@ verified DB backup first, then rsyncs, rebuilds, and waits for `/health` before 
 local `deploy/lightsail/.env.deploy` it pushes it; without one it keeps the box's existing
 `.env` (how CI deploys, so prod secrets never leave the box).
 
-### CI/CD (GitHub Actions)
+### CI/CD — on-box (free, no GitHub Actions)
+
+If GitHub Actions isn't available (billing, etc.), run CI/CD on the Lightsail box you already
+pay for. A systemd timer polls `main`, runs the tests in a throwaway container, and only on
+green backs up + rebuilds the live container. For a public repo this is also *safer* than a
+self-hosted Actions runner, since it only ever builds `main` — untrusted fork-PR code never runs.
+
+One-time, on the box (as `ubuntu`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aruntemme/reins/main/deploy/lightsail/setup-ci.sh | bash
+#   or: git clone the repo and run deploy/lightsail/setup-ci.sh
+```
+
+Then every push to `main` is tested and deployed within a few minutes. Useful commands:
+
+```bash
+journalctl -u reins-ci.service -f          # watch a run
+sudo systemctl start reins-ci.service      # force a run now
+sudo systemctl disable --now reins-ci.timer # pause it
+```
+
+### CI/CD (GitHub Actions) — when Actions is available
 
 `.github/workflows/backend.yml` runs on every push/PR touching the backend:
 
