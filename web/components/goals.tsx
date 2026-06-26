@@ -57,13 +57,14 @@ function ProposalStrip({ proposals, onChange }: { proposals: GoalProposal[]; onC
 
 /** A slide-in side panel that holds the full goals pane, separate from the board. */
 export function GoalsDrawer({
-  open, onClose, projectId, goals, proposals, onChange,
+  open, onClose, projectId, goals, proposals, viewer, onChange,
 }: {
   open: boolean;
   onClose: () => void;
   projectId: string;
   goals: Goal[];
   proposals: GoalProposal[];
+  viewer: { admin: boolean; me: string };
   onChange: () => void;
 }) {
   useEffect(() => {
@@ -82,25 +83,17 @@ export function GoalsDrawer({
           <button className="tiny" onClick={onClose}>close ✕</button>
         </div>
         <div className="goals-drawer-body">
-          <GoalsPane projectId={projectId} goals={goals} proposals={proposals} onChange={onChange} embedded />
+          <GoalsPane projectId={projectId} goals={goals} proposals={proposals} viewer={viewer} onChange={onChange} embedded />
         </div>
       </aside>
     </div>
   );
 }
 
-export function GoalsPane({ projectId, goals, proposals, onChange, embedded }: { projectId: string; goals: Goal[]; proposals: GoalProposal[]; onChange: () => void; embedded?: boolean }) {
-  const [admin, setAdmin] = useState(false);
-  const [me, setMe] = useState("");
-
-  useEffect(() => {
-    api.me()
-      .then((m) => {
-        setAdmin(!!m.admin || !m.auth); // auth-off dev mode = full control
-        setMe(m.user?.email || localStorage.getItem("reins-me") || "");
-      })
-      .catch(() => {});
-  }, []);
+export function GoalsPane({ projectId, goals, proposals, viewer, onChange, embedded }: { projectId: string; goals: Goal[]; proposals: GoalProposal[]; viewer: { admin: boolean; me: string }; onChange: () => void; embedded?: boolean }) {
+  const admin = viewer.admin;
+  const [me, setMe] = useState(viewer.me);
+  useEffect(() => { if (viewer.me) setMe(viewer.me); }, [viewer.me]);
 
   const team = goals.filter((g) => g.scope === "team");
   const mine = goals.filter((g) => g.scope === "individual" && me && g.member === me);

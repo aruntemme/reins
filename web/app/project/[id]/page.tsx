@@ -17,6 +17,18 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [proposals, setProposals] = useState<GoalProposal[]>([]);
   const [goalsOpen, setGoalsOpen] = useState(false);
+  const [viewer, setViewer] = useState<{ admin: boolean; me: string }>({ admin: false, me: "" });
+
+  useEffect(() => {
+    api.me()
+      .then((m) => setViewer({ admin: !!m.admin || !m.auth, me: m.user?.email || (typeof localStorage !== "undefined" ? localStorage.getItem("reins-me") : "") || "" }))
+      .catch(() => {});
+  }, []);
+
+  // A proposal is only shown to who can act on it: team-goal proposals to admins,
+  // an individual goal's proposals to that teammate. Avoids dumping someone's
+  // personal goal tracking onto the rest of the team.
+  const myProposals = proposals.filter((p) => (p.scope === "team" ? viewer.admin : p.member === viewer.me));
 
   const load = useCallback(async () => {
     try {
@@ -55,7 +67,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
       />
       <main className="wrap">
         <div className="dash">
-          <DashHead proj={proj} goals={goals} proposals={proposals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
+          <DashHead proj={proj} goals={goals} proposals={myProposals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
           <div className="cols">
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
@@ -85,7 +97,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
           </div>
         </div>
       </main>
-      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} proposals={proposals} onChange={onChange} />
+      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} proposals={myProposals} viewer={viewer} onChange={onChange} />
       <footer className="foot"><div className="wrap">project · {proj.id}</div></footer>
     </>
   );
