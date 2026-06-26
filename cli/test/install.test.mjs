@@ -23,6 +23,20 @@ function settingsFor(home) {
   return JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 }
 
+/** Run a PROJECT install (no --global): HOME holds ~/.reins, cwd is the repo. */
+function runProjectInstall(home, projectDir, args) {
+  return execFileSync(process.execPath, [BIN, "install", ...args], {
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    cwd: projectDir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function jsonAt(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
 /** Collect every command string across all hook events. */
 function allCommands(settings) {
   const out = [];
@@ -95,6 +109,58 @@ test("install with no --agent keeps Claude Code as the default", () => {
   const ours = cmds.find((c) => c.includes("reins-hook.mjs"));
   assert.ok(ours, "claude hook command must be written by default");
   assert.match(ours, /REINS_SOURCE=claude-code/);
+});
+
+test("project install writes the machine-specific hook to settings.local.json, NOT the shared settings.json", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-home-"));
+  const proj = mkdtempSync(join(tmpdir(), "reins-proj-"));
+  runProjectInstall(home, proj, ["--me", "asha"]);
+
+  const localPath = join(proj, ".claude", "settings.local.json");
+  const sharedPath = join(proj, ".claude", "settings.json");
+
+  // Our hook lands in the personal, git-ignored file...
+  assert.ok(existsSync(localPath), "settings.local.json must be written");
+  const ours = allCommands(jsonAt(localPath)).find((c) => c.includes("reins-hook.mjs"));
+  assert.ok(ours, "hook command must be in settings.local.json");
+  assert.match(ours, /REINS_MEMBER=asha/);
+  // ...and the SHARED settings.json is not created with our machine path.
+  assert.ok(!existsSync(sharedPath), "shared settings.json must not be created");
+});
+
+test("project install sweeps a stale Reins hook out of the committed shared settings.json, keeping foreign hooks", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-home-"));
+  const proj = mkdtempSync(join(tmpdir(), "reins-proj-"));
+  mkdirSync(join(proj, ".claude"), { recursive: true });
+
+  // Simulate an older version that committed our absolute path into the shared
+  // file (the exact thing that breaks teammates), alongside a foreign hook.
+  const stale = `REINS_SOURCE=claude-code node ${join(home, ".reins", "reins-hook.mjs")}`;
+  const foreign = "echo keep-me";
+  writeFileSync(
+    join(proj, ".claude", "settings.json"),
+    JSON.stringify(
+      {
+        hooks: {
+          UserPromptSubmit: [
+            { hooks: [{ type: "command", command: foreign }] },
+            { hooks: [{ type: "command", command: stale }] },
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  runProjectInstall(home, proj, ["--me", "rui"]);
+
+  const shared = allCommands(jsonAt(join(proj, ".claude", "settings.json")));
+  assert.ok(shared.includes(foreign), "foreign hook must survive the sweep");
+  assert.ok(!shared.some((c) => c.includes(".reins")), "our stale hook must be removed from the shared file");
+
+  const local = allCommands(jsonAt(join(proj, ".claude", "settings.local.json")));
+  assert.ok(local.some((c) => c.includes("reins-hook.mjs")), "the working hook now lives in settings.local.json");
 });
 
 test("installing a second agent replaces ours but keeps foreign hooks", () => {

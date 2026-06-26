@@ -66,10 +66,26 @@ function parseArgs(argv) {
   return args;
 }
 
+// Where the hook config is written.
+//  • global  → ~/.claude/settings.json (already personal — lives in your home)
+//  • project → ./.claude/settings.local.json — Claude Code's PER-USER, auto
+//    git-ignored file. Critical: the hook command embeds a machine-specific
+//    absolute path (~/.reins/reins-hook.mjs). Writing that into the *shared*
+//    ./.claude/settings.json gets it committed, and every teammate who pulls the
+//    repo then runs a path that doesn't exist on their machine — Claude Code
+//    reports "node:internal/modules/cjs/loader … Cannot find module". settings
+//    .local.json keeps each person's path on their own machine.
+function globalSettingsPath() {
+  return join(os.homedir(), ".claude", "settings.json");
+}
+function localSettingsPath() {
+  return resolve(process.cwd(), ".claude", "settings.local.json");
+}
+function sharedSettingsPath() {
+  return resolve(process.cwd(), ".claude", "settings.json");
+}
 function settingsPath(global) {
-  return global
-    ? join(os.homedir(), ".claude", "settings.json")
-    : resolve(process.cwd(), ".claude", "settings.json");
+  return global ? globalSettingsPath() : localSettingsPath();
 }
 
 function readJson(path) {
@@ -100,6 +116,31 @@ function copyDir(src, dest) {
     if (name.isDirectory()) copyDir(from, to);
     else copyFileSync(from, to);
   }
+}
+
+/**
+ * Remove our hook (matched by the ~/.reins MARKER) from a settings file, leaving
+ * foreign hooks intact. Writes back only if something changed. Returns the count
+ * removed. Used by uninstall and by install's cleanup of a stale, committed
+ * entry in the shared settings.json.
+ */
+function scrubOurHooks(path) {
+  if (!existsSync(path)) return 0;
+  const settings = readJson(path);
+  if (!settings.hooks) return 0;
+  let removed = 0;
+  for (const evt of EVENTS) {
+    const list = settings.hooks[evt];
+    if (!Array.isArray(list)) continue;
+    const before = list.length;
+    settings.hooks[evt] = list.filter(
+      (g) => !(g?.hooks || []).some((h) => typeof h.command === "string" && h.command.includes(MARKER))
+    );
+    removed += before - settings.hooks[evt].length;
+    if (settings.hooks[evt].length === 0) delete settings.hooks[evt];
+  }
+  if (removed) writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+  return removed;
 }
 
 /** Insert/replace our hook entry in one event array, leaving foreign hooks intact. */
@@ -164,11 +205,19 @@ async function install(args) {
   for (const evt of EVENTS) settings.hooks[evt] = mergeEvent(settings.hooks[evt], command);
   writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
 
+  // For a project install, sweep our hook out of the SHARED ./.claude/settings
+  // .json if a previous version put it there (its absolute path was machine
+  // specific and breaks teammates who pull the repo). It belongs in the personal
+  // settings.local.json we just wrote.
+  let sweptShared = 0;
+  if (!global) sweptShared = scrubOurHooks(sharedSettingsPath());
+
   // 3) report
   console.log(`\n  ${c.green("✓")} Reins hook installed`);
   console.log(`  ${c.dim("agent")}     ${agent} ${c.dim(`(source: ${opts.source || AGENTS[agent].source})`)}`);
   console.log(`  ${c.dim("command")}   ${AGENTS[agent].file}`);
-  console.log(`  ${c.dim("settings")}  ${path} ${c.dim(global ? "(global — all repos)" : "(this repo)")}`);
+  console.log(`  ${c.dim("settings")}  ${path} ${c.dim(global ? "(global — all repos)" : "(this repo, personal — not committed)")}`);
+  if (sweptShared) console.log(`  ${c.yellow("!")} removed a stale Reins hook from the shared settings.json ${c.dim("(commit that change so teammates stop seeing a missing-path error)")}`);
   console.log(`  ${c.dim("events")}    ${EVENTS.join(", ")}`);
   console.log(`  ${c.dim("as")}        ${opts.me || c.yellow("(auto: git email → $USER)")}`);
   console.log(`  ${c.dim("project")}   ${opts.project || c.yellow("(auto: folder name)")}`);
@@ -192,31 +241,34 @@ async function install(args) {
 
 function uninstall(args) {
   const global = !!args.global;
-  const path = settingsPath(global);
-  if (!existsSync(path)) { console.log(c.yellow(`Nothing to do — ${path} doesn't exist.`)); return; }
-  const settings = readJson(path);
-  let removed = 0;
-  for (const evt of EVENTS) {
-    const list = settings.hooks?.[evt];
-    if (!Array.isArray(list)) continue;
-    const before = list.length;
-    settings.hooks[evt] = list.filter((g) => !(g?.hooks || []).some((h) => typeof h.command === "string" && h.command.includes(MARKER)));
-    removed += before - settings.hooks[evt].length;
-    if (settings.hooks[evt].length === 0) delete settings.hooks[evt];
+  // Project uninstall also sweeps the shared settings.json, in case an older
+  // version (or a committed file) left our machine-specific hook there.
+  const paths = global ? [globalSettingsPath()] : [localSettingsPath(), sharedSettingsPath()];
+  let any = false;
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    const removed = scrubOurHooks(path);
+    if (removed) { any = true; console.log(c.green(`✓ Removed Reins hook from ${path}`)); }
+    else console.log(c.dim(`· no Reins hook in ${path}`));
   }
-  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
-  console.log(removed ? c.green(`✓ Removed Reins hook from ${path}`) : c.yellow(`No Reins hook found in ${path}`));
+  if (!any) console.log(c.yellow(`Nothing to remove.`));
 }
 
 async function status(args) {
-  for (const [label, global] of [["global", true], ["this repo", false]]) {
-    const path = settingsPath(global);
+  const rows = [
+    ["global", globalSettingsPath()],
+    ["this repo (personal)", localSettingsPath()],
+    ["this repo (shared)", sharedSettingsPath()],
+  ];
+  for (const [label, path] of rows) {
     const settings = readJson(path);
     const cmds = EVENTS.flatMap((e) => (settings.hooks?.[e] || []).flatMap((g) => (g.hooks || []).map((h) => h.command)))
       .filter((cmd) => typeof cmd === "string" && cmd.includes(MARKER));
     if (cmds.length) {
-      console.log(`  ${c.green("✓")} installed ${c.dim(`(${label}: ${path})`)}`);
+      const shared = label.includes("shared");
+      console.log(`  ${shared ? c.yellow("!") : c.green("✓")} installed ${c.dim(`(${label}: ${path})`)}`);
       console.log(`    ${c.dim(cmds[0])}`);
+      if (shared) console.log(`    ${c.yellow("this is committed — reinstall to move it to settings.local.json")}`);
     } else {
       console.log(`  ${c.dim("·")} not installed ${c.dim(`(${label}: ${path})`)}`);
     }
@@ -247,7 +299,8 @@ function help() {
     --token <token>    ingest token from the dashboard invite / new-project flow
     --key <secret>     legacy single shared ingest secret (alias of --token)
     --global           install for ALL repos (~/.claude/settings.json)
-                       (default: just this repo's ./.claude/settings.json)
+                       (default: this repo's ./.claude/settings.local.json,
+                        which is personal and git-ignored — never committed)
 
   ${c.b("Examples")}
     npx reins-hook install --url https://reins.yourco.com --me asha
