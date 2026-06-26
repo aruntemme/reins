@@ -681,3 +681,12 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .goal-additem { margin: 6px 0 2px; }
 .goal-additem input { width: 100%; font-size: 13px; padding: 5px 9px; }
 .goal-acts { display: flex; gap: 6px; margin-top: 8px; }
+
+/* goals: header reference + side-rail pane tweaks */
+.goals-ref { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 12px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 13px; color: var(--ink-2); text-decoration: none; width: fit-content; max-width: 100%; }
+.goals-ref:hover { border-color: var(--line-2); }
+.goals-ref .mono { font-size: 11px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.goals-ref b { color: var(--ink); font-weight: 600; }
+.goals-ref .warn b { color: var(--blocked); }
+.goals-ref .goals-ref-go { margin-left: auto; color: var(--blue); font-family: var(--font-mono); font-size: 12px; }
+.rail .goals { position: relative; }

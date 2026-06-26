@@ -1,22 +1,33 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Goal } from "@/lib/api";
-import { handleAuth } from "@/lib/guard";
 
 /**
  * Short-term goals pane: common TEAM goals (admin-managed) and per-person goals,
- * each a checklist with derived progress. Sits beneath the project's global goal.
- * Reloads whenever the page's SSE `reload` counter ticks.
+ * each a checklist with derived progress. Lives in the project's side rail as a
+ * vertical pane. Controlled: the page owns the goals fetch (so a small header
+ * reference can share it) and passes `onChange` to re-load after a mutation.
  */
-export function GoalsPane({ projectId, reload }: { projectId: string; reload: number }) {
-  const [goals, setGoals] = useState<Goal[] | null>(null);
+/** Small inline reference in the page header that links down to the side pane. */
+export function GoalsRef({ goals }: { goals: Goal[] }) {
+  if (!goals.length) return null;
+  const n = (s: string) => goals.filter((g) => g.status === s).length;
+  const done = n("done"), prog = n("in_progress"), blocked = n("blocked"), todo = n("todo");
+  return (
+    <a href="#goals" className="goals-ref">
+      <span className="mono">short-term goals</span>
+      <span><b>{done}</b> done</span>
+      <span><b>{prog}</b> in progress</span>
+      {blocked > 0 && <span className="warn"><b>{blocked}</b> blocked</span>}
+      <span><b>{todo}</b> to do</span>
+      <span className="goals-ref-go">in side pane ›</span>
+    </a>
+  );
+}
+
+export function GoalsPane({ projectId, goals, onChange }: { projectId: string; goals: Goal[]; onChange: () => void }) {
   const [admin, setAdmin] = useState(false);
   const [me, setMe] = useState("");
-
-  const load = useCallback(async () => {
-    try { setGoals((await api.goals(projectId)).goals); }
-    catch (e) { handleAuth(e); }
-  }, [projectId]);
 
   useEffect(() => {
     api.me()
@@ -26,9 +37,6 @@ export function GoalsPane({ projectId, reload }: { projectId: string; reload: nu
       })
       .catch(() => {});
   }, []);
-  useEffect(() => { load(); }, [load, reload]);
-
-  if (!goals) return null;
 
   const team = goals.filter((g) => g.scope === "team");
   const mine = goals.filter((g) => g.scope === "individual" && me && g.member === me);
@@ -40,9 +48,10 @@ export function GoalsPane({ projectId, reload }: { projectId: string; reload: nu
     if (v) { localStorage.setItem("reins-me", v); setMe(v); }
     return v || "me";
   };
+  const load = onChange;
 
   return (
-    <div className="goals card pad">
+    <div className="goals card pad" id="goals">
       <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> short-term goals</div>
 
       <Section
