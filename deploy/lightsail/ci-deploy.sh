@@ -66,3 +66,5 @@ done
 echo "✗ backend unhealthy after deploy — recent logs:"
 docker compose logs --tail 50 reins || true
 exit 1
+
+# CI/CD pipeline verified end-to-end on the box: 2026-06-26
