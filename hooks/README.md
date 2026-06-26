@@ -14,8 +14,14 @@ npx reins-hook install --url https://reins.yourco.com --me asha
 ```
 
 This copies the hook to `~/.reins/reins-hook.mjs` and **merges** it into your
-`.claude/settings.json` (without touching other hooks). Then run `/hooks` in
-Claude Code to approve it (or restart).
+`.claude/settings.local.json` (your personal, git-ignored settings) without
+touching other hooks. Then run `/hooks` in Claude Code to approve it (or restart).
+
+> Why `settings.local.json` and not the shared `settings.json`? The hook command
+> embeds a machine-specific absolute path (`~/.reins/...`). If that goes in the
+> committed `settings.json`, every teammate who pulls the repo runs a path that
+> doesn't exist on their machine and Claude Code reports a missing-module error
+> on each prompt. `--global` writes `~/.claude/settings.json` (already personal).
 
 | Flag | Default | Meaning |
 |------|---------|---------|
@@ -59,8 +65,9 @@ ships an `intent`/`progress`/`summary` event with the right `source`.
 
 ### Wiring each agent's trigger
 
-The installer records the command in settings.json; point the agent's own
-trigger at the printed command (it lives under `~/.reins`):
+The installer records the command in your settings (`settings.local.json` for a
+project install, `~/.claude/settings.json` with `--global`); point the agent's
+own trigger at the printed command (it lives under `~/.reins`):
 
 - **Codex** — in `~/.codex/config.toml` set
   `notify = ["node", "/Users/you/.reins/adapters/codex.mjs"]`. Codex passes the
