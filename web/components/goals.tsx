@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, type Goal } from "@/lib/api";
+import { api, type Goal, type GoalProposal } from "@/lib/api";
 
 /**
  * Short-term goals pane: common TEAM goals (admin-managed) and per-person goals,
@@ -9,7 +9,7 @@ import { api, type Goal } from "@/lib/api";
  * reference can share it) and passes `onChange` to re-load after a mutation.
  */
 /** Small inline reference in the page header that opens the goals panel. */
-export function GoalsRef({ goals, onOpen }: { goals: Goal[]; onOpen: () => void }) {
+export function GoalsRef({ goals, proposals, onOpen }: { goals: Goal[]; proposals: GoalProposal[]; onOpen: () => void }) {
   const n = (s: string) => goals.filter((g) => g.status === s).length;
   const done = n("done"), prog = n("in_progress"), blocked = n("blocked"), todo = n("todo");
   return (
@@ -25,19 +25,46 @@ export function GoalsRef({ goals, onOpen }: { goals: Goal[]; onOpen: () => void 
           <span><b>{todo}</b> to do</span>
         </>
       )}
+      {proposals.length > 0 && <span className="goals-ref-sugg">{proposals.length} suggested</span>}
       <span className="goals-ref-go">open ›</span>
     </button>
   );
 }
 
+/** The 'suggested by activity' strip: pipeline proposals the owner confirms/dismisses. */
+function ProposalStrip({ proposals, onChange }: { proposals: GoalProposal[]; onChange: () => void }) {
+  if (!proposals.length) return null;
+  return (
+    <div className="goal-props">
+      <div className="goal-props-h"><span className="sq active" /> suggested by activity <span className="mono">{proposals.length}</span></div>
+      {proposals.map((p) => (
+        <div className="goal-prop" key={p.id}>
+          <div className="goal-prop-what">
+            {p.kind === "check_item" && <><b>mark done?</b> {p.itemText} <span className="goal-owner mono">· {p.goalTitle}</span></>}
+            {p.kind === "add_item" && <><b>add step?</b> {p.text} <span className="goal-owner mono">· {p.goalTitle}</span></>}
+            {p.kind === "block_goal" && <><b>blocked?</b> <span className="goal-owner mono">{p.goalTitle}</span></>}
+          </div>
+          <div className="goal-prop-why">{p.reason}{p.member ? ` · ${p.member}` : ""}</div>
+          <div className="goal-prop-acts">
+            <button className="tiny solid" onClick={() => api.acceptProposal(p.id).then(onChange)}>confirm</button>
+            <button className="tiny" onClick={() => api.dismissProposal(p.id).then(onChange)}>dismiss</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** A slide-in side panel that holds the full goals pane, separate from the board. */
 export function GoalsDrawer({
-  open, onClose, projectId, goals, onChange,
+  open, onClose, projectId, goals, proposals, viewer, onChange,
 }: {
   open: boolean;
   onClose: () => void;
   projectId: string;
   goals: Goal[];
+  proposals: GoalProposal[];
+  viewer: { admin: boolean; me: string };
   onChange: () => void;
 }) {
   useEffect(() => {
@@ -56,25 +83,17 @@ export function GoalsDrawer({
           <button className="tiny" onClick={onClose}>close ✕</button>
         </div>
         <div className="goals-drawer-body">
-          <GoalsPane projectId={projectId} goals={goals} onChange={onChange} embedded />
+          <GoalsPane projectId={projectId} goals={goals} proposals={proposals} viewer={viewer} onChange={onChange} embedded />
         </div>
       </aside>
     </div>
   );
 }
 
-export function GoalsPane({ projectId, goals, onChange, embedded }: { projectId: string; goals: Goal[]; onChange: () => void; embedded?: boolean }) {
-  const [admin, setAdmin] = useState(false);
-  const [me, setMe] = useState("");
-
-  useEffect(() => {
-    api.me()
-      .then((m) => {
-        setAdmin(!!m.admin || !m.auth); // auth-off dev mode = full control
-        setMe(m.user?.email || localStorage.getItem("reins-me") || "");
-      })
-      .catch(() => {});
-  }, []);
+export function GoalsPane({ projectId, goals, proposals, viewer, onChange, embedded }: { projectId: string; goals: Goal[]; proposals: GoalProposal[]; viewer: { admin: boolean; me: string }; onChange: () => void; embedded?: boolean }) {
+  const admin = viewer.admin;
+  const [me, setMe] = useState(viewer.me);
+  useEffect(() => { if (viewer.me) setMe(viewer.me); }, [viewer.me]);
 
   const team = goals.filter((g) => g.scope === "team");
   const mine = goals.filter((g) => g.scope === "individual" && me && g.member === me);
@@ -91,6 +110,8 @@ export function GoalsPane({ projectId, goals, onChange, embedded }: { projectId:
   return (
     <div className={embedded ? "goals goals-embedded" : "goals card pad"} id={embedded ? undefined : "goals"}>
       {!embedded && <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> short-term goals</div>}
+
+      <ProposalStrip proposals={proposals} onChange={onChange} />
 
       <Section
         title="Team goals"

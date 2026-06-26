@@ -7,6 +7,7 @@ import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending, e
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
+  listGoalProposals, getGoalProposal, acceptGoalProposal, dismissGoalProposal,
 } from "../db.js";
 import type { GoalRow } from "../db.js";
 import { bus } from "../bus.js";
@@ -163,9 +164,19 @@ api.post("/projects/:id/rollup", requireViewer, async (req, res) => {
 function accessGoal(req: Request, res: Response, goal: GoalRow | undefined): GoalRow | null {
   if (!goal) { res.status(404).json({ error: "not found" }); return null; }
   if (!authorizeProject(req, res, goal.project)) return null;
-  if (goal.scope === "team" && !isWorkspaceAdmin(req)) {
-    res.status(403).json({ error: "owner or admin role required for a team goal" });
-    return null;
+  if (goal.scope === "team") {
+    if (!isWorkspaceAdmin(req)) {
+      res.status(403).json({ error: "owner or admin role required for a team goal" });
+      return null;
+    }
+  } else {
+    // Individual goals belong to one teammate — only they act on them. A token
+    // session (no userId) is a trusted machine credential (e.g. an agent over
+    // MCP declaring/ticking its own goals) and is allowed through.
+    if (req.userId && req.member !== goal.member) {
+      res.status(403).json({ error: "this goal belongs to another teammate" });
+      return null;
+    }
   }
   return goal;
 }
@@ -191,8 +202,11 @@ api.post("/projects/:id/goals", requireViewer, (req, res) => {
   if (scope === "team" && !isWorkspaceAdmin(req)) {
     return res.status(403).json({ error: "owner or admin role required to add a team goal" });
   }
-  if (scope === "individual" && !member) {
-    return res.status(400).json({ error: "an individual goal requires 'member'" });
+  // A logged-in human can only create their OWN individual goals (their effective
+  // member); a token session (agent) declares whatever member it carries.
+  const goalMember = scope === "individual" ? (req.userId ? req.member : member) : null;
+  if (scope === "individual" && !goalMember) {
+    return res.status(400).json({ error: "an individual goal requires a member identity" });
   }
   if (parentId) {
     const parent = getGoal(parentId);
@@ -200,10 +214,10 @@ api.post("/projects/:id/goals", requireViewer, (req, res) => {
       return res.status(400).json({ error: "parentId must be a team goal in this project" });
     }
   }
-  if (scope === "individual" && member) ensureMember(req.params.id!, member);
+  if (goalMember) ensureMember(req.params.id!, goalMember);
   const id = createGoal({
-    project: req.params.id!, scope, member: member ?? null,
-    parentId: parentId ?? null, title, createdBy: createdBy ?? member ?? null,
+    project: req.params.id!, scope, member: goalMember,
+    parentId: parentId ?? null, title, createdBy: createdBy ?? goalMember ?? null,
   });
   for (const text of items ?? []) addGoalItem({ goalId: id, text });
   bus.emitChange({ type: "goals.changed", project: req.params.id! });
@@ -255,6 +269,45 @@ api.delete("/goal-items/:itemId", requireViewer, (req, res) => {
   if (!goal) return;
   deleteGoalItem(req.params.itemId!);
   bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true });
+});
+
+// ── Goal auto-tracking proposals (Phase 2) ───────────────────
+// The pipeline files proposals; the owner accepts or dismisses. Same authority
+// as editing the underlying goal (team goals need owner/admin).
+api.get("/projects/:id/goal-proposals", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  // Only what the caller can act on: team-goal proposals to admins, an individual
+  // goal's proposals to that teammate. Avoids surfacing a person's private goal
+  // tracking to the rest of the team.
+  const admin = isWorkspaceAdmin(req);
+  const proposals = listGoalProposals(req.params.id!).filter((p) =>
+    p.scope === "team" ? admin : !!req.userId && p.member === req.member
+  );
+  res.json({ proposals });
+});
+
+function accessProposalGoal(req: Request, res: Response, proposalId: string): { goal: GoalRow } | null {
+  const p = getGoalProposal(proposalId);
+  if (!p || p.status !== "pending") { res.status(404).json({ error: "not found" }); return null; }
+  const goal = accessGoal(req, res, getGoal(p.goal_id));
+  if (!goal) return null;
+  return { goal };
+}
+
+api.post("/goal-proposals/:id/accept", requireViewer, (req, res) => {
+  const ctx = accessProposalGoal(req, res, req.params.id!);
+  if (!ctx) return;
+  acceptGoalProposal(req.params.id!);
+  bus.emitChange({ type: "goals.changed", project: ctx.goal.project });
+  res.json({ ok: true });
+});
+
+api.post("/goal-proposals/:id/dismiss", requireViewer, (req, res) => {
+  const ctx = accessProposalGoal(req, res, req.params.id!);
+  if (!ctx) return;
+  dismissGoalProposal(req.params.id!);
+  bus.emitChange({ type: "goals.changed", project: ctx.goal.project });
   res.json({ ok: true });
 });
 

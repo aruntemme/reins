@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS memberships (
   user_id       TEXT NOT NULL,
   workspace_id  TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'member',  -- owner | admin | member
+  member        TEXT,                            -- this account's capture identity in the ws (the hook's --me). Null => use email.
   created_at    INTEGER NOT NULL,
   PRIMARY KEY (user_id, workspace_id)
 );
@@ -209,12 +210,39 @@ CREATE TABLE IF NOT EXISTS goal_items (
   updated_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_goal_items ON goal_items(goal_id, position);
+
+-- Phase 2 auto-tracking: the pipeline never edits a checklist directly. When it
+-- spots that an item looks done (or a new sub-task), it files a PROPOSAL here for
+-- the goal's owner to accept or dismiss. kind: check_item (tick item_id),
+-- add_item (add text to goal_id), block_goal (flag goal_id blocked). evidence
+-- is the event that triggered it; member is whose activity drove it.
+CREATE TABLE IF NOT EXISTS goal_proposals (
+  id          TEXT PRIMARY KEY,
+  project     TEXT NOT NULL,
+  goal_id     TEXT NOT NULL,
+  item_id     TEXT,
+  kind        TEXT NOT NULL,                 -- check_item | add_item | block_goal
+  text        TEXT,                          -- new item text (add_item) or note
+  reason      TEXT NOT NULL,                 -- why the pipeline proposed it
+  evidence    TEXT,                          -- triggering event id
+  member      TEXT,                          -- whose activity drove it
+  status      TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | dismissed
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goal_proposals ON goal_proposals(project, status);
 `);
 
 // Migrate pre-auth databases: add projects.workspace_id if missing.
 const projCols = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
 if (!projCols.some((c) => c.name === "workspace_id")) {
   db.exec("ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'");
+}
+
+// Account ↔ capture-identity link: which project member id an account uses.
+const memCols = db.prepare("PRAGMA table_info(memberships)").all() as { name: string }[];
+if (!memCols.some((c) => c.name === "member")) {
+  db.exec("ALTER TABLE memberships ADD COLUMN member TEXT");
 }
 
 // 0G Storage provenance: each rollup snapshot is uploaded to 0G Storage and
@@ -784,6 +812,184 @@ export function buildGoalsView(project: string): GoalView[] {
       rollup,
     };
   });
+}
+
+// ── Goal auto-tracking proposals (Phase 2) ────────────────────
+export type GoalOpKind = "check_item" | "add_item" | "block_goal";
+export interface GoalOp {
+  op: GoalOpKind;
+  goalId?: string;   // add_item / block_goal
+  itemId?: string;   // check_item
+  text?: string;     // add_item
+  reason: string;
+}
+
+export interface GoalProposalRow {
+  id: string;
+  project: string;
+  goal_id: string;
+  item_id: string | null;
+  kind: GoalOpKind;
+  text: string | null;
+  reason: string;
+  evidence: string | null;
+  member: string | null;
+  status: string;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Open, not-done checklist items the matcher can reason about for a member:
+ *  their own individual goals plus the project's team goals. */
+export function openGoalItemsForMatch(project: string, member: string): {
+  itemId: string;
+  goalId: string;
+  goalTitle: string;
+  scope: GoalScope;
+  text: string;
+}[] {
+  return db
+    .prepare(
+      `SELECT i.id AS itemId, g.id AS goalId, g.title AS goalTitle, g.scope AS scope, i.text AS text
+         FROM goal_items i JOIN goals g ON g.id = i.goal_id
+        WHERE g.project = ? AND i.done = 0
+          AND (g.scope = 'team' OR (g.scope = 'individual' AND g.member = ?))
+        ORDER BY g.scope = 'team' DESC, i.position ASC`
+    )
+    .all(project, member) as any;
+}
+
+/** Goals (id + title) the member can have new items proposed onto. */
+export function openGoalsForMatch(project: string, member: string): { id: string; title: string; scope: GoalScope }[] {
+  return db
+    .prepare(
+      `SELECT id, title, scope FROM goals
+        WHERE project = ? AND (scope = 'team' OR (scope = 'individual' AND member = ?))
+        ORDER BY scope = 'team' DESC, created_at ASC`
+    )
+    .all(project, member) as any;
+}
+
+/** File a proposal, de-duping against an identical still-pending one. Returns the
+ *  id, or null if a matching pending proposal already exists (or the target is gone). */
+export function createGoalProposal(p: {
+  project: string;
+  goalId: string;
+  itemId?: string | null;
+  kind: GoalOpKind;
+  text?: string | null;
+  reason: string;
+  evidence?: string | null;
+  member?: string | null;
+}): string | null {
+  // Target must still exist.
+  if (!getGoal(p.goalId)) return null;
+  if (p.kind === "check_item" && !p.itemId) return null;
+  if (p.kind === "check_item") {
+    const it = db.prepare("SELECT done FROM goal_items WHERE id = ?").get(p.itemId) as { done: number } | undefined;
+    if (!it || it.done) return null; // already gone or already done
+  }
+  const dupe = db
+    .prepare(
+      `SELECT id FROM goal_proposals WHERE status = 'pending' AND project = ? AND goal_id = ? AND kind = ?
+         AND COALESCE(item_id,'') = COALESCE(?, '') AND COALESCE(text,'') = COALESCE(?, '')`
+    )
+    .get(p.project, p.goalId, p.kind, p.itemId ?? null, p.text ?? null) as { id: string } | undefined;
+  if (dupe) return null;
+  const id = randomUUID();
+  const t = now();
+  db.prepare(
+    `INSERT INTO goal_proposals (id, project, goal_id, item_id, kind, text, reason, evidence, member, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+  ).run(id, p.project, p.goalId, p.itemId ?? null, p.kind, p.text ?? null, p.reason, p.evidence ?? null, p.member ?? null, t, t);
+  return id;
+}
+
+/** Turn the pipeline's goal_ops into proposals. Returns how many were filed. */
+export function applyGoalOps(project: string, member: string, ops: GoalOp[], evidence?: string | null): number {
+  let n = 0;
+  for (const op of ops) {
+    const id = createGoalProposal({
+      project,
+      goalId: op.goalId ?? (op.itemId ? goalItemGoal(op.itemId)?.id ?? "" : ""),
+      itemId: op.itemId ?? null,
+      kind: op.op,
+      text: op.text ?? null,
+      reason: op.reason,
+      evidence: evidence ?? null,
+      member,
+    });
+    if (id) n++;
+  }
+  return n;
+}
+
+export function getGoalProposal(id: string): GoalProposalRow | undefined {
+  return db.prepare("SELECT * FROM goal_proposals WHERE id = ?").get(id) as GoalProposalRow | undefined;
+}
+
+/** Pending proposals for a project, shaped with the goal title + item text. */
+export function listGoalProposals(project: string): {
+  id: string;
+  goalId: string;
+  goalTitle: string;
+  scope: GoalScope;
+  itemId: string | null;
+  itemText: string | null;
+  kind: GoalOpKind;
+  text: string | null;
+  reason: string;
+  evidence: string | null;
+  member: string | null;
+  createdAt: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT p.id, p.goal_id AS goalId, g.title AS goalTitle, g.scope AS scope,
+              p.item_id AS itemId, i.text AS itemText, p.kind, p.text, p.reason,
+              p.evidence, p.member, p.created_at AS createdAt
+         FROM goal_proposals p
+         JOIN goals g ON g.id = p.goal_id
+         LEFT JOIN goal_items i ON i.id = p.item_id
+        WHERE p.project = ? AND p.status = 'pending'
+        ORDER BY p.created_at ASC`
+    )
+    .all(project) as any;
+}
+
+/** Apply a pending proposal (tick item / add item / block goal) and mark it
+ *  accepted. Returns the affected goal row, or null if not pending/missing. */
+export function acceptGoalProposal(id: string): GoalRow | null {
+  const p = getGoalProposal(id);
+  if (!p || p.status !== "pending") return null;
+  const goal = getGoal(p.goal_id);
+  if (!goal) { db.prepare("UPDATE goal_proposals SET status='dismissed', updated_at=? WHERE id=?").run(now(), id); return null; }
+  const tx = db.transaction(() => {
+    if (p.kind === "check_item" && p.item_id) {
+      db.prepare("UPDATE goal_items SET done = 1, origin = 'auto', evidence = ?, updated_at = ? WHERE id = ?")
+        .run(p.evidence ?? null, now(), p.item_id);
+      db.prepare("UPDATE goals SET updated_at = ? WHERE id = ?").run(now(), p.goal_id);
+    } else if (p.kind === "add_item" && p.text) {
+      addGoalItem({ goalId: p.goal_id, text: p.text, origin: "auto", evidence: p.evidence });
+    } else if (p.kind === "block_goal") {
+      db.prepare("UPDATE goals SET blocked = 1, updated_at = ? WHERE id = ?").run(now(), p.goal_id);
+    }
+    db.prepare("UPDATE goal_proposals SET status='accepted', updated_at=? WHERE id=?").run(now(), id);
+  });
+  tx();
+  return goal;
+}
+
+export function dismissGoalProposal(id: string): GoalRow | null {
+  const p = getGoalProposal(id);
+  if (!p || p.status !== "pending") return null;
+  db.prepare("UPDATE goal_proposals SET status='dismissed', updated_at=? WHERE id=?").run(now(), id);
+  return getGoal(p.goal_id) ?? null;
+}
+
+export function countPendingProposals(project: string): number {
+  const r = db.prepare("SELECT COUNT(*) AS n FROM goal_proposals WHERE project = ? AND status = 'pending'").get(project) as { n: number };
+  return r.n;
 }
 
 // ── Workspace cleanup ─────────────────────────────────────────

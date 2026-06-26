@@ -131,7 +131,7 @@ test("goals routes: team goals need admin, individual goals are open, tenant-iso
     assert.equal(list.body.goals[0].id, teamId, "team goal sorts first");
     assert.equal(teamView.progress.total, 2, "own items");
     assert.equal(teamView.rollup.total, 3, "own + child's item rolled up");
-    assert.equal(mineView.member, memberEmail.toLowerCase ? memberEmail : memberEmail);
+    assert.equal(mineView.member, memberEmail);
 
     // Member ticks an item on their own goal.
     const itemId = mineView.items[0].id as string;
@@ -144,6 +144,44 @@ test("goals routes: team goals need admin, individual goals are open, tenant-iso
     await member.call("/api/auth/switch", { method: "POST", body: JSON.stringify({ workspaceId: memberHomeWs }) });
     const cross = await member.call("/api/projects/roadmap/goals");
     assert.equal(cross.status, 404, "goals must not be visible across tenants");
+  } finally {
+    child.kill("SIGKILL");
+  }
+});
+
+test("account↔member: alias drives individual-goal ownership, and a member can't create another's", async () => {
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  const indexPath = resolve(import.meta.dirname, "..", "index.ts");
+  const child = spawn(process.execPath, ["--import", "tsx", indexPath], {
+    env: { ...process.env, PORT: String(port), REINS_DB: DB_PATH, REINS_AUTH: "on", REINS_SESSION_SECRET: "test-secret-goals" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderr?.on("data", (d) => process.stderr.write(`[server] ${d}`));
+  try {
+    await waitForHealth(url, child);
+    const owner = makeClient(url);
+    const ownerEmail = `owner-${randomUUID().slice(0, 8)}@acme.test`;
+    await owner.call("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: ownerEmail, password: "supersecret-1", workspaceName: "Acme" }) });
+    await owner.call("/api/projects", { method: "POST", body: JSON.stringify({ id: "proj", name: "Proj" }) });
+
+    // Default effective member is the email.
+    let me = await owner.call("/api/auth/me");
+    assert.equal(me.body.member, ownerEmail.toLowerCase());
+
+    // Set the capture-identity alias (e.g. how their hook reports them).
+    const set = await owner.call("/api/auth/member", { method: "POST", body: JSON.stringify({ member: "Arun" }) });
+    assert.equal(set.status, 200);
+    assert.equal(set.body.member, "Arun");
+    me = await owner.call("/api/auth/me");
+    assert.equal(me.body.member, "Arun", "me reflects the alias");
+
+    // An individual goal they create is owned by the alias, not the email — and a
+    // spoofed body 'member' is ignored (a human can only create their own).
+    const g = await owner.call("/api/projects/proj/goals", { method: "POST", body: JSON.stringify({ scope: "individual", member: "someone-else", title: "mine" }) });
+    assert.equal(g.status, 200);
+    const goal = (await owner.call("/api/projects/proj/goals")).body.goals.find((x: any) => x.id === g.body.id);
+    assert.equal(goal.member, "Arun", "ownership follows the caller's identity, not the body");
   } finally {
     child.kill("SIGKILL");
   }

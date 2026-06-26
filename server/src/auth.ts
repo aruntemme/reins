@@ -133,6 +133,7 @@ export interface SessionInfo {
   kind: TokenKind | "user";
   userId?: string;
   role?: Role;
+  member?: string; // the account's capture identity in this workspace (user sessions only)
 }
 
 export function verifySession(cookie: string | undefined): SessionInfo | null {
@@ -151,7 +152,8 @@ export function verifySession(cookie: string | undefined): SessionInfo | null {
     if (data.uid) {
       const m = getMembership(data.uid, data.ws);
       if (!m) return null;
-      return { workspaceId: data.ws, kind: "user", userId: data.uid, role: m.role };
+      const member = m.member ?? getUserById(data.uid)?.email;
+      return { workspaceId: data.ws, kind: "user", userId: data.uid, role: m.role, member };
     }
     return { workspaceId: data.ws, kind: (data.k as TokenKind) ?? "access" };
   } catch {
@@ -224,10 +226,29 @@ export function addMembership(userId: string, workspaceId: string, role: Role): 
   ).run(userId, workspaceId, role, now());
 }
 
-export function getMembership(userId: string, workspaceId: string): { role: Role } | undefined {
+export function getMembership(userId: string, workspaceId: string): { role: Role; member: string | null } | undefined {
   return db
-    .prepare("SELECT role FROM memberships WHERE user_id = ? AND workspace_id = ?")
+    .prepare("SELECT role, member FROM memberships WHERE user_id = ? AND workspace_id = ?")
     .get(userId, workspaceId) as any;
+}
+
+/** Set the capture identity (the hook's --me) this account uses in a workspace. */
+export function setMembershipMember(userId: string, workspaceId: string, member: string | null): boolean {
+  const r = db
+    .prepare("UPDATE memberships SET member = ? WHERE user_id = ? AND workspace_id = ?")
+    .run(member && member.trim() ? member.trim() : null, userId, workspaceId);
+  return r.changes > 0;
+}
+
+/**
+ * The project member id an account acts as in a workspace: its explicit override
+ * if set, else its email (the common default, since hooks fall back to git email).
+ */
+export function effectiveMember(userId: string, workspaceId: string): string | undefined {
+  const m = getMembership(userId, workspaceId);
+  if (!m) return undefined;
+  if (m.member) return m.member;
+  return getUserById(userId)?.email;
 }
 
 /** Workspaces a user belongs to, with role and name. */
