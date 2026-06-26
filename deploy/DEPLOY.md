@@ -27,7 +27,24 @@ cp deploy/lightsail/.env.deploy.example deploy/lightsail/.env.deploy
 #   → builds the container, starts it, and prints your workspace tokens (once!)
 ```
 
-`ship.sh` is also your redeploy command — re-run it after any change.
+`ship.sh` is also your redeploy command — re-run it after any change. It now takes a
+verified DB backup first, then rsyncs, rebuilds, and waits for `/health` before returning
+(so a broken deploy fails loudly instead of silently). The `.env` push is optional: with a
+local `deploy/lightsail/.env.deploy` it pushes it; without one it keeps the box's existing
+`.env` (how CI deploys, so prod secrets never leave the box).
+
+### CI/CD (GitHub Actions)
+
+`.github/workflows/backend.yml` runs on every push/PR touching the backend:
+
+- **CI** (always): `npm ci`, `tsc --noEmit`, the server test suite, and the CLI tests.
+- **CD** (push to `main`, after CI is green): runs `ship.sh` against the box — backup,
+  rsync, rebuild, health check. It reuses the box's `.env`, so the only repo secrets needed are:
+  - `LIGHTSAIL_SSH_KEY` — the contents of `deploy/lightsail/reins-key.pem`
+  - `LIGHTSAIL_HOST` — the box's public IP
+
+  Add them under **Settings → Secrets and variables → Actions**. Until both are set, the
+  deploy job no-ops with a notice (CI still runs). The dashboard keeps auto-deploying on Vercel.
 
 What you get: the container runs with `REINS_AUTH=on`, SQLite on the box's disk (survives
 restarts/redeploys), and three tokens (admin / ingest / access) from the bootstrap step.

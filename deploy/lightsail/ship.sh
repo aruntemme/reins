@@ -19,7 +19,9 @@ ENVFILE="${HERE}/.env.deploy"
 SSH="ssh -i $KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${IP}"
 
 [ -f "$KEY" ] || { echo "missing $KEY — run provision.sh first"; exit 1; }
-[ -f "$ENVFILE" ] || { echo "missing $ENVFILE — copy .env.deploy.example and fill it"; exit 1; }
+# .env is optional: when present (local deploys) we push it; when absent (CI/CD
+# code-only deploys) we keep whatever .env is already configured on the box.
+HAS_ENV=0; [ -f "$ENVFILE" ] && HAS_ENV=1
 
 # ── Pre-deploy safety net: snapshot the live DB before we touch anything ──────
 # A consistent online backup (better-sqlite3 .backup, run inside the live
@@ -56,11 +58,30 @@ echo "→ copying server + compose to ${IP}"
 rsync -az -e "ssh -i $KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
   --exclude node_modules --exclude '*.db*' --exclude '.env' \
   "$ROOT/server" "$ROOT/docker-compose.yml" "ubuntu@${IP}:/home/ubuntu/reins/"
-scp -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  "$ENVFILE" "ubuntu@${IP}:/home/ubuntu/reins/.env"
+if [ "$HAS_ENV" = 1 ]; then
+  echo "→ pushing .env.deploy"
+  scp -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    "$ENVFILE" "ubuntu@${IP}:/home/ubuntu/reins/.env"
+else
+  echo "→ no local .env.deploy — keeping the box's existing .env"
+  $SSH "test -f /home/ubuntu/reins/.env" || { echo "✗ box has no /home/ubuntu/reins/.env and none provided — aborting"; exit 1; }
+fi
 
 echo "→ building + starting container"
 $SSH 'cd /home/ubuntu/reins && docker compose up -d --build'
+
+echo "→ waiting for the backend to report healthy"
+HEALTHY=0
+for _ in $(seq 1 30); do
+  if $SSH "curl -fsS http://localhost:4319/health" >/dev/null 2>&1; then HEALTHY=1; break; fi
+  sleep 2
+done
+if [ "$HEALTHY" != 1 ]; then
+  echo "✗ backend did not become healthy after deploy — recent logs:"
+  $SSH 'cd /home/ubuntu/reins && docker compose logs --tail 50 reins' || true
+  exit 1
+fi
+echo "  ✓ backend healthy"
 
 if [ "$BOOTSTRAP" = "--bootstrap" ]; then
   echo "→ bootstrapping a workspace (tokens shown once)"
