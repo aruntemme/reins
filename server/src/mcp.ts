@@ -4,7 +4,7 @@ import { z } from "zod";
 import "./db.js";
 import { env } from "./env.js";
 import { projectSnapshot, projectsList } from "./state.js";
-import { getProject, getRollup, buildGoalsView } from "./db.js";
+import { getProject, getRollup, buildGoalsView, countPendingProposals } from "./db.js";
 import {
   buildContextPack,
   buildScopedContextPack,
@@ -232,6 +232,8 @@ function renderGoals(project: string, memberFilter?: string): string {
     `\n# ${memberFilter ? `${memberFilter}'s goals` : "Individual goals"}\n` +
       (indiv.length ? indiv.map((g) => `${g.member ? `(${g.member}) ` : ""}${fmt(g)}`).join("\n") : "(none)")
   );
+  const pending = countPendingProposals(project);
+  if (pending > 0) out.push(`\n(${pending} auto-tracked update${pending === 1 ? "" : "s"} awaiting confirmation in the dashboard)`);
   return out.join("\n");
 }
 

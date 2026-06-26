@@ -50,6 +50,20 @@ export const DistillSchema = z.object({
     .array(z.object({ to: z.string(), note: z.string() }))
     .default([])
     .describe("Teammates this person directly flagged/@mentioned/handed work to, with what they need. 'to' MUST be an exact name from the provided ROSTER."),
+  goal_ops: z
+    .array(
+      z.object({
+        op: z.enum(["check_item", "add_item", "block_goal"]),
+        itemId: z.string().optional().describe("for check_item: the exact OPEN GOAL ITEM id this event completed"),
+        goalId: z.string().optional().describe("for add_item / block_goal: the exact GOAL id"),
+        text: z.string().optional().describe("for add_item: the new sub-task text"),
+        reason: z.string().describe("one short sentence: why this event implies it"),
+      })
+    )
+    .default([])
+    .describe(
+      "PROPOSED, NOT applied. Only when the event CLEARLY shows it: check_item when an OPEN GOAL ITEM is now demonstrably done; add_item when the work is a concrete sub-task of a listed goal that isn't already an item; block_goal when the person is clearly blocked on that goal. Use only the exact ids provided. Empty array if unsure."
+    ),
 });
 export type Distill = z.infer<typeof DistillSchema>;
 

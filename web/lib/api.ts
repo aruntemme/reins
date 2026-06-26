@@ -87,6 +87,21 @@ export interface Goal {
   rollup: GoalProgress;
 }
 
+export interface GoalProposal {
+  id: string;
+  goalId: string;
+  goalTitle: string;
+  scope: GoalScope;
+  itemId: string | null;
+  itemText: string | null;
+  kind: "check_item" | "add_item" | "block_goal";
+  text: string | null;
+  reason: string;
+  evidence: string | null;
+  member: string | null;
+  createdAt: number;
+}
+
 export class AuthError extends Error {
   constructor() { super("auth required"); }
 }
@@ -247,6 +262,11 @@ export const api = {
   patchGoalItem: (itemId: string, patch: { text?: string; done?: boolean }) =>
     j<{ ok: boolean }>(`/api/goal-items/${itemId}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteGoalItem: (itemId: string) => j<{ ok: boolean }>(`/api/goal-items/${itemId}`, { method: "DELETE" }),
+
+  // Auto-tracking proposals (the pipeline suggests; the owner confirms).
+  goalProposals: (id: string) => j<{ proposals: GoalProposal[] }>(`/api/projects/${encodeURIComponent(id)}/goal-proposals`),
+  acceptProposal: (pid: string) => j<{ ok: boolean }>(`/api/goal-proposals/${pid}/accept`, { method: "POST" }),
+  dismissProposal: (pid: string) => j<{ ok: boolean }>(`/api/goal-proposals/${pid}/dismiss`, { method: "POST" }),
 };
 
 export function timeAgo(ts: number): string {

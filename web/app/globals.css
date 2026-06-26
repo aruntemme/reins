@@ -714,3 +714,15 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .goals-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .goals-drawer-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
 .goals-embedded { background: none; }
+
+/* goals: auto-track proposal strip */
+.goals-ref-sugg { background: var(--active); color: #fff; border-radius: 999px; padding: 1px 9px; font-size: 11px; font-weight: 600; }
+.goal-props { border: 1px solid var(--active); background: #f1f8f2; border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
+.goal-props-h { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px; }
+.goal-props-h .mono { margin-left: auto; color: var(--active); font-weight: 600; }
+.goal-prop { padding: 9px 0; border-top: 1px solid #d6e8d8; }
+.goal-prop:first-of-type { border-top: none; }
+.goal-prop-what { font-size: 13.5px; color: var(--ink); line-height: 1.4; }
+.goal-prop-what b { color: var(--active); font-weight: 650; margin-right: 4px; }
+.goal-prop-why { font-size: 12px; color: var(--ink-3); margin: 3px 0 8px; }
+.goal-prop-acts { display: flex; gap: 6px; }

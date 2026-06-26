@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { api, timeAgo, type Project, type Goal } from "@/lib/api";
+import { api, timeAgo, type Project, type Goal, type GoalProposal } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
@@ -15,6 +15,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   const [missing, setMissing] = useState(false);
 
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [proposals, setProposals] = useState<GoalProposal[]>([]);
   const [goalsOpen, setGoalsOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -27,8 +28,11 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   }, [id]);
 
   const loadGoals = useCallback(async () => {
-    try { setGoals((await api.goals(id)).goals); }
-    catch (e) { handleAuth(e); }
+    try {
+      const [g, p] = await Promise.all([api.goals(id), api.goalProposals(id)]);
+      setGoals(g.goals);
+      setProposals(p.proposals);
+    } catch (e) { handleAuth(e); }
   }, [id]);
 
   // One change handler drives both the board and the goals pane off the same SSE.
@@ -51,7 +55,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
       />
       <main className="wrap">
         <div className="dash">
-          <DashHead proj={proj} goals={goals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
+          <DashHead proj={proj} goals={goals} proposals={proposals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
           <div className="cols">
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
@@ -81,13 +85,13 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
           </div>
         </div>
       </main>
-      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} onChange={onChange} />
+      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} proposals={proposals} onChange={onChange} />
       <footer className="foot"><div className="wrap">project · {proj.id}</div></footer>
     </>
   );
 }
 
-function DashHead({ proj, goals, onSaved, onOpenGoals }: { proj: Project; goals: Goal[]; onSaved: () => void; onOpenGoals: () => void }) {
+function DashHead({ proj, goals, proposals, onSaved, onOpenGoals }: { proj: Project; goals: Goal[]; proposals: GoalProposal[]; onSaved: () => void; onOpenGoals: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proj.goal);
   useEffect(() => setDraft(proj.goal), [proj.goal]);
@@ -122,7 +126,7 @@ function DashHead({ proj, goals, onSaved, onOpenGoals }: { proj: Project; goals:
           </>
         )}
       </div>
-      <GoalsRef goals={goals} onOpen={onOpenGoals} />
+      <GoalsRef goals={goals} proposals={proposals} onOpen={onOpenGoals} />
     </div>
   );
 }

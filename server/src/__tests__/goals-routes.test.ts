@@ -131,7 +131,7 @@ test("goals routes: team goals need admin, individual goals are open, tenant-iso
     assert.equal(list.body.goals[0].id, teamId, "team goal sorts first");
     assert.equal(teamView.progress.total, 2, "own items");
     assert.equal(teamView.rollup.total, 3, "own + child's item rolled up");
-    assert.equal(mineView.member, memberEmail.toLowerCase ? memberEmail : memberEmail);
+    assert.equal(mineView.member, memberEmail);
 
     // Member ticks an item on their own goal.
     const itemId = mineView.items[0].id as string;

@@ -103,6 +103,7 @@ async function distill(eventId: string, input: IngestInput): Promise<void> {
       project: input.project,
       member: input.member,
       text: input.text,
+      eventId,
     });
     setEventSignificance(eventId, sig);
   }

@@ -1,6 +1,6 @@
 import { db, findOpenPending, listMembers, resolveMember, createHandoff } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
-import { getProject } from "../db.js";
+import { getProject, openGoalItemsForMatch, openGoalsForMatch, applyGoalOps } from "../db.js";
 import { bus } from "../bus.js";
 import { DistillSchema } from "./schemas.js";
 import { applyOps } from "./reconcile.js";
@@ -27,6 +27,11 @@ Return ONLY a JSON object:
   named teammate ("heads up Praveen…", "@asha can you…", "blocked on the API Ravi owns"). "to" MUST
   be an exact name from the TEAMMATE ROSTER; drop mentions of anyone not on it. "note" = what that
   teammate needs to do or know. Empty array if none.
+- "goal_ops": PROPOSED goal updates (a human confirms them later — so be precise, not eager). Using
+  ONLY the ids in OPEN GOAL ITEMS / GOALS below: "check_item" {itemId, reason} when the event clearly
+  shows that item is DONE; "add_item" {goalId, text, reason} when the work is a concrete sub-task of a
+  listed goal not already an item; "block_goal" {goalId, reason} when clearly blocked on it. Empty if
+  unsure — a wrong proposal wastes the owner's time.
 
 Be faithful — never invent. If nothing meaningful changed, return just the significance.`;
 
@@ -34,8 +39,9 @@ export async function distillCombined(input: {
   project: string;
   member: string;
   text: string;
+  eventId?: string;
 }): Promise<"noise" | "minor" | "major"> {
-  const { project, member, text } = input;
+  const { project, member, text, eventId } = input;
   const current: any =
     db.prepare("SELECT * FROM members WHERE project = ? AND member = ?").get(project, member) ?? {};
   const openPending = findOpenPending(project, member);
@@ -43,6 +49,8 @@ export async function distillCombined(input: {
   const roster = listMembers(project)
     .map((x) => x.display_name || x.member)
     .filter((n) => n !== (current.display_name || member));
+  const goalItems = openGoalItemsForMatch(project, member);
+  const goals = openGoalsForMatch(project, member);
 
   const ops = await jsonComplete({
     schema: DistillSchema,
@@ -59,12 +67,23 @@ working_on: ${current.working_on || "[]"}
 open_pending:
 ${openPending.map((p) => `  - [${p.id}] ${p.text}`).join("\n") || "  (none)"}
 
+OPEN GOAL ITEMS (for goal_ops check_item — use the exact item id):
+${goalItems.map((g) => `  - item ${g.itemId} :: "${g.text}" (${g.scope} goal: ${g.goalTitle})`).join("\n") || "  (none)"}
+GOALS (for goal_ops add_item / block_goal — use the exact goal id):
+${goals.map((g) => `  - goal ${g.id} :: "${g.title}" (${g.scope})`).join("\n") || "  (none)"}
+
 NEW EVENT FROM THEIR AGENT:
 ${text}`,
   });
 
   if (ops.significance === "noise") return "noise";
   applyOps(project, member, ops);
+
+  // Goal auto-tracking: file the proposed goal_ops for the owner to confirm.
+  if (ops.goal_ops?.length) {
+    const filed = applyGoalOps(project, member, ops.goal_ops, eventId);
+    if (filed > 0) bus.emitChange({ type: "goals.changed", project });
+  }
 
   // @mentions -> directed handoffs to the named teammate.
   let handed = false;

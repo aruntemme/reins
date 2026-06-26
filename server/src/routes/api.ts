@@ -7,6 +7,7 @@ import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending, e
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
+  listGoalProposals, getGoalProposal, acceptGoalProposal, dismissGoalProposal,
 } from "../db.js";
 import type { GoalRow } from "../db.js";
 import { bus } from "../bus.js";
@@ -255,6 +256,38 @@ api.delete("/goal-items/:itemId", requireViewer, (req, res) => {
   if (!goal) return;
   deleteGoalItem(req.params.itemId!);
   bus.emitChange({ type: "goals.changed", project: goal.project });
+  res.json({ ok: true });
+});
+
+// ── Goal auto-tracking proposals (Phase 2) ───────────────────
+// The pipeline files proposals; the owner accepts or dismisses. Same authority
+// as editing the underlying goal (team goals need owner/admin).
+api.get("/projects/:id/goal-proposals", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  res.json({ proposals: listGoalProposals(req.params.id!) });
+});
+
+function accessProposalGoal(req: Request, res: Response, proposalId: string): { goal: GoalRow } | null {
+  const p = getGoalProposal(proposalId);
+  if (!p || p.status !== "pending") { res.status(404).json({ error: "not found" }); return null; }
+  const goal = accessGoal(req, res, getGoal(p.goal_id));
+  if (!goal) return null;
+  return { goal };
+}
+
+api.post("/goal-proposals/:id/accept", requireViewer, (req, res) => {
+  const ctx = accessProposalGoal(req, res, req.params.id!);
+  if (!ctx) return;
+  acceptGoalProposal(req.params.id!);
+  bus.emitChange({ type: "goals.changed", project: ctx.goal.project });
+  res.json({ ok: true });
+});
+
+api.post("/goal-proposals/:id/dismiss", requireViewer, (req, res) => {
+  const ctx = accessProposalGoal(req, res, req.params.id!);
+  if (!ctx) return;
+  dismissGoalProposal(req.params.id!);
+  bus.emitChange({ type: "goals.changed", project: ctx.goal.project });
   res.json({ ok: true });
 });
 
