@@ -688,5 +688,22 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .goals-ref .mono { font-size: 11px; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
 .goals-ref b { color: var(--ink); font-weight: 600; }
 .goals-ref .warn b { color: var(--blocked); }
+.goals-ref { cursor: pointer; font-family: inherit; }
 .goals-ref .goals-ref-go { margin-left: auto; color: var(--blue); font-family: var(--font-mono); font-size: 12px; }
-.rail .goals { position: relative; }
+.goals-ref-none { color: var(--ink-3); }
+
+/* ── Goals slide-in panel (separate from the board) ─────────── */
+.goals-drawer { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.goals-drawer.open { pointer-events: auto; }
+.goals-drawer-scrim { position: absolute; inset: 0; background: rgba(20, 17, 12, 0.32); opacity: 0; transition: opacity .22s ease; }
+.goals-drawer.open .goals-drawer-scrim { opacity: 1; }
+.goals-drawer-panel {
+  position: absolute; top: 0; right: 0; height: 100%; width: min(440px, 92vw);
+  background: var(--bg); border-left: 1px solid var(--line); box-shadow: -18px 0 48px rgba(40, 30, 12, 0.14);
+  display: flex; flex-direction: column; transform: translateX(100%);
+  transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.goals-drawer.open .goals-drawer-panel { transform: translateX(0); }
+.goals-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.goals-drawer-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
+.goals-embedded { background: none; }

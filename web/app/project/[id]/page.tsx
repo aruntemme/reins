@@ -7,7 +7,7 @@ import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
 import { Invite } from "@/components/invite";
 import { ManageTokens } from "@/components/admin";
-import { GoalsPane, GoalsRef } from "@/components/goals";
+import { GoalsDrawer, GoalsRef } from "@/components/goals";
 
 export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -15,6 +15,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   const [missing, setMissing] = useState(false);
 
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalsOpen, setGoalsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -50,7 +51,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
       />
       <main className="wrap">
         <div className="dash">
-          <DashHead proj={proj} goals={goals} onSaved={load} />
+          <DashHead proj={proj} goals={goals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
           <div className="cols">
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
@@ -75,18 +76,18 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
               </div>
             </div>
             <div className="rail">
-              <GoalsPane projectId={proj.id} goals={goals} onChange={onChange} />
               <PendingRail proj={proj} onChange={onChange} />
             </div>
           </div>
         </div>
       </main>
+      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} onChange={onChange} />
       <footer className="foot"><div className="wrap">project · {proj.id}</div></footer>
     </>
   );
 }
 
-function DashHead({ proj, goals, onSaved }: { proj: Project; goals: Goal[]; onSaved: () => void }) {
+function DashHead({ proj, goals, onSaved, onOpenGoals }: { proj: Project; goals: Goal[]; onSaved: () => void; onOpenGoals: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proj.goal);
   useEffect(() => setDraft(proj.goal), [proj.goal]);
@@ -121,7 +122,7 @@ function DashHead({ proj, goals, onSaved }: { proj: Project; goals: Goal[]; onSa
           </>
         )}
       </div>
-      <GoalsRef goals={goals} />
+      <GoalsRef goals={goals} onOpen={onOpenGoals} />
     </div>
   );
 }

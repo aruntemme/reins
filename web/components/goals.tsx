@@ -8,24 +8,62 @@ import { api, type Goal } from "@/lib/api";
  * vertical pane. Controlled: the page owns the goals fetch (so a small header
  * reference can share it) and passes `onChange` to re-load after a mutation.
  */
-/** Small inline reference in the page header that links down to the side pane. */
-export function GoalsRef({ goals }: { goals: Goal[] }) {
-  if (!goals.length) return null;
+/** Small inline reference in the page header that opens the goals panel. */
+export function GoalsRef({ goals, onOpen }: { goals: Goal[]; onOpen: () => void }) {
   const n = (s: string) => goals.filter((g) => g.status === s).length;
   const done = n("done"), prog = n("in_progress"), blocked = n("blocked"), todo = n("todo");
   return (
-    <a href="#goals" className="goals-ref">
+    <button className="goals-ref" onClick={onOpen}>
       <span className="mono">short-term goals</span>
-      <span><b>{done}</b> done</span>
-      <span><b>{prog}</b> in progress</span>
-      {blocked > 0 && <span className="warn"><b>{blocked}</b> blocked</span>}
-      <span><b>{todo}</b> to do</span>
-      <span className="goals-ref-go">in side pane ›</span>
-    </a>
+      {goals.length === 0 ? (
+        <span className="goals-ref-none">none yet</span>
+      ) : (
+        <>
+          <span><b>{done}</b> done</span>
+          <span><b>{prog}</b> in progress</span>
+          {blocked > 0 && <span className="warn"><b>{blocked}</b> blocked</span>}
+          <span><b>{todo}</b> to do</span>
+        </>
+      )}
+      <span className="goals-ref-go">open ›</span>
+    </button>
   );
 }
 
-export function GoalsPane({ projectId, goals, onChange }: { projectId: string; goals: Goal[]; onChange: () => void }) {
+/** A slide-in side panel that holds the full goals pane, separate from the board. */
+export function GoalsDrawer({
+  open, onClose, projectId, goals, onChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  projectId: string;
+  goals: Goal[];
+  onChange: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [open, onClose]);
+
+  return (
+    <div className={`goals-drawer ${open ? "open" : ""}`} aria-hidden={!open}>
+      <div className="goals-drawer-scrim" onClick={onClose} />
+      <aside className="goals-drawer-panel" role="dialog" aria-label="Short-term goals">
+        <div className="goals-drawer-head">
+          <span className="label"><span className="sq blue" /> short-term goals</span>
+          <button className="tiny" onClick={onClose}>close ✕</button>
+        </div>
+        <div className="goals-drawer-body">
+          <GoalsPane projectId={projectId} goals={goals} onChange={onChange} embedded />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export function GoalsPane({ projectId, goals, onChange, embedded }: { projectId: string; goals: Goal[]; onChange: () => void; embedded?: boolean }) {
   const [admin, setAdmin] = useState(false);
   const [me, setMe] = useState("");
 
@@ -51,8 +89,8 @@ export function GoalsPane({ projectId, goals, onChange }: { projectId: string; g
   const load = onChange;
 
   return (
-    <div className="goals card pad" id="goals">
-      <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> short-term goals</div>
+    <div className={embedded ? "goals goals-embedded" : "goals card pad"} id={embedded ? undefined : "goals"}>
+      {!embedded && <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> short-term goals</div>}
 
       <Section
         title="Team goals"
