@@ -4,7 +4,7 @@ import { z } from "zod";
 import "./db.js";
 import { env } from "./env.js";
 import { projectSnapshot, projectsList } from "./state.js";
-import { getProject, getRollup } from "./db.js";
+import { getProject, getRollup, buildGoalsView } from "./db.js";
 import {
   buildContextPack,
   buildScopedContextPack,
@@ -20,18 +20,26 @@ import { syncPush, syncPull } from "./sync.js";
 // server process (the MCP server is a separate process sharing the same DB file).
 const SERVER = (process.env.REINS_URL || `http://localhost:${env.port}`).replace(/\/$/, "");
 
-async function post(path: string, body: unknown): Promise<string> {
+async function send(method: string, path: string, body: unknown): Promise<{ ok: boolean; json?: any; error?: string }> {
   try {
     const res = await fetch(SERVER + path, {
-      method: "POST",
+      method,
       headers: { "content-type": "application/json", ...(env.ingestKey ? { "x-reins-key": env.ingestKey } : {}) },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return `error: server returned ${res.status} (is the reins server running at ${SERVER}?)`;
-    return "ok";
+    const raw = await res.text();
+    if (!res.ok) return { ok: false, error: `server returned ${res.status} (is the reins server running at ${SERVER}?)` };
+    let json: any = {};
+    try { json = raw ? JSON.parse(raw) : {}; } catch { /* non-json ok */ }
+    return { ok: true, json };
   } catch {
-    return `error: could not reach reins server at ${SERVER}`;
+    return { ok: false, error: `could not reach reins server at ${SERVER}` };
   }
+}
+
+async function post(path: string, body: unknown): Promise<string> {
+  const r = await send("POST", path, body);
+  return r.ok ? "ok" : `error: ${r.error}`;
 }
 
 /**
@@ -205,6 +213,62 @@ server.tool(
   "Acknowledge or resolve a handoff directed at you (get ids from reins_handoffs). action: 'ack' = seen/on it, 'resolve' = done.",
   { project: z.string(), id: z.string(), action: z.enum(["ack", "resolve"]).default("ack") },
   async ({ project, id, action }) => text2(await post(`/api/handoffs/${id}/${action}`, { project }))
+);
+
+// ── Short-term goals ──
+function renderGoals(project: string, memberFilter?: string): string {
+  const view = buildGoalsView(project);
+  const mark = (s: string) => (s === "done" ? "✓" : s === "blocked" ? "⊘" : "•");
+  const fmt = (g: (typeof view)[number]) => {
+    const p = g.scope === "team" ? g.rollup : g.progress;
+    const items = g.items.map((i) => `    [${i.done ? "x" : " "}] ${i.text}  {item ${i.id}}`).join("\n");
+    return `${mark(g.status)} ${g.title}  (${p.done}/${p.total}) {goal ${g.id}}${items ? `\n${items}` : ""}`;
+  };
+  const team = view.filter((g) => g.scope === "team");
+  const indiv = view.filter((g) => g.scope === "individual" && (!memberFilter || g.member === memberFilter));
+  const out: string[] = [];
+  out.push("# Team goals\n" + (team.length ? team.map(fmt).join("\n") : "(none)"));
+  out.push(
+    `\n# ${memberFilter ? `${memberFilter}'s goals` : "Individual goals"}\n` +
+      (indiv.length ? indiv.map((g) => `${g.member ? `(${g.member}) ` : ""}${fmt(g)}`).join("\n") : "(none)")
+  );
+  return out.join("\n");
+}
+
+server.tool(
+  "reins_goals",
+  "Read the short-term goals for a project: common TEAM goals and individual goals, each with a checklist and progress. Pass `member` to focus on one teammate's goals. Use the {goal …} / {item …} ids with reins_goal_check.",
+  { project: z.string(), member: z.string().optional().describe("Focus on this teammate's individual goals") },
+  async ({ project, member }) => {
+    if (!getProject(project)) return text(`No project "${project}".`);
+    return text(renderGoals(project, member));
+  }
+);
+
+server.tool(
+  "reins_goal_add",
+  "Declare one of YOUR OWN short-term goals (with an optional checklist) in a project, so the team can see and track what you're about to do. Creates an individual goal for `member`. (Team/common goals are set by admins in the dashboard.)",
+  {
+    project: z.string(),
+    member: z.string().describe("Who you are (id or name) — the goal is yours"),
+    title: z.string().describe("The goal, one line"),
+    items: z.array(z.string()).optional().describe("Optional checklist of concrete steps"),
+  },
+  async ({ project, member, title, items }) => {
+    const r = await send("POST", `/api/projects/${project}/goals`, { scope: "individual", member, title, items });
+    if (!r.ok) return text(`error: ${r.error}`);
+    return text(`Added your goal "${title}"${items?.length ? ` with ${items.length} step(s)` : ""}. (goal ${r.json?.id})`);
+  }
+);
+
+server.tool(
+  "reins_goal_check",
+  "Tick (or untick) a checklist item on a goal as you complete it. Get item ids from reins_goals ({item …}).",
+  { item: z.string().describe("The item id from reins_goals"), done: z.boolean().default(true) },
+  async ({ item, done }) => {
+    const r = await send("PATCH", `/api/goal-items/${item}`, { done });
+    return text(r.ok ? `Marked item ${done ? "done" : "not done"}.` : `error: ${r.error}`);
+  }
 );
 
 // ── Cross-instance sync over 0G Storage ──

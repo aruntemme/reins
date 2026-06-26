@@ -171,6 +171,44 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_resets_code ON password_resets(code_hash);
+
+-- ── Short-term goals (a declared layer beneath projects.goal) ────
+-- Human/agent-authored objectives, distinct from the emergent 'pending' queue.
+--   scope 'team'       → a common goal for the whole project (admin-authored)
+--   scope 'individual' → a teammate's own goal (member = the capture identity)
+-- parent_id optionally hangs an individual goal under a team goal so its items
+-- roll up. Progress is derived from the checklist (goal_items); 'blocked' is an
+-- explicit flag. Authorization is by the goal's project workspace, like events.
+CREATE TABLE IF NOT EXISTS goals (
+  id          TEXT PRIMARY KEY,
+  project     TEXT NOT NULL,
+  scope       TEXT NOT NULL,                 -- team | individual
+  member      TEXT,                          -- null for team; member id for individual
+  parent_id   TEXT,                          -- optional team-goal parent
+  title       TEXT NOT NULL,
+  blocked     INTEGER NOT NULL DEFAULT 0,
+  created_by  TEXT,                          -- who authored it (member/user/agent)
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goals_project ON goals(project, scope);
+CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals(parent_id);
+
+-- Checklist items for a goal. origin 'auto' marks an item the pipeline proposed
+-- (Phase 2); 'human' is hand-authored. evidence holds the event id that drove a
+-- completion when it came from observed activity.
+CREATE TABLE IF NOT EXISTS goal_items (
+  id          TEXT PRIMARY KEY,
+  goal_id     TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  done        INTEGER NOT NULL DEFAULT 0,
+  origin      TEXT NOT NULL DEFAULT 'human',  -- human | auto
+  evidence    TEXT,                           -- event id when completion was observed
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goal_items ON goal_items(goal_id, position);
 `);
 
 // Migrate pre-auth databases: add projects.workspace_id if missing.
@@ -539,6 +577,213 @@ export function setSnapshotAnchor(rootHash: string, anchoredTx: string): boolean
   if (!row) return false;
   const r = db.prepare("UPDATE snapshots SET anchored_tx = ? WHERE id = ?").run(anchoredTx, row.id);
   return r.changes > 0;
+}
+
+// ── Short-term goals ──────────────────────────────────────────
+export type GoalScope = "team" | "individual";
+
+export interface GoalItemRow {
+  id: string;
+  goal_id: string;
+  text: string;
+  done: number;
+  origin: string;
+  evidence: string | null;
+  position: number;
+  created_at: number;
+  updated_at: number;
+}
+export interface GoalRow {
+  id: string;
+  project: string;
+  scope: GoalScope;
+  member: string | null;
+  parent_id: string | null;
+  title: string;
+  blocked: number;
+  created_by: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export function createGoal(g: {
+  project: string;
+  scope: GoalScope;
+  member?: string | null;
+  parentId?: string | null;
+  title: string;
+  createdBy?: string | null;
+}): string {
+  const id = randomUUID();
+  const t = now();
+  db.prepare(
+    `INSERT INTO goals (id, project, scope, member, parent_id, title, blocked, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+  ).run(
+    id,
+    g.project,
+    g.scope,
+    g.scope === "individual" ? g.member ?? null : null,
+    g.parentId ?? null,
+    g.title,
+    g.createdBy ?? null,
+    t,
+    t
+  );
+  return id;
+}
+
+export function getGoal(id: string): GoalRow | undefined {
+  return db.prepare("SELECT * FROM goals WHERE id = ?").get(id) as GoalRow | undefined;
+}
+
+/** The project a goal belongs to (for authorization), or null if it doesn't exist. */
+export function goalProjectId(id: string): string | null {
+  const row = db.prepare("SELECT project FROM goals WHERE id = ?").get(id) as { project: string } | undefined;
+  return row?.project ?? null;
+}
+
+/** The goal an item belongs to (for project + scope authorization). */
+export function goalItemGoal(itemId: string): GoalRow | undefined {
+  return db
+    .prepare("SELECT g.* FROM goal_items i JOIN goals g ON g.id = i.goal_id WHERE i.id = ?")
+    .get(itemId) as GoalRow | undefined;
+}
+
+export function updateGoal(id: string, patch: { title?: string; blocked?: boolean; parentId?: string | null }): boolean {
+  const sets: string[] = [];
+  const args: Record<string, unknown> = { id, updated_at: now() };
+  if (patch.title !== undefined) { sets.push("title = @title"); args.title = patch.title; }
+  if (patch.blocked !== undefined) { sets.push("blocked = @blocked"); args.blocked = patch.blocked ? 1 : 0; }
+  if (patch.parentId !== undefined) { sets.push("parent_id = @parent_id"); args.parent_id = patch.parentId; }
+  if (!sets.length) return false;
+  sets.push("updated_at = @updated_at");
+  const r = db.prepare(`UPDATE goals SET ${sets.join(", ")} WHERE id = @id`).run(args);
+  return r.changes > 0;
+}
+
+/** Delete a goal, its items, and orphan any children (parent_id → null). */
+export function deleteGoal(id: string): boolean {
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM goal_items WHERE goal_id = ?").run(id);
+    db.prepare("UPDATE goals SET parent_id = NULL, updated_at = ? WHERE parent_id = ?").run(now(), id);
+    return db.prepare("DELETE FROM goals WHERE id = ?").run(id).changes;
+  });
+  return tx() > 0;
+}
+
+export function addGoalItem(it: { goalId: string; text: string; origin?: string; evidence?: string | null }): string {
+  const id = randomUUID();
+  const t = now();
+  const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS m FROM goal_items WHERE goal_id = ?").get(it.goalId) as { m: number };
+  db.prepare(
+    `INSERT INTO goal_items (id, goal_id, text, done, origin, evidence, position, created_at, updated_at)
+     VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)`
+  ).run(id, it.goalId, it.text, it.origin ?? "human", it.evidence ?? null, max.m + 1, t, t);
+  db.prepare("UPDATE goals SET updated_at = ? WHERE id = ?").run(t, it.goalId);
+  return id;
+}
+
+export function updateGoalItem(id: string, patch: { text?: string; done?: boolean; evidence?: string | null }): boolean {
+  const sets: string[] = [];
+  const args: Record<string, unknown> = { id, updated_at: now() };
+  if (patch.text !== undefined) { sets.push("text = @text"); args.text = patch.text; }
+  if (patch.done !== undefined) { sets.push("done = @done"); args.done = patch.done ? 1 : 0; }
+  if (patch.evidence !== undefined) { sets.push("evidence = @evidence"); args.evidence = patch.evidence; }
+  if (!sets.length) return false;
+  sets.push("updated_at = @updated_at");
+  const r = db.prepare(`UPDATE goal_items SET ${sets.join(", ")} WHERE id = @id`).run(args);
+  if (r.changes > 0) {
+    const gid = db.prepare("SELECT goal_id FROM goal_items WHERE id = ?").get(id) as { goal_id: string } | undefined;
+    if (gid) db.prepare("UPDATE goals SET updated_at = ? WHERE id = ?").run(now(), gid.goal_id);
+  }
+  return r.changes > 0;
+}
+
+export function deleteGoalItem(id: string): boolean {
+  return db.prepare("DELETE FROM goal_items WHERE id = ?").run(id).changes > 0;
+}
+
+type GoalProgress = { done: number; total: number; pct: number };
+function pct(done: number, total: number): number {
+  return total === 0 ? 0 : Math.round((done / total) * 100);
+}
+function deriveStatus(blocked: boolean, p: GoalProgress): "todo" | "in_progress" | "blocked" | "done" {
+  if (blocked) return "blocked";
+  if (p.total > 0 && p.done === p.total) return "done";
+  if (p.done > 0) return "in_progress";
+  return "todo";
+}
+
+export interface GoalView {
+  id: string;
+  scope: GoalScope;
+  member: string | null;
+  parentId: string | null;
+  title: string;
+  blocked: boolean;
+  status: "todo" | "in_progress" | "blocked" | "done";
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+  items: { id: string; text: string; done: boolean; origin: string; evidence: string | null }[];
+  progress: GoalProgress; // own items only
+  rollup: GoalProgress; // own + children's items (team goals); equals progress for individual
+}
+
+/**
+ * Shaped goals for a project: each goal with its checklist, own progress, a
+ * rolled-up progress (team goals also count parented children's items), and a
+ * derived status. Sorted team-first, then by creation.
+ */
+export function buildGoalsView(project: string): GoalView[] {
+  const goals = db
+    .prepare("SELECT * FROM goals WHERE project = ? ORDER BY scope = 'team' DESC, created_at ASC")
+    .all(project) as GoalRow[];
+  const items = db
+    .prepare("SELECT * FROM goal_items WHERE goal_id IN (SELECT id FROM goals WHERE project = ?) ORDER BY position ASC")
+    .all(project) as GoalItemRow[];
+
+  const byGoal = new Map<string, GoalItemRow[]>();
+  for (const it of items) (byGoal.get(it.goal_id) ?? byGoal.set(it.goal_id, []).get(it.goal_id)!).push(it);
+
+  const ownProgress = (gid: string): GoalProgress => {
+    const its = byGoal.get(gid) ?? [];
+    const done = its.filter((i) => i.done).length;
+    return { done, total: its.length, pct: pct(done, its.length) };
+  };
+  const childrenOf = (gid: string) => goals.filter((g) => g.parent_id === gid);
+
+  return goals.map((g) => {
+    const own = ownProgress(g.id);
+    // Team goals roll up their parented children's items; individual goals don't.
+    let rollup = own;
+    if (g.scope === "team") {
+      let done = own.done, total = own.total;
+      for (const child of childrenOf(g.id)) {
+        const cp = ownProgress(child.id);
+        done += cp.done; total += cp.total;
+      }
+      rollup = { done, total, pct: pct(done, total) };
+    }
+    return {
+      id: g.id,
+      scope: g.scope,
+      member: g.member,
+      parentId: g.parent_id,
+      title: g.title,
+      blocked: !!g.blocked,
+      status: deriveStatus(!!g.blocked, g.scope === "team" ? rollup : own),
+      createdBy: g.created_by,
+      createdAt: g.created_at,
+      updatedAt: g.updated_at,
+      items: (byGoal.get(g.id) ?? []).map((i) => ({
+        id: i.id, text: i.text, done: !!i.done, origin: i.origin, evidence: i.evidence,
+      })),
+      progress: own,
+      rollup,
+    };
+  });
 }
 
 // ── Workspace cleanup ─────────────────────────────────────────

@@ -7,11 +7,14 @@ import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
 import { Invite } from "@/components/invite";
 import { ManageTokens } from "@/components/admin";
+import { GoalsPane } from "@/components/goals";
 
 export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [proj, setProj] = useState<Project | null>(null);
   const [missing, setMissing] = useState(false);
+
+  const [tick, setTick] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -22,8 +25,11 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     }
   }, [id]);
 
+  // Bump `tick` on every change too, so child panes (goals) reload off the same
+  // SSE stream without re-plumbing their own subscriptions.
+  const onChange = useCallback(() => { load(); setTick((t) => t + 1); }, [load]);
   useEffect(() => { load(); }, [load]);
-  const live = useStream(id, load);
+  const live = useStream(id, onChange);
 
   if (missing) return (
     <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">No project “{id}”. <Link href="/dashboard" className="hl">Back</Link></div></div></main></>
@@ -44,6 +50,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
           <div className="cols">
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
+              <GoalsPane projectId={proj.id} reload={tick} />
               <div>
                 <div className="label" style={{ marginBottom: 14, justifyContent: "space-between", display: "flex", alignItems: "center" }}>
                   <span><span className="sq active" /> team · live</span>
