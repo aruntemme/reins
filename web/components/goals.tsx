@@ -103,20 +103,15 @@ export function GoalsPane({ projectId, goals, onChange, embedded }: { projectId:
       </Section>
 
       <Section
-        title="My goals"
-        count={mine.length}
+        title="Individual goals"
+        count={mine.length + others.length}
         canAdd
         onAdd={(t) => api.addGoal(projectId, { scope: "individual", member: ensureMe(), title: t }).then(load)}
         empty="Add a goal or two of your own."
       >
-        {mine.map((g) => <GoalCard key={g.id} g={g} editable onChange={load} />)}
+        {mine.map((g) => <GoalCard key={g.id} g={g} editable mine onChange={load} showMember />)}
+        {others.map((g) => <GoalCard key={g.id} g={g} editable={false} onChange={load} showMember />)}
       </Section>
-
-      {others.length > 0 && (
-        <Section title="Teammates' goals" count={others.length} canAdd={false} empty="">
-          {others.map((g) => <GoalCard key={g.id} g={g} editable={false} onChange={load} showMember />)}
-        </Section>
-      )}
     </div>
   );
 }
@@ -166,12 +161,13 @@ function Section({
 }
 
 function GoalCard({
-  g, editable, onChange, showMember,
+  g, editable, onChange, showMember, mine,
 }: {
   g: Goal;
   editable: boolean;
   onChange: () => void;
   showMember?: boolean;
+  mine?: boolean;
 }) {
   const [newItem, setNewItem] = useState("");
   const p = g.scope === "team" ? g.rollup : g.progress;
@@ -187,7 +183,7 @@ function GoalCard({
         <span className={`goal-dot ${g.status}`} title={g.status} />
         <div className="goal-title">
           {g.title}
-          {showMember && g.member ? <span className="goal-owner mono"> · {g.member}</span> : null}
+          {showMember && g.member ? <span className="goal-owner mono"> · {mine ? "you" : g.member}</span> : null}
         </div>
         <span className="goal-pct mono">{p.done}/{p.total}</span>
       </div>
