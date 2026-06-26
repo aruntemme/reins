@@ -62,6 +62,8 @@ If no inference backend is configured, Reins still captures raw events but does 
   rollup for a lead (summary, goal alignment, file collisions, risks).
 - Short-term goals beneath the project's global goal: admins set common team goals, and each teammate
   keeps their own, each a checklist with progress. An agent can declare and tick its own goals over MCP.
+  Auto-tracked: the pipeline watches each teammate's activity and proposes which items look done (and
+  new ones it spotted), with a reason and a link to the event, for the owner to confirm or dismiss.
 - Handoffs and @mentions, created automatically when two agents touch the same file or one is blocked
   on another's work.
 - A live dashboard over SSE, and an MCP server so any agent can read or write the shared context.
@@ -91,8 +93,6 @@ If no inference backend is configured, Reins still captures raw events but does 
 - Richer on-chain provenance. Anchoring writes a witness transaction today; a small contract could index
   the full history of a workspace's snapshot hashes.
 - Email for invites and resets. Both work over one-time links today; sending them by email is next.
-- Auto-tracked goals. Short-term goals are set and ticked by hand today; next the pipeline watches agent
-  activity and proposes which checklist items are done (and new ones it spotted) for the owner to confirm.
 
 ## Quick start
 
