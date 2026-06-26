@@ -8,6 +8,7 @@ import {
   addTimeline,
 } from "../db.js";
 import { llmConfigured } from "../llm/client.js";
+import { redactSecrets } from "../redact.js";
 import { bus } from "../bus.js";
 import { triage } from "./triage.js";
 import { extract } from "./extract.js";
@@ -37,6 +38,10 @@ export interface IngestInput {
  * Runs async; the HTTP handler returns immediately after persisting the raw event.
  */
 export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
+  // Mask any credential in the captured text BEFORE it is stored or seen by the
+  // LLM, so a leaked key never lands in the event store or a distilled summary.
+  input.text = redactSecrets(input.text);
+
   ensureProject(input.project, undefined, input.workspaceId ?? "default");
   ensureMember(input.project, input.member, input.displayName);
   touchMember(input.project, input.member);

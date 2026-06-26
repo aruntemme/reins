@@ -11,6 +11,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
+import { redactSecrets } from "./redact.mjs";
 
 const DEFAULT_URL = "http://localhost:4319";
 const MAX_TEXT = 6000;
@@ -73,6 +74,9 @@ export async function sendEvent(o) {
   const source = o.source || "claude-code";
   let text = String(o.text ?? "").trim();
   if (!text) return { ok: false, skipped: true };
+  // Mask credentials before anything leaves the machine (the server masks again
+  // at ingest as a backstop). Redact first, then bound the length.
+  text = redactSecrets(text);
   if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
 
   const body = JSON.stringify({
