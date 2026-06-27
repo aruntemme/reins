@@ -233,6 +233,12 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
 .bighead { font-family: var(--font-display); font-weight: 500; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.02em; line-height: 1.2; color: var(--ink); }
 .doc-tl { border-top: 0; padding-top: 0; gap: 11px; }
 .doc-tl .tl { font-size: 14px; }
+.tl-more {
+  margin-top: 12px; border: 1px dashed var(--line-2); background: none; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; color: var(--ink-3);
+  padding: 7px 12px; border-radius: 8px; transition: .15s; align-self: start;
+}
+.tl-more:hover { border-color: var(--ink-3); color: var(--ink-2); }
 .plist { display: grid; gap: 10px; }
 .prow { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .prow .ptext { font-size: 14.5px; color: var(--ink); }

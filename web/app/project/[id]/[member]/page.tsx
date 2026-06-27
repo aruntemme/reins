@@ -121,23 +121,40 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
             )}
 
             <Section label="timeline" sq="active">
-              {m.timeline.length === 0 ? <div className="empty">No activity yet.</div> : (
-                <div className="timeline doc-tl">
-                  {m.timeline.map((t, k) => (
-                    <div className="tl" key={k}>
-                      <span className="tk">{t.kind}</span>
-                      <span style={{ flex: 1 }}>{t.summary}</span>
-                      <span className="mono" style={{ whiteSpace: "nowrap" }}>{timeAgo(t.at)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {m.timeline.length === 0 ? <div className="empty">No activity yet.</div> : <Timeline items={m.timeline} />}
             </Section>
 
           </div>
         </div>
       </main>
       <footer className="foot"><div className="wrap">{id} · {m.displayName}</div></footer>
+    </>
+  );
+}
+
+// Timeline shows the most recent 15 by default; the toggle (in the same spot for
+// both states) reveals the rest or folds it back.
+function Timeline({ items }: { items: MemberDetail["timeline"] }) {
+  const PAGE = 15;
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? items : items.slice(0, PAGE);
+  const overflow = items.length - PAGE;
+  return (
+    <>
+      <div className="timeline doc-tl">
+        {shown.map((t, k) => (
+          <div className="tl" key={k}>
+            <span className="tk">{t.kind}</span>
+            <span style={{ flex: 1 }}>{t.summary}</span>
+            <span className="mono" style={{ whiteSpace: "nowrap" }}>{timeAgo(t.at)}</span>
+          </div>
+        ))}
+      </div>
+      {overflow > 0 && (
+        <button className="tl-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "show less ▴" : `show ${overflow} more ▾`}
+        </button>
+      )}
     </>
   );
 }
