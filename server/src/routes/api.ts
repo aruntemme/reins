@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ingest } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, getProject, setHandoffStatus, listPending, ensureProject, projectWorkspace } from "../db.js";
+import { setGoal, setPendingStatus, getProject, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
@@ -146,6 +146,20 @@ api.post("/handoffs/:id/:action", requireViewer, (req, res) => {
   setHandoffStatus(req.params.id!, action === "ack" ? "ack" : "resolved");
   bus.emitChange({ type: "handoff.changed", project: body.data.project });
   res.json({ ok: true });
+});
+
+// Bulk-clear a member's incoming handoffs, optionally just one kind (respects an
+// active filter in the UI). Same authority as a single resolve: any viewer of the
+// project can clear what's directed at this member.
+api.post("/projects/:id/handoffs/resolve", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  const body = z
+    .object({ member: z.string().min(1), kind: z.enum(["mention", "collision", "blocker", "fyi"]).optional() })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const resolved = resolveHandoffs(req.params.id!, body.data);
+  if (resolved > 0) bus.emitChange({ type: "handoff.changed", project: req.params.id! });
+  res.json({ ok: true, resolved });
 });
 
 api.post("/projects/:id/rollup", requireViewer, async (req, res) => {

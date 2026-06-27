@@ -64,7 +64,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
           <div className="doc">
             {m.handoffs.length > 0 && (
               <Section label="for you" sq="blocked">
-                <ForYou items={m.handoffs} projectId={id} onAct={load} />
+                <ForYou items={m.handoffs} projectId={id} member={memberId} onAct={load} />
               </Section>
             )}
             <Section label="now">
@@ -151,17 +151,50 @@ function Timeline({ items }: { items: MemberDetail["timeline"] }) {
 
 const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi" };
 
-// Incoming handoffs ("for you"). Shows the top 3 by default — as each is resolved
-// it drops out (the list reloads) and the next slides into view, so you always
-// see the next 3 to clear without the whole stack eating the page. "show more"
+// Incoming handoffs ("for you"). Filter by kind, bulk-clear (with confirmation),
+// and shows the top 3 by default — as each is resolved it drops out (the list
+// reloads) and the next slides in, so the stack never eats the page. "show more"
 // reveals the rest; "show less" folds back to 3.
-function ForYou({ items, projectId, onAct }: { items: MemberDetail["handoffs"]; projectId: string; onAct: () => void }) {
+type HKind = MemberDetail["handoffs"][number]["kind"];
+function ForYou({ items, projectId, member, onAct }: { items: MemberDetail["handoffs"]; projectId: string; member: string; onAct: () => void }) {
   const TOP = 3;
   const [expanded, setExpanded] = useState(false);
-  const shown = expanded ? items : items.slice(0, TOP);
-  const overflow = items.length - TOP;
+  const [filter, setFilter] = useState<"all" | HKind>("all");
+
+  // Kinds actually present, in a stable order, for the filter chips.
+  const order: HKind[] = ["mention", "blocker", "collision", "fyi"];
+  const present = order.filter((k) => items.some((h) => h.kind === k));
+  const active = filter !== "all" && !present.includes(filter) ? "all" : filter; // filter may no longer apply after a clear
+  const filtered = active === "all" ? items : items.filter((h) => h.kind === active);
+  const shown = expanded ? filtered : filtered.slice(0, TOP);
+  const overflow = filtered.length - TOP;
+
+  const resolveAll = async () => {
+    const label = active === "all" ? "" : `${HKIND[active] || active} `;
+    if (!window.confirm(`Resolve all ${filtered.length} ${label}handoff${filtered.length > 1 ? "s" : ""}? This can't be undone.`)) return;
+    await api.resolveHandoffs(projectId, member, active === "all" ? undefined : active);
+    setExpanded(false);
+    onAct();
+  };
+
   return (
     <>
+      <div className="foryou-bar">
+        <div className="foryou-filters">
+          {(["all", ...present] as const).map((k) => (
+            <button
+              key={k}
+              className={`fchip${active === k ? " on" : ""}`}
+              onClick={() => setFilter(k)}
+            >
+              {k === "all" ? `all ${items.length}` : `${HKIND[k] || k} ${items.filter((h) => h.kind === k).length}`}
+            </button>
+          ))}
+        </div>
+        {filtered.length > 1 && (
+          <button className="tiny danger" onClick={resolveAll}>resolve all ({filtered.length})</button>
+        )}
+      </div>
       <div className="handoffs">
         {shown.map((h) => (
           <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>

@@ -207,6 +207,11 @@ export const api = {
     j(`/api/pending/${id}/done`, { method: "POST", body: JSON.stringify({ project }) }),
   handoff: (id: string, project: string, action: "ack" | "resolve") =>
     j(`/api/handoffs/${id}/${action}`, { method: "POST", body: JSON.stringify({ project }) }),
+  resolveHandoffs: (project: string, member: string, kind?: Handoff["kind"]) =>
+    j<{ ok: boolean; resolved: number }>(`/api/projects/${encodeURIComponent(project)}/handoffs/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ member, ...(kind ? { kind } : {}) }),
+    }),
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
   ogStatus: () => j<OgStatus>("/api/og/status"),

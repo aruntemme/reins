@@ -554,6 +554,15 @@ export function setHandoffStatus(id: string, status: string) {
   db.prepare("UPDATE handoffs SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), id);
 }
 
+/** Bulk-resolve open handoffs for a member, optionally limited to one kind.
+ *  Returns how many were cleared. */
+export function resolveHandoffs(project: string, opts: { member: string; kind?: string }): number {
+  const params: any[] = [now(), project, opts.member];
+  let sql = "UPDATE handoffs SET status = 'resolved', updated_at = ? WHERE project = ? AND to_member = ? AND status != 'resolved'";
+  if (opts.kind) { sql += " AND kind = ?"; params.push(opts.kind); }
+  return db.prepare(sql).run(...params).changes;
+}
+
 // ── Rollup ────────────────────────────────────────────────────
 export function getRollup(project: string): any {
   return db.prepare("SELECT * FROM rollup WHERE project = ?").get(project);
