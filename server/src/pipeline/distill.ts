@@ -1,4 +1,4 @@
-import { db, findOpenPending, listMembers, resolveMember, createHandoff } from "../db.js";
+import { db, findOpenPending, listMembers, resolveMember, memberNamedIn, createHandoff } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
 import { getProject, openGoalItemsForMatch, openGoalsForMatch, applyGoalOps, openTraitsForMatch, applyTraitOps } from "../db.js";
 import type { TraitOp } from "../db.js";
@@ -24,10 +24,14 @@ Return ONLY a JSON object:
   Never restate the headline. Usually 0-1 items.
 - "pending_add": array of strings a PEER could pick up or that must not be forgotten. No duplicates of open pending.
 - "pending_resolve": ids of existing open pending items the new facts show are now done.
-- "mentions": array of {to, note} — when this person directly flags, @mentions, or hands work to a
-  named teammate ("heads up Praveen…", "@asha can you…", "blocked on the API Ravi owns"). "to" MUST
-  be an exact name from the TEAMMATE ROSTER; drop mentions of anyone not on it. "note" = what that
-  teammate needs to do or know. Empty array if none.
+- "mentions": array of {to, note} — ONLY when this person EXPLICITLY directs a heads-up or work AT a
+  named teammate and that teammate's NAME APPEARS in the event: "@asha can you…", "heads up Praveen, …",
+  "blocked on the API Ravi owns". The event is this person talking to their OWN AI agent, so an
+  instruction to the agent is NEVER a teammate mention. NOT mentions: imperatives to their own agent
+  ("review the codebase", "note it down for me", "fix the tests", "check existing implementation"),
+  status notes ("phase 3 done"), or naming someone only in passing ("discuss with Sam later"). If no
+  teammate is named, return []. "to" MUST be an exact name from the TEAMMATE ROSTER; drop anyone not on
+  it. "note" = what that teammate needs to do or know. Empty array if none.
 - "goal_ops": PROPOSED goal updates (a human confirms them later — so be precise, not eager). Using
   ONLY the ids in OPEN GOAL ITEMS / GOALS below: "check_item" {itemId, reason} when the event clearly
   shows that item is DONE; "add_item" {goalId, text, reason} when the work is a concrete sub-task of a
@@ -113,6 +117,11 @@ ${text}`,
   for (const mention of ops.mentions ?? []) {
     const toId = resolveMember(project, mention.to);
     if (!toId || toId === member) continue; // must be a real, different teammate
+    // Grounding guard: only hand off if the teammate is actually NAMED in the event.
+    // The distiller sees one person talking to their own agent; without this, a
+    // self-directed prompt ("note it down for me") gets routed to whoever is left
+    // on the roster — which is exactly the false-handoff bug this prevents.
+    if (!memberNamedIn(project, toId, text)) continue;
     const created = createHandoff({
       project,
       toMember: toId,
