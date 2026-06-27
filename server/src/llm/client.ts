@@ -7,6 +7,7 @@ export const llm = new OpenAI({
   baseURL: env.llm.baseURL,
   apiKey: env.llm.apiKey || "not-set",
   maxRetries: 0, // we handle retry/backoff ourselves (below)
+  timeout: env.llm.timeoutMs, // fail fast on a hung gateway so the queue keeps draining
 });
 
 // 0G Private Computer Router — OpenAI-compatible, so it's just a client pointed
@@ -16,6 +17,7 @@ const router = usesRouter
       baseURL: env.og.routerBaseUrl,
       apiKey: env.og.routerApiKey || "not-set",
       maxRetries: 0,
+      timeout: env.llm.timeoutMs,
       defaultHeaders: env.og.privateMode ? { "X-0G-Provider-Trust-Mode": "private" } : undefined,
     })
   : null;
