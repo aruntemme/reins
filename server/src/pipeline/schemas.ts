@@ -64,6 +64,23 @@ export const DistillSchema = z.object({
     .describe(
       "PROPOSED, NOT applied. Only when the event CLEARLY shows it: check_item when an OPEN GOAL ITEM is now demonstrably done; add_item when the work is a concrete sub-task of a listed goal that isn't already an item; block_goal when the person is clearly blocked on that goal. Use only the exact ids provided. Empty array if unsure."
     ),
+  trait_ops: z
+    .array(
+      z.object({
+        op: z.enum(["reinforce", "revise", "add"]),
+        traitId: z.string().optional().describe("for reinforce/revise: the exact id from MY TASTE PROFILE below"),
+        type: z
+          .enum(["tooling", "quality", "communication", "concern", "workflow"])
+          .optional()
+          .describe("for add/revise: tooling=langs/libs/tools they reach for; quality=their bar for correctness/tests/polish; communication=how they phrase/plan; concern=what they repeatedly care about (security/perf/cost/UX); workflow=how they decompose & drive work"),
+        statement: z.string().max(160).optional().describe("for add/revise: the DURABLE, ABSTRACT preference, e.g. 'prefers terse single-purpose functions'. Never task-specific."),
+        evidence: z.string().max(160).describe("one short PARAPHRASE of why — NEVER the raw prompt, no code, secrets, file paths, or identifiers"),
+      })
+    )
+    .default([])
+    .describe(
+      "The person's durable WORKING GRAIN (taste), learned over time — NOT what they did this once. Be conservative: prefer 'reinforce' an existing trait over inventing one; only 'add' when a clear, repeatable preference shows that isn't already listed. Empty array for routine activity. This is a privacy-sensitive abstraction: emit preferences, never content."
+    ),
 });
 export type Distill = z.infer<typeof DistillSchema>;
 

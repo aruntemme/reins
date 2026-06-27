@@ -8,8 +8,9 @@ import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
   listGoalProposals, getGoalProposal, acceptGoalProposal, dismissGoalProposal,
+  getTrait, updateTrait, dismissTrait, TRAIT_TYPES,
 } from "../db.js";
-import type { GoalRow } from "../db.js";
+import type { GoalRow, TraitRow, TraitType } from "../db.js";
 import { bus } from "../bus.js";
 import { llmConfigured } from "../llm/client.js";
 import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
@@ -308,6 +309,44 @@ api.post("/goal-proposals/:id/dismiss", requireViewer, (req, res) => {
   if (!ctx) return;
   dismissGoalProposal(req.params.id!);
   bus.emitChange({ type: "goals.changed", project: ctx.goal.project });
+  res.json({ ok: true });
+});
+
+// ── Taste profile (member "grain") ────────────────────────────
+// The profile (an abstraction) is readable by any teammate via memberDetail.
+// Editing/removing a trait is restricted to its owner — a person curates their
+// own grain. A token session (an agent acting as that member) is allowed through,
+// mirroring goal access.
+function accessTrait(req: Request, res: Response, trait: TraitRow | undefined): TraitRow | null {
+  if (!trait) { res.status(404).json({ error: "not found" }); return null; }
+  if (!authorizeProject(req, res, trait.project)) return null;
+  if (req.userId && req.member !== trait.member) {
+    res.status(403).json({ error: "this trait belongs to another teammate" });
+    return null;
+  }
+  return trait;
+}
+
+api.patch("/traits/:id", requireViewer, (req, res) => {
+  const trait = accessTrait(req, res, getTrait(req.params.id!));
+  if (!trait) return;
+  const body = z
+    .object({
+      statement: z.string().trim().min(1).max(160).optional(),
+      type: z.enum(TRAIT_TYPES as [TraitType, ...TraitType[]]).optional(),
+    })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  updateTrait(trait.id, body.data);
+  bus.emitChange({ type: "profile.changed", project: trait.project, member: trait.member });
+  res.json({ ok: true });
+});
+
+api.delete("/traits/:id", requireViewer, (req, res) => {
+  const trait = accessTrait(req, res, getTrait(req.params.id!));
+  if (!trait) return;
+  dismissTrait(trait.id);
+  bus.emitChange({ type: "profile.changed", project: trait.project, member: trait.member });
   res.json({ ok: true });
 });
 

@@ -27,10 +27,26 @@ export interface Member {
   timeline: TimelineEntry[];
 }
 
+export type TraitType = "tooling" | "quality" | "communication" | "concern" | "workflow";
+export interface Trait {
+  id: string;
+  member: string;
+  type: TraitType;
+  statement: string;
+  confidence: number;
+  level: "low" | "medium" | "high";
+  observations: number;
+  evidence: string | null;
+  lastSeen: number;
+}
+
 export interface MemberDetail extends Member {
   projectId: string;
   pending: { id: string; text: string; status: string; claimedBy?: string; createdAt: number }[];
-  events: { kind: string; text: string; significance?: string; at: number }[];
+  // Privacy-safe signal pulse: no raw prompt text, only metadata + cadence.
+  signals: { kind: string; significance?: string; source?: string; at: number }[];
+  // Learned taste profile — durable working grain, strongest first.
+  profile: Trait[];
 }
 export interface PendingItem {
   id: string;
@@ -272,6 +288,11 @@ export const api = {
   goalProposals: (id: string) => j<{ proposals: GoalProposal[] }>(`/api/projects/${encodeURIComponent(id)}/goal-proposals`),
   acceptProposal: (pid: string) => j<{ ok: boolean }>(`/api/goal-proposals/${pid}/accept`, { method: "POST" }),
   dismissProposal: (pid: string) => j<{ ok: boolean }>(`/api/goal-proposals/${pid}/dismiss`, { method: "POST" }),
+
+  // ── Taste profile (a member curates their own learned grain) ──
+  patchTrait: (id: string, patch: { statement?: string; type?: TraitType }) =>
+    j<{ ok: boolean }>(`/api/traits/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteTrait: (id: string) => j<{ ok: boolean }>(`/api/traits/${id}`, { method: "DELETE" }),
 };
 
 export function timeAgo(ts: number): string {

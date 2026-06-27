@@ -9,6 +9,7 @@ import {
   getRollup,
   incomingHandoffs,
   listHandoffs,
+  buildProfileView,
 } from "./db.js";
 import { storageExplorerUrl } from "./llm/og-storage.js";
 
@@ -60,7 +61,16 @@ export function memberView(project: string, m: any) {
   };
 }
 
-/** Full per-member detail: long timeline, their pending, recent raw events. */
+/**
+ * Full per-member detail: long timeline, their pending, and a privacy-safe
+ * pulse of recent signals.
+ *
+ * Raw prompt text is deliberately NOT returned here. It still lives in the
+ * `events` table for the distillation pipeline to read, but surfacing the raw
+ * back-and-forth a teammate had with their agent feels exposing even with
+ * consent. The UI gets only signal metadata (kind, significance, cadence) — the
+ * distilled timeline above and the taste profile carry the actual meaning.
+ */
 export function memberDetail(project: string, member: string) {
   const m = getMember(project, member);
   if (!m) return null;
@@ -73,13 +83,14 @@ export function memberDetail(project: string, member: string) {
   const pending = listPending(project)
     .filter((p) => p.member === member && p.status !== "done")
     .map((p) => ({ id: p.id, text: p.text, status: p.status, claimedBy: p.claimed_by, createdAt: p.created_at }));
-  const events = db
+  const signals = db
     .prepare(
-      "SELECT kind, text, significance, source, created_at FROM events WHERE project = ? AND member = ? ORDER BY created_at DESC LIMIT 12"
+      "SELECT kind, significance, source, created_at FROM events WHERE project = ? AND member = ? ORDER BY created_at DESC LIMIT 12"
     )
     .all(project, member)
-    .map((e: any) => ({ kind: e.kind, text: e.text, significance: e.significance, source: e.source, at: e.created_at }));
-  return { ...base, projectId: project, timeline, pending, events };
+    .map((e: any) => ({ kind: e.kind, significance: e.significance, source: e.source, at: e.created_at }));
+  const profile = buildProfileView(project, member);
+  return { ...base, projectId: project, timeline, pending, signals, profile };
 }
 
 export function projectSnapshot(projectId: string) {

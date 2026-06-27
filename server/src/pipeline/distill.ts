@@ -1,6 +1,6 @@
 import { db, findOpenPending, listMembers, resolveMember, createHandoff } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
-import { getProject, openGoalItemsForMatch, openGoalsForMatch, applyGoalOps } from "../db.js";
+import { getProject, openGoalItemsForMatch, openGoalsForMatch, applyGoalOps, openTraitsForMatch, applyTraitOps } from "../db.js";
 import { bus } from "../bus.js";
 import { DistillSchema } from "./schemas.js";
 import { applyOps } from "./reconcile.js";
@@ -32,6 +32,11 @@ Return ONLY a JSON object:
   shows that item is DONE; "add_item" {goalId, text, reason} when the work is a concrete sub-task of a
   listed goal not already an item; "block_goal" {goalId, reason} when clearly blocked on it. Empty if
   unsure — a wrong proposal wastes the owner's time.
+- "trait_ops": the person's durable WORKING GRAIN (taste) — how they like to work, NOT this one task.
+  "reinforce" {traitId, evidence} when the event re-confirms a trait in MY TASTE PROFILE below; "revise"
+  {traitId, type, statement, evidence} to sharpen one; "add" {type, statement, evidence} for a clear new
+  preference not listed. Be conservative — prefer reinforce, add rarely, empty for routine work. CRITICAL:
+  evidence is a SHORT PARAPHRASE of the signal — never the raw prompt, code, secrets, paths, or identifiers.
 
 Be faithful — never invent. If nothing meaningful changed, return just the significance.`;
 
@@ -51,6 +56,7 @@ export async function distillCombined(input: {
     .filter((n) => n !== (current.display_name || member));
   const goalItems = openGoalItemsForMatch(project, member);
   const goals = openGoalsForMatch(project, member);
+  const traits = openTraitsForMatch(project, member);
 
   const ops = await jsonComplete({
     schema: DistillSchema,
@@ -72,6 +78,9 @@ ${goalItems.map((g) => `  - item ${g.itemId} :: "${g.text}" (${g.scope} goal: ${
 GOALS (for goal_ops add_item / block_goal — use the exact goal id):
 ${goals.map((g) => `  - goal ${g.id} :: "${g.title}" (${g.scope})`).join("\n") || "  (none)"}
 
+MY TASTE PROFILE for ${current.display_name || member} (for trait_ops reinforce/revise — use the exact trait id):
+${traits.map((t) => `  - trait ${t.id} :: [${t.type}] "${t.statement}"`).join("\n") || "  (none yet)"}
+
 NEW EVENT FROM THEIR AGENT:
 ${text}`,
   });
@@ -83,6 +92,14 @@ ${text}`,
   if (ops.goal_ops?.length) {
     const filed = applyGoalOps(project, member, ops.goal_ops, eventId);
     if (filed > 0) bus.emitChange({ type: "goals.changed", project });
+  }
+
+  // Taste profile: learn/reinforce the member's working grain from this signal.
+  // Applied directly (not a proposal) — it's an evolving, decaying, member-editable
+  // abstraction, never the raw prompt, so a stray trait is low-cost and fades.
+  if (ops.trait_ops?.length) {
+    const changed = applyTraitOps(project, member, ops.trait_ops as any);
+    if (changed > 0) bus.emitChange({ type: "profile.changed", project, member });
   }
 
   // @mentions -> directed handoffs to the named teammate.

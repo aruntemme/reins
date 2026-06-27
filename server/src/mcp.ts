@@ -4,7 +4,7 @@ import { z } from "zod";
 import "./db.js";
 import { env } from "./env.js";
 import { projectSnapshot, projectsList } from "./state.js";
-import { getProject, getRollup, buildGoalsView, countPendingProposals } from "./db.js";
+import { getProject, getRollup, buildGoalsView, countPendingProposals, buildProfileView, resolveMember } from "./db.js";
 import {
   buildContextPack,
   buildScopedContextPack,
@@ -270,6 +270,40 @@ server.tool(
   async ({ item, done }) => {
     const r = await send("PATCH", `/api/goal-items/${item}`, { done });
     return text(r.ok ? `Marked item ${done ? "done" : "not done"}.` : `error: ${r.error}`);
+  }
+);
+
+// ── Taste profile (member "grain") ──
+const TRAIT_LABEL: Record<string, string> = {
+  tooling: "Tooling",
+  quality: "Quality bar",
+  communication: "Communication",
+  concern: "Recurring concerns",
+  workflow: "Workflow",
+};
+
+server.tool(
+  "reins_profile",
+  "Read a teammate's TASTE PROFILE in a project: their durable working grain (tooling, quality bar, communication style, recurring concerns, workflow) learned passively from their activity — not their raw prompts. Pull your own to recall how you like to work, or a teammate's to match their style. Great to read at the start of a task and graft into your working preferences.",
+  { project: z.string(), member: z.string().describe("Whose profile (id or name) — yourself or a teammate") },
+  async ({ project, member }) => {
+    if (!getProject(project)) return text(`No project "${project}".`);
+    const id = resolveMember(project, member) || member;
+    const traits = buildProfileView(project, id);
+    if (!traits.length) return text(`No taste profile yet for "${member}" — it builds up as they work.`);
+    const byType = new Map<string, typeof traits>();
+    for (const t of traits) {
+      if (!byType.has(t.type)) byType.set(t.type, []);
+      byType.get(t.type)!.push(t);
+    }
+    const out: string[] = [`# Taste profile — ${member}`];
+    for (const type of Object.keys(TRAIT_LABEL)) {
+      const ts = byType.get(type);
+      if (!ts?.length) continue;
+      out.push(`\n## ${TRAIT_LABEL[type]}`);
+      for (const t of ts) out.push(`- ${t.statement}  (${t.level}, ${t.observations}×)`);
+    }
+    return text(out.join("\n"));
   }
 );
 

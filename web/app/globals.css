@@ -231,6 +231,22 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
 .tk2 { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--blue); }
 .tk2.noise { color: var(--ink-3); }
 .rawtext { color: var(--ink-2); line-height: 1.45; }
+.priv-note { margin-top: 10px; font-size: 11px; color: var(--ink-3); }
+
+/* Taste profile ("grain") */
+.grain { display: grid; gap: 16px; }
+.grain-grp { display: grid; gap: 7px; }
+.grain-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.grain-list { display: grid; gap: 6px; }
+.grain-trait { display: flex; align-items: baseline; gap: 9px; font-size: 14px; color: var(--ink); line-height: 1.4; }
+.grain-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; background: var(--blue); opacity: .35; }
+.grain-trait.lvl-medium .grain-dot { opacity: .6; }
+.grain-trait.lvl-high .grain-dot { opacity: 1; }
+.grain-text { flex: 1; }
+.grain-trait.lvl-low .grain-text { color: var(--ink-2); }
+.grain-x { flex: none; border: none; background: none; color: var(--ink-3); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; opacity: 0; transition: opacity .12s; }
+.grain-trait:hover .grain-x { opacity: 1; }
+.grain-x:hover { color: var(--blocked, #c0392b); }
 
 .empty { color: var(--ink-3); font-size: 14px; padding: 8px 0; }
 .banner { display:flex; gap:10px; align-items:center; background:#fbf1e3; border:1px solid #f0dcc0; color:#8a5a22; border-radius:12px; padding:11px 15px; font-size:13.5px; }
