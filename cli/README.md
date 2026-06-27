@@ -2,8 +2,14 @@
 
 One-command installer for the **Reins** capture hook (Claude Code).
 
-[Reins](https://github.com/) turns your team's AI-agent activity into one live shared context
-board. This installs the hook that streams your prompts and agent turns to a Reins server.
+[Reins](https://reinshq.vercel.app) turns your team's AI-agent activity into one live shared
+context board. This installs the hook that streams your prompts and agent turns to a Reins server.
+
+- **Website:** https://reinshq.vercel.app
+- **Source (GitHub):** https://github.com/aruntemme/reins
+- **Issues:** https://github.com/aruntemme/reins/issues
+
+Reins is open source — run your own instance with your own AI provider.
 
 ## Usage
 
@@ -30,4 +36,4 @@ npx reins-hook status
 npx reins-hook uninstall [--global]
 ```
 
-Dependency-free — only Node built-ins. MIT.
+Dependency-free, only Node built-ins. MIT.
