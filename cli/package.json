@@ -1,6 +1,6 @@
 {
   "name": "reins-hook",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "One-command installer for the Reins capture hook (Claude Code) — stream your AI-agent activity to a live shared team-context board.",
   "type": "module",
   "homepage": "https://reinshq.vercel.app",
@@ -22,6 +22,7 @@
   "files": [
     "bin.mjs",
     "reins-hook.mjs",
+    "reins-mcp.mjs",
     "lib",
     "adapters",
     "README.md",

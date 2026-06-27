@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readd
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
+import { runMcp } from "./reins-mcp.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_SRC = join(HERE, "reins-hook.mjs");
@@ -299,6 +300,7 @@ function help() {
     npx reins-hook install [options]
     npx reins-hook status [--url <url>]
     npx reins-hook uninstall [--global]
+    npx reins-hook mcp --url <url> --token <access-token> [--ingest-token <tok>]
 
   ${c.b("install options")}
     --agent <name>     which agent harness (default claude-code)
@@ -318,6 +320,13 @@ function help() {
     npx reins-hook install --global --me asha --project web-app
     npx reins-hook install --agent codex --me asha
     npx reins-hook install --agent generic --source my-bot --me asha
+
+  ${c.b("mcp")} — give your agent read/write access to the shared board over MCP
+    Add it to Claude Code (run once):
+      claude mcp add reins -- npx reins-hook mcp --url https://your-reins --token rk_access_…
+    Add --ingest-token rk_ingest_… to also let the agent post notes.
+    Tools: reins_context, reins_member, reins_pending, reins_handoffs,
+           reins_goals, reins_profile, reins_claim/resolve, reins_goal_add/check, reins_note
 `);
 }
 
@@ -327,5 +336,10 @@ const cmd = args._[0] || "help";
   if (cmd === "install") await install(args);
   else if (cmd === "uninstall") uninstall(args);
   else if (cmd === "status") await status(args);
+  else if (cmd === "mcp") {
+    // Long-lived stdio server, launched by the agent. stdout is reserved for the
+    // protocol, so it must stay silent here.
+    await runMcp({ url: args.url, token: args.token || args.key, ingestToken: args["ingest-token"] || args.ingest });
+  }
   else help();
 })();
