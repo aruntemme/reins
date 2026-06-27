@@ -239,6 +239,21 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
   padding: 7px 12px; border-radius: 8px; transition: .15s; align-self: start;
 }
 .tl-more:hover { border-color: var(--ink-3); color: var(--ink-2); }
+/* Open-source banner (landing) */
+.oss { display: flex; align-items: center; justify-content: space-between; gap: 28px; flex-wrap: wrap; }
+.oss-title { font-family: var(--font-display); font-size: 26px; letter-spacing: -.02em; margin: 8px 0 8px; }
+.oss-text { max-width: 560px; }
+.oss-cta { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Legal / content pages */
+.legal { max-width: 680px; margin: 48px auto 64px; }
+.legal h1 { font-family: var(--font-display); font-size: 34px; letter-spacing: -.02em; margin: 0 0 6px; }
+.legal .legal-sub { color: var(--ink-3); font-family: var(--font-mono); font-size: 12px; margin: 0 0 28px; }
+.legal h2 { font-family: var(--font-display); font-size: 19px; letter-spacing: -.01em; margin: 30px 0 8px; }
+.legal p, .legal li { color: var(--ink-2); font-size: 15.5px; line-height: 1.65; }
+.legal ul { padding-left: 20px; display: grid; gap: 6px; margin: 8px 0; }
+.legal .legal-back { margin-top: 36px; }
+
 .foryou-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .foryou-filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .foryou-actions { display: flex; align-items: center; gap: 8px; }

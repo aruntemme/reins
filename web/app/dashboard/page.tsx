@@ -83,7 +83,7 @@ export default function Dashboard() {
         )}
       </main>
       <footer className="foot">
-        <div className="wrap">reins · hook / distill / live shared context / MCP retrieval</div>
+        <div className="wrap">reins · <Link href="/privacy">privacy</Link></div>
       </footer>
     </>
   );

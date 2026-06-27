@@ -117,7 +117,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
           </div>
         </div>
       </main>
-      <footer className="foot"><div className="wrap">{id} · {m.displayName}</div></footer>
+      <footer className="foot"><div className="wrap">{id} · {m.displayName} · <Link href="/privacy">privacy</Link></div></footer>
     </>
   );
 }
