@@ -24,42 +24,49 @@ export default function PrivacyPage() {
           <h2>What Reins records</h2>
           <p>
             When you connect Reins to your AI coding assistant, it receives the activity your assistant
-            already produces as you work — the requests you make and the steps it takes — and uses it to
+            already produces as you work, the requests you make and the steps it takes, and uses it to
             keep your team&rsquo;s shared status current.
           </p>
 
           <h2>What your teammates see</h2>
           <p>
             Your teammates never see your raw conversations with your AI assistant. Reins turns that
-            activity into short, high-level summaries — what you&rsquo;re working on, recent milestones,
+            activity into short, high-level summaries: what you&rsquo;re working on, recent milestones,
             and a profile of how you like to work. The underlying raw text is used only to produce those
             summaries and is never shown in the interface.
           </p>
 
           <h2>Secrets are masked</h2>
           <p>
-            Before anything is stored, Reins scans for credentials — API keys, tokens, private keys — and
-            masks them, so a secret that appears in your activity never lands in the stored record or any
-            summary.
+            Before anything is stored, Reins scans for credentials such as API keys, tokens, and private
+            keys, and masks them, so a secret that appears in your activity never lands in the stored
+            record or any summary.
           </p>
 
           <h2>Where your data lives</h2>
           <p>
             Your data is stored on the Reins instance your team runs, inside your team&rsquo;s workspace.
-            Workspaces are isolated — one team cannot see another team&rsquo;s data. If your team has
+            Workspaces are isolated, so one team cannot see another team&rsquo;s data. If your team has
             enabled decentralized backup, only the distilled summaries are included; raw text never is.
           </p>
 
           <h2>Your controls</h2>
           <ul>
-            <li>Your working-style profile is yours — edit or remove any item in it at any time.</li>
+            <li>Your working-style profile is yours. Edit or remove any item in it at any time.</li>
             <li>You can clear handoffs and notifications directed at you, individually or in bulk.</li>
             <li>Removing your access removes your identity from the workspace.</li>
           </ul>
 
+          <h2>Open source, your infrastructure</h2>
+          <p>
+            Reins is completely open source. Feel free to run your own instance with your specific AI
+            provider, so your team&rsquo;s data and the model it&rsquo;s sent to stay entirely under your
+            control.
+          </p>
+
           <h2>What Reins does not do</h2>
           <p>
-            Reins does not sell your data or use it for advertising. It exists for one purpose: keeping
+            Reins does not sell your data or use it for advertising. It exists for one purpose, keeping
             your team in sync.
           </p>
 

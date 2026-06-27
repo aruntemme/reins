@@ -83,6 +83,26 @@ export default function Landing() {
             </div>
           </div>
         </section>
+
+        {/* ── Open source ────────────────────────────────── */}
+        <section id="open" className="lsection">
+          <div className="wrap">
+            <div className="card pad oss">
+              <div className="oss-text">
+                <div className="label"><span className="sq active" /> open source</div>
+                <h2 className="oss-title">Run your own Reins.</h2>
+                <p className="sub">
+                  Reins is completely open source. Run your own instance with your specific AI provider,
+                  so your team&rsquo;s data and the model it talks to stay entirely under your control.
+                </p>
+              </div>
+              <div className="oss-cta">
+                <a href={GITHUB} target="_blank" rel="noreferrer" className="btn solid">View on GitHub</a>
+                <a href="https://www.npmjs.com/package/reins-hook" target="_blank" rel="noreferrer" className="btn ghost">npm</a>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* ── Footer ──────────────────────────────────────── */}
