@@ -64,23 +64,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
           <div className="doc">
             {m.handoffs.length > 0 && (
               <Section label="for you" sq="blocked">
-                <div className="handoffs">
-                  {m.handoffs.map((h) => (
-                    <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
-                      <div className="hmeta">
-                        <span className="hkind">{h.kind}{h.from ? ` · ${h.from}` : ""}</span>
-                        {h.status === "ack" && <span className="mono">ack’d</span>}
-                      </div>
-                      <div className="htext">{h.text}</div>
-                      <div className="hacts">
-                        {h.status === "open" && (
-                          <button className="tiny" onClick={() => api.handoff(h.id, id, "ack").then(load)}>ack</button>
-                        )}
-                        <button className="tiny" onClick={() => api.handoff(h.id, id, "resolve").then(load)}>resolve</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ForYou items={m.handoffs} projectId={id} onAct={load} />
               </Section>
             )}
             <Section label="now">
@@ -166,6 +150,43 @@ function Timeline({ items }: { items: MemberDetail["timeline"] }) {
 }
 
 const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi" };
+
+// Incoming handoffs ("for you"). Shows the top 3 by default — as each is resolved
+// it drops out (the list reloads) and the next slides into view, so you always
+// see the next 3 to clear without the whole stack eating the page. "show more"
+// reveals the rest; "show less" folds back to 3.
+function ForYou({ items, projectId, onAct }: { items: MemberDetail["handoffs"]; projectId: string; onAct: () => void }) {
+  const TOP = 3;
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? items : items.slice(0, TOP);
+  const overflow = items.length - TOP;
+  return (
+    <>
+      <div className="handoffs">
+        {shown.map((h) => (
+          <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
+            <div className="hmeta">
+              <span className="hkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
+              {h.status === "ack" && <span className="mono">ack’d</span>}
+            </div>
+            <div className="htext">{h.text}</div>
+            <div className="hacts">
+              {h.status === "open" && (
+                <button className="tiny" onClick={() => api.handoff(h.id, projectId, "ack").then(onAct)}>ack</button>
+              )}
+              <button className="tiny" onClick={() => api.handoff(h.id, projectId, "resolve").then(onAct)}>resolve</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {overflow > 0 && (
+        <button className="tl-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "show less ▴" : `show ${overflow} more ▾`}
+        </button>
+      )}
+    </>
+  );
+}
 
 // Resolved handoffs — read-only history, collapsed by default behind a count.
 function HandoffHistory({ items }: { items: MemberDetail["resolvedHandoffs"] }) {
