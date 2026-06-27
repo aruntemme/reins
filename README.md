@@ -129,7 +129,16 @@ your dashboard with `--token`. See [`hooks/README.md`](hooks/README.md) for flag
 
 ## Pull context from an agent (MCP)
 
-Register the MCP server so a teammate's agent can read the shared context:
+There are two MCP servers. For a teammate on any machine, point the bundled HTTP MCP at your server
+with an access token (no clone, no database access):
+
+```bash
+claude mcp add reins -- npx reins-hook mcp --url http://localhost:4319 --token <access-token>
+# add --ingest-token <ingest-token> to also let the agent post notes
+```
+
+For an agent running on the server box itself, register the local MCP, which reads the SQLite file
+directly:
 
 ```json
 { "mcpServers": { "reins": { "command": "npx", "args": ["tsx", "server/src/mcp.ts"], "cwd": "/ABS/PATH/reins" } } }
@@ -139,8 +148,11 @@ Tools:
 
 - `reins_context` reads a project's current status, fetched and verified from 0G Storage.
 - `reins_pull_context` rebuilds a snapshot from a 0G Storage root hash alone, with no database.
-- `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs` for narrower reads.
-- `reins_note`, `reins_claim`, `reins_resolve`, `reins_handoff_ack` let an agent write back.
+- `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs`, `reins_goals`, `reins_profile` for narrower reads.
+- `reins_note`, `reins_claim`, `reins_resolve`, `reins_handoff_ack`, `reins_goal_add`, `reins_goal_check` let an agent write back.
+
+Running your own instance? [`SELFHOST.md`](SELFHOST.md) is the full guide: backend, database,
+dashboard, hook, and both MCP servers, with a complete environment-variable reference.
 
 ## Layout
 
@@ -151,6 +163,8 @@ Tools:
 | `cli/` | `reins-hook`, the `npx` installer that bundles the capture hook |
 | `hooks/` | Hook docs (the hook itself ships inside `cli/`) |
 | `deploy/` | [`DEPLOY.md`](deploy/DEPLOY.md) and the deploy scripts |
+
+Self-hosting your own instance, end to end? See [`SELFHOST.md`](SELFHOST.md).
 
 ## Auth and deploy
 
