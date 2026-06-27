@@ -1,5 +1,9 @@
 # Deploying Reins
 
+> This is the maintainer's concrete recipe: **backend on AWS Lightsail, dashboard on Vercel**. For a
+> provider-agnostic, all-the-pieces self-hosting guide (backend, database, dashboard, hook, both MCP
+> servers, full env reference), see [`../SELFHOST.md`](../SELFHOST.md).
+
 **Backend + DB → AWS Lightsail** (one small VM, Docker, persistent disk) ·
 **Dashboard → Vercel** (Next.js).
 
