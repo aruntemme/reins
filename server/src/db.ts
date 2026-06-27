@@ -417,6 +417,29 @@ export function resolveMember(project: string, name: string): string | null {
   return null;
 }
 
+/** True only if `member` is actually NAMED in `text` (id, display name, first name, or @handle),
+ *  matched on a word boundary. This grounds @mention handoffs: the distiller works off one
+ *  person talking to their OWN agent, so an imperative ("review the codebase", "note it down for
+ *  me") with no teammate named must NOT become a handoff to whoever is left on the roster. */
+export function memberNamedIn(project: string, member: string, text: string): boolean {
+  const m = listMembers(project).find((x) => x.member === member);
+  if (!m || !text) return false;
+  const tokens = new Set<string>();
+  const add = (s?: string | null) => {
+    const t = (s || "").trim().toLowerCase();
+    // 2+ chars only — single letters word-match far too eagerly.
+    if (t.length >= 2) tokens.add(t);
+  };
+  add(m.member);
+  add(m.display_name);
+  if (m.display_name) add(m.display_name.split(/\s+/)[0]);
+  for (const tok of tokens) {
+    const re = new RegExp(`(^|[^a-z0-9])@?${tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
+    if (re.test(text)) return true;
+  }
+  return false;
+}
+
 // ── Events ────────────────────────────────────────────────────
 export function insertEvent(e: {
   project: string;

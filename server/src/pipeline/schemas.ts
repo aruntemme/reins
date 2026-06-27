@@ -49,7 +49,7 @@ export const DistillSchema = z.object({
   mentions: z
     .array(z.object({ to: z.string(), note: z.string() }))
     .default([])
-    .describe("Teammates this person directly flagged/@mentioned/handed work to, with what they need. 'to' MUST be an exact name from the provided ROSTER."),
+    .describe("ONLY teammates this person EXPLICITLY addressed by name in the event (heads-up / handed work / blocked on theirs). NOT instructions to their own agent, status notes, or names dropped in passing. The teammate's name must appear in the event. 'to' MUST be an exact name from the provided ROSTER. [] if none."),
   goal_ops: z
     .array(
       z.object({
