@@ -124,6 +124,12 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
               {m.timeline.length === 0 ? <div className="empty">No activity yet.</div> : <Timeline items={m.timeline} />}
             </Section>
 
+            {m.resolvedHandoffs.length > 0 && (
+              <Section label="handoff history">
+                <HandoffHistory items={m.resolvedHandoffs} />
+              </Section>
+            )}
+
           </div>
         </div>
       </main>
@@ -155,6 +161,34 @@ function Timeline({ items }: { items: MemberDetail["timeline"] }) {
           {expanded ? "show less ▴" : `show ${overflow} more ▾`}
         </button>
       )}
+    </>
+  );
+}
+
+const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi" };
+
+// Resolved handoffs — read-only history, collapsed by default behind a count.
+function HandoffHistory({ items }: { items: MemberDetail["resolvedHandoffs"] }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button className="tl-more" onClick={() => setOpen(true)}>
+        show {items.length} resolved ▾
+      </button>
+    );
+  }
+  return (
+    <>
+      <div className="hist">
+        {items.map((h) => (
+          <div className="histrow" key={h.id}>
+            <span className="histkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
+            <span className="histtext">{h.text}</span>
+            <span className="mono" style={{ whiteSpace: "nowrap" }}>{timeAgo(h.createdAt)}</span>
+          </div>
+        ))}
+      </div>
+      <button className="tl-more" onClick={() => setOpen(false)}>show less ▴</button>
     </>
   );
 }

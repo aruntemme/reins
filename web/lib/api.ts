@@ -46,6 +46,8 @@ export interface MemberDetail extends Member {
   // Learned taste profile — durable working grain, strongest first. Raw prompts
   // are never sent to the client.
   profile: Trait[];
+  // Cleared handoffs directed at this member — the resolved history.
+  resolvedHandoffs: Handoff[];
 }
 export interface PendingItem {
   id: string;

@@ -245,6 +245,11 @@ function Handoffs({ items, projectId, onAct }: { items: Project["members"][numbe
 
   return (
     <div className="handoffs">
+      {items.length > COLLAPSE_AT && (
+        <button className="handoff-collapse hide" onClick={(e) => { stop(e); setOpen(false); }}>
+          <span className="hc-x">▴</span> <span className="mono">{items.length} for you · collapse</span>
+        </button>
+      )}
       {items.map((h) => (
         <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
           <div className="hmeta">
@@ -260,11 +265,6 @@ function Handoffs({ items, projectId, onAct }: { items: Project["members"][numbe
           </div>
         </div>
       ))}
-      {items.length > COLLAPSE_AT && (
-        <button className="handoff-collapse hide" onClick={(e) => { stop(e); setOpen(false); }}>
-          <span className="hc-x">▴</span> <span className="mono">collapse</span>
-        </button>
-      )}
     </div>
   );
 }

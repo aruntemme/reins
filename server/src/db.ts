@@ -541,6 +541,15 @@ export function incomingHandoffs(project: string, member: string): any[] {
     .all(project, member);
 }
 
+/** Resolved handoffs directed at a member — the cleared history, most recent first. */
+export function resolvedHandoffs(project: string, member: string, limit = 30): any[] {
+  return db
+    .prepare(
+      "SELECT * FROM handoffs WHERE project = ? AND to_member = ? AND status = 'resolved' ORDER BY updated_at DESC LIMIT ?"
+    )
+    .all(project, member, limit);
+}
+
 export function setHandoffStatus(id: string, status: string) {
   db.prepare("UPDATE handoffs SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), id);
 }

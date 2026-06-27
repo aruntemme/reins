@@ -7,6 +7,7 @@ import {
   listPending,
   getRollup,
   incomingHandoffs,
+  resolvedHandoffs,
   listHandoffs,
   buildProfileView,
 } from "./db.js";
@@ -83,7 +84,8 @@ export function memberDetail(project: string, member: string) {
     .filter((p) => p.member === member && p.status !== "done")
     .map((p) => ({ id: p.id, text: p.text, status: p.status, claimedBy: p.claimed_by, createdAt: p.created_at }));
   const profile = buildProfileView(project, member);
-  return { ...base, projectId: project, timeline, pending, profile };
+  const resolvedHandoffsList = resolvedHandoffs(project, member).map(handoffView);
+  return { ...base, projectId: project, timeline, pending, profile, resolvedHandoffs: resolvedHandoffsList };
 }
 
 export function projectSnapshot(projectId: string) {

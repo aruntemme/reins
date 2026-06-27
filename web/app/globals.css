@@ -239,6 +239,10 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
   padding: 7px 12px; border-radius: 8px; transition: .15s; align-self: start;
 }
 .tl-more:hover { border-color: var(--ink-3); color: var(--ink-2); }
+.hist { display: grid; gap: 11px; margin-bottom: 12px; }
+.histrow { display: flex; gap: 11px; align-items: baseline; font-size: 14px; color: var(--ink-2); opacity: .8; }
+.histrow .histkind { font-family: var(--font-mono); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); min-width: 84px; }
+.histrow .histtext { flex: 1; text-decoration: line-through; text-decoration-color: var(--line-2); }
 .plist { display: grid; gap: 10px; }
 .prow { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .prow .ptext { font-size: 14.5px; color: var(--ink); }
