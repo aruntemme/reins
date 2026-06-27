@@ -104,7 +104,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
         </div>
       </main>
       <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} proposals={myProposals} viewer={viewer} onChange={onChange} />
-      <footer className="foot"><div className="wrap">project · {proj.id}</div></footer>
+      <footer className="foot"><div className="wrap">project · {proj.id} · <Link href="/privacy">privacy</Link></div></footer>
     </>
   );
 }

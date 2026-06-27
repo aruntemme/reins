@@ -96,8 +96,8 @@ export default function Landing() {
             <a href={GITHUB} target="_blank" rel="noreferrer">github</a>
             <a href="https://www.npmjs.com/package/reins-hook" target="_blank" rel="noreferrer">npm</a>
             <Link href="/dashboard">dashboard</Link>
+            <Link href="/privacy">privacy</Link>
           </div>
-          <div className="mono muted">hook / distill / live shared context / MCP</div>
         </div>
       </footer>
     </>
