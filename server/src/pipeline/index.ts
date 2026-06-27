@@ -15,6 +15,7 @@ import { extract } from "./extract.js";
 import { reconcile } from "./reconcile.js";
 import { distillCombined } from "./distill.js";
 import { scheduleRollup } from "./rollup.js";
+import { enqueueDistill } from "./queue.js";
 
 // "combined" = 1 LLM call/event (default — robust on rate-limited endpoints).
 // "multi"    = staged triage -> extract -> reconcile (3 calls/event).
@@ -58,23 +59,30 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
 
   bus.emitChange({ type: "ingest", project: input.project, member: input.member });
 
-  // Fire-and-forget distillation. Failures are logged, never block ingestion.
+  // Distillation runs through a serial queue (not fire-and-forget) so a burst of
+  // events can't launch concurrent LLM calls into a rate-limited gateway. The
+  // event is already persisted; the HTTP handler still returns immediately. The
+  // inflight count now tracks queued + running work per project, so the rollup
+  // still fires only once the board has SETTLED.
   inflight.set(input.project, (inflight.get(input.project) ?? 0) + 1);
-  void distill(eventId, input)
-    .catch((e) => console.error("[pipeline]", input.project, input.member, e?.message ?? e))
-    .finally(() => {
+  enqueueDistill(async () => {
+    try {
+      await distill(eventId, input);
+    } catch (e: any) {
+      console.error("[pipeline]", input.project, input.member, e?.message ?? e);
+    } finally {
       const n = (inflight.get(input.project) ?? 1) - 1;
       inflight.set(input.project, n);
-      // Only synthesize the rollup once the board has SETTLED (queue idle for this
-      // project). On throttled endpoints distills land far apart, so a fixed timer
-      // would fire mid-drain on a half-distilled board.
+      // On throttled endpoints distills land far apart, so a fixed timer would
+      // fire mid-drain on a half-distilled board; gate on the project's queue.
       if (n <= 0) scheduleRollup(input.project, 1500);
-    });
+    }
+  });
 
   return { eventId };
 }
 
-// In-flight distillation count per project (gates the rollup).
+// In-flight distillation count per project (queued + running; gates the rollup).
 const inflight = new Map<string, number>();
 
 async function distill(eventId: string, input: IngestInput): Promise<void> {
