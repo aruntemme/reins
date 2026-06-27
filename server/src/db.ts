@@ -231,6 +231,27 @@ CREATE TABLE IF NOT EXISTS goal_proposals (
   updated_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_goal_proposals ON goal_proposals(project, status);
+
+-- Taste profile: a per-member set of durable working preferences ("grain")
+-- LEARNED from their activity, not their raw prompts. The distiller emits abstract
+-- trait statements (e.g. "prefers terse, single-purpose functions") with a
+-- paraphrased evidence note — never the raw prompt — so this layer is private by
+-- construction. confidence grows as a trait is reinforced and DECAYS with time on
+-- read (see buildProfileView), so a stale preference fades instead of sticking.
+CREATE TABLE IF NOT EXISTS member_traits (
+  id           TEXT PRIMARY KEY,
+  project      TEXT NOT NULL,
+  member       TEXT NOT NULL,
+  type         TEXT NOT NULL,                  -- tooling | quality | communication | concern | workflow
+  statement    TEXT NOT NULL,                  -- the durable preference, abstract
+  confidence   REAL NOT NULL DEFAULT 0.35,     -- 0..1, asymptotic toward 1 as reinforced
+  observations INTEGER NOT NULL DEFAULT 1,     -- how many signals have reinforced it
+  evidence     TEXT,                           -- last paraphrased rationale (never raw prompt)
+  status       TEXT NOT NULL DEFAULT 'active', -- active | dismissed (member-removed)
+  first_seen   INTEGER NOT NULL,
+  last_seen    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_member_traits ON member_traits(project, member, status);
 `);
 
 // Migrate pre-auth databases: add projects.workspace_id if missing.
@@ -520,8 +541,26 @@ export function incomingHandoffs(project: string, member: string): any[] {
     .all(project, member);
 }
 
+/** Resolved handoffs directed at a member — the cleared history, most recent first. */
+export function resolvedHandoffs(project: string, member: string, limit = 30): any[] {
+  return db
+    .prepare(
+      "SELECT * FROM handoffs WHERE project = ? AND to_member = ? AND status = 'resolved' ORDER BY updated_at DESC LIMIT ?"
+    )
+    .all(project, member, limit);
+}
+
 export function setHandoffStatus(id: string, status: string) {
   db.prepare("UPDATE handoffs SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), id);
+}
+
+/** Bulk-resolve open handoffs for a member, optionally limited to one kind.
+ *  Returns how many were cleared. */
+export function resolveHandoffs(project: string, opts: { member: string; kind?: string }): number {
+  const params: any[] = [now(), project, opts.member];
+  let sql = "UPDATE handoffs SET status = 'resolved', updated_at = ? WHERE project = ? AND to_member = ? AND status != 'resolved'";
+  if (opts.kind) { sql += " AND kind = ?"; params.push(opts.kind); }
+  return db.prepare(sql).run(...params).changes;
 }
 
 // ── Rollup ────────────────────────────────────────────────────
@@ -990,6 +1029,214 @@ export function dismissGoalProposal(id: string): GoalRow | null {
 export function countPendingProposals(project: string): number {
   const r = db.prepare("SELECT COUNT(*) AS n FROM goal_proposals WHERE project = ? AND status = 'pending'").get(project) as { n: number };
   return r.n;
+}
+
+// ── Taste profile (member "grain", learned from activity) ──────
+export type TraitType = "tooling" | "quality" | "communication" | "concern" | "workflow";
+export const TRAIT_TYPES: TraitType[] = ["tooling", "quality", "communication", "concern", "workflow"];
+
+export interface TraitRow {
+  id: string;
+  project: string;
+  member: string;
+  type: string;
+  statement: string;
+  confidence: number;
+  observations: number;
+  evidence: string | null;
+  status: string;
+  first_seen: number;
+  last_seen: number;
+}
+
+// A trait proposed by the distiller. reinforce/revise reference an existing id
+// (fed to the model in the prompt); add introduces a new one.
+export type TraitOp =
+  | { op: "reinforce"; traitId: string; evidence: string }
+  | { op: "revise"; traitId: string; type?: TraitType; statement: string; evidence: string }
+  | { op: "add"; type: TraitType; statement: string; evidence: string };
+
+// Confidence dynamics. New traits start cautious; each reinforcement closes a
+// fraction of the gap to 1 (asymptotic, never certain). Confidence then decays on
+// READ with a half-life, so a preference not seen in weeks fades on its own.
+const TRAIT_SEED = 0.35;
+const TRAIT_GAIN = 0.3; // fraction of (1 - confidence) gained per reinforcement
+const TRAIT_HALFLIFE_MS = 21 * 24 * 60 * 60 * 1000; // 3 weeks
+const TRAIT_FLOOR = 0.12; // below this (after decay) a trait is hidden
+
+function reinforceConfidence(c: number): number {
+  return Math.min(0.98, c + (1 - c) * TRAIT_GAIN);
+}
+
+/** Confidence after time-decay since last reinforcement. Pure — used on read. */
+export function decayedConfidence(c: number, lastSeen: number, at = now()): number {
+  const dt = Math.max(0, at - lastSeen);
+  return c * Math.pow(0.5, dt / TRAIT_HALFLIFE_MS);
+}
+
+export function getTrait(id: string): TraitRow | undefined {
+  return db.prepare("SELECT * FROM member_traits WHERE id = ?").get(id) as TraitRow | undefined;
+}
+
+/** Active traits for a member, by raw confidence — fed into the distiller prompt. */
+export function openTraitsForMatch(project: string, member: string): TraitRow[] {
+  return db
+    .prepare(
+      "SELECT * FROM member_traits WHERE project = ? AND member = ? AND status = 'active' ORDER BY confidence DESC, last_seen DESC LIMIT 40"
+    )
+    .all(project, member) as TraitRow[];
+}
+
+function findActiveTraitByStatement(project: string, member: string, type: string, statement: string): TraitRow | undefined {
+  return db
+    .prepare(
+      "SELECT * FROM member_traits WHERE project = ? AND member = ? AND status = 'active' AND type = ? AND lower(statement) = lower(?)"
+    )
+    .get(project, member, type, statement.trim()) as TraitRow | undefined;
+}
+
+function reinforceTrait(row: TraitRow, patch: { type?: string; statement?: string; evidence?: string | null }): void {
+  db.prepare(
+    "UPDATE member_traits SET type = ?, statement = ?, confidence = ?, observations = observations + 1, evidence = ?, last_seen = ? WHERE id = ?"
+  ).run(
+    patch.type ?? row.type,
+    (patch.statement ?? row.statement).trim(),
+    reinforceConfidence(row.confidence),
+    patch.evidence ?? row.evidence,
+    now(),
+    row.id
+  );
+}
+
+function insertTrait(t: { project: string; member: string; type: string; statement: string; evidence?: string | null }): string {
+  const id = randomUUID();
+  const t0 = now();
+  db.prepare(
+    "INSERT INTO member_traits (id, project, member, type, statement, confidence, observations, evidence, status, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'active', ?, ?)"
+  ).run(id, t.project, t.member, t.type, t.statement.trim(), TRAIT_SEED, t.evidence ?? null, t0, t0);
+  return id;
+}
+
+const cap = (s: string | null | undefined, n: number): string | null =>
+  s == null ? null : String(s).trim().slice(0, n) || null;
+
+// Models improvise trait categories ("code_style", "testing_preference",
+// "process"…). Coerce any value into one of the five canonical buckets so a stray
+// label never lands in "workflow" by accident — keyword match first, default last.
+function normalizeTraitType(t: any): TraitType {
+  const s = String(t ?? "").trim().toLowerCase().replace(/[_\-]+/g, " ");
+  if ((TRAIT_TYPES as string[]).includes(s)) return s as TraitType;
+  if (/(test|mock|stub|quality|polish|style|correct|robust|clean|craft)/.test(s)) return "quality";
+  if (/(tool|lang|framework|library|stack|tech|sdk|runtime|db|database)/.test(s)) return "tooling";
+  if (/(secur|perf|cost|risk|privacy|scal|concern|prior|value)/.test(s)) return "concern";
+  if (/(comm|tone|writ|phras|verbos|terse|direct|explain)/.test(s)) return "communication";
+  return "workflow";
+}
+
+// Models emit trait ops two ways: flat ({op:"add", type, statement,...}) or with
+// the op as a WRAPPING KEY ({add:{type, statement,...}}). Normalize to flat so
+// the rest of applyTraitOps is shape-agnostic.
+function normalizeTraitOp(raw: any): { op: string; traitId?: string; type?: string; statement?: string; evidence?: string } {
+  if (raw && typeof raw === "object") {
+    if (typeof raw.op === "string") return raw;
+    for (const op of ["add", "reinforce", "revise"]) {
+      if (raw[op] && typeof raw[op] === "object") return { op, ...raw[op] };
+    }
+  }
+  return raw ?? {};
+}
+
+/** Apply the distiller's trait_ops. Tolerant by design — the model improvises, so
+ *  a malformed op is skipped (not thrown). Returns how many traits changed. */
+export function applyTraitOps(
+  project: string,
+  member: string,
+  ops: ReadonlyArray<Record<string, any>>
+): number {
+  let n = 0;
+  for (const r of ops) {
+    const raw = normalizeTraitOp(r);
+    const op = (raw?.op || "").toLowerCase();
+    const type = normalizeTraitType((raw as any).type);
+    const statement = cap((raw as any).statement, 160);
+    const evidence = cap((raw as any).evidence, 200);
+    if (op === "add") {
+      if (!statement) continue;
+      // Defensive dedupe: an "add" that matches an existing active trait reinforces it.
+      const existing = findActiveTraitByStatement(project, member, type, statement);
+      if (existing) reinforceTrait(existing, { evidence });
+      else insertTrait({ project, member, type, statement, evidence });
+      n++;
+    } else if (op === "reinforce" || op === "revise") {
+      const row = getTrait((raw as any).traitId);
+      if (!row || row.project !== project || row.member !== member || row.status !== "active") continue;
+      if (op === "revise") {
+        if (!statement) continue;
+        reinforceTrait(row, { type, statement, evidence });
+      } else {
+        reinforceTrait(row, { evidence });
+      }
+      n++;
+    }
+  }
+  return n;
+}
+
+export interface TraitView {
+  id: string;
+  member: string;
+  type: TraitType;
+  statement: string;
+  confidence: number; // decayed, 0..1
+  level: "low" | "medium" | "high";
+  observations: number;
+  evidence: string | null;
+  lastSeen: number;
+}
+
+/** A member's profile: active traits with decayed confidence, faded ones dropped,
+ *  strongest first, grouped-ready. The abstraction is safe to show the team. */
+export function buildProfileView(project: string, member: string, at = now()): TraitView[] {
+  const rows = db
+    .prepare("SELECT * FROM member_traits WHERE project = ? AND member = ? AND status = 'active'")
+    .all(project, member) as TraitRow[];
+  return rows
+    .map((r) => {
+      const confidence = decayedConfidence(r.confidence, r.last_seen, at);
+      const level: TraitView["level"] = confidence >= 0.66 ? "high" : confidence >= 0.33 ? "medium" : "low";
+      return {
+        id: r.id,
+        member: r.member,
+        type: r.type as TraitType,
+        statement: r.statement,
+        confidence,
+        level,
+        observations: r.observations,
+        evidence: r.evidence,
+        lastSeen: r.last_seen,
+      };
+    })
+    .filter((t) => t.confidence >= TRAIT_FLOOR)
+    .sort((a, b) => b.confidence - a.confidence);
+}
+
+/** Member edits the wording of their own trait. */
+export function updateTrait(id: string, patch: { statement?: string; type?: TraitType }): boolean {
+  const row = getTrait(id);
+  if (!row) return false;
+  db.prepare("UPDATE member_traits SET statement = ?, type = ?, last_seen = ? WHERE id = ?").run(
+    (patch.statement ?? row.statement).trim(),
+    patch.type ?? row.type,
+    now(),
+    id
+  );
+  return true;
+}
+
+/** Member removes a trait from their profile (soft delete; won't be re-proposed by id). */
+export function dismissTrait(id: string): boolean {
+  const r = db.prepare("UPDATE member_traits SET status = 'dismissed', last_seen = ? WHERE id = ? AND status = 'active'").run(now(), id);
+  return r.changes > 0;
 }
 
 // ── Workspace cleanup ─────────────────────────────────────────

@@ -201,25 +201,7 @@ function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number];
         </div>
         <span className="statuslabel"><span className={`sq ${s.cls}`} /> {s.label}</span>
       </div>
-      {m.handoffs.length > 0 && (
-        <div className="handoffs">
-          {m.handoffs.map((h) => (
-            <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
-              <div className="hmeta">
-                <span className="hkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
-                {h.status === "ack" && <span className="mono">ack’d</span>}
-              </div>
-              <div className="htext">{h.text}</div>
-              <div className="hacts">
-                {h.status === "open" && (
-                  <button className="tiny" onClick={(e) => { stop(e); api.handoff(h.id, projectId, "ack").then(onAct); }}>ack</button>
-                )}
-                <button className="tiny" onClick={(e) => { stop(e); api.handoff(h.id, projectId, "resolve").then(onAct); }}>resolve</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {m.handoffs.length > 0 && <Handoffs items={m.handoffs} projectId={projectId} onAct={onAct} />}
       <div className="headline">{m.headline || "…"}</div>
       {m.goal && <div className="goal">{m.goal}</div>}
       {m.workingOn.length > 0 && (
@@ -235,6 +217,55 @@ function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number];
         </div>
       )}
     </Link>
+  );
+}
+
+// Incoming handoffs for a member. More than a couple would balloon the card, so
+// they collapse behind a count (with a kind breakdown) and expand on click.
+function Handoffs({ items, projectId, onAct }: { items: Project["members"][number]["handoffs"]; projectId: string; onAct: () => void }) {
+  const [open, setOpen] = useState(false);
+  const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
+  const COLLAPSE_AT = 2;
+  const collapsed = items.length > COLLAPSE_AT && !open;
+
+  if (collapsed) {
+    const counts = items.reduce<Record<string, number>>((a, h) => ((a[h.kind] = (a[h.kind] || 0) + 1), a), {});
+    const breakdown = Object.entries(counts)
+      .map(([k, n]) => `${n} ${HKIND[k] || k}${n > 1 ? "s" : ""}`)
+      .join(" · ");
+    return (
+      <button className="handoff-collapse" onClick={(e) => { stop(e); setOpen(true); }}>
+        <span className="sq blocked" />
+        <span className="hc-n">{items.length} for you</span>
+        <span className="mono hc-b">{breakdown}</span>
+        <span className="hc-x">▾</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="handoffs">
+      {items.length > COLLAPSE_AT && (
+        <button className="handoff-collapse hide" onClick={(e) => { stop(e); setOpen(false); }}>
+          <span className="hc-x">▴</span> <span className="mono">{items.length} for you · collapse</span>
+        </button>
+      )}
+      {items.map((h) => (
+        <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
+          <div className="hmeta">
+            <span className="hkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
+            {h.status === "ack" && <span className="mono">ack’d</span>}
+          </div>
+          <div className="htext">{h.text}</div>
+          <div className="hacts">
+            {h.status === "open" && (
+              <button className="tiny" onClick={(e) => { stop(e); api.handoff(h.id, projectId, "ack").then(onAct); }}>ack</button>
+            )}
+            <button className="tiny" onClick={(e) => { stop(e); api.handoff(h.id, projectId, "resolve").then(onAct); }}>resolve</button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

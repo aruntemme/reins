@@ -145,10 +145,12 @@ export async function ogChat(params: Params): Promise<string> {
   // Fresh signed billing headers per request (nonce + wallet signature).
   const headers = await broker.inference.getRequestHeaders(provider, content);
 
+  // Fail fast on a hung provider so the serial distill queue keeps draining.
   const res = await fetch(`${endpoint}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(headers as unknown as Record<string, string>) },
     body: JSON.stringify({ ...params, model }),
+    signal: AbortSignal.timeout(env.llm.timeoutMs),
   });
 
   if (!res.ok) {

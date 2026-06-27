@@ -1,5 +1,4 @@
 import {
-  db,
   getProject,
   listProjects,
   listMembers,
@@ -8,7 +7,9 @@ import {
   listPending,
   getRollup,
   incomingHandoffs,
+  resolvedHandoffs,
   listHandoffs,
+  buildProfileView,
 } from "./db.js";
 import { storageExplorerUrl } from "./llm/og-storage.js";
 
@@ -60,7 +61,16 @@ export function memberView(project: string, m: any) {
   };
 }
 
-/** Full per-member detail: long timeline, their pending, recent raw events. */
+/**
+ * Full per-member detail: long timeline, their pending, and the learned taste
+ * profile.
+ *
+ * Raw prompt text is deliberately NOT returned. It still lives in the `events`
+ * table for the distillation pipeline to read, but surfacing the raw
+ * back-and-forth a teammate had with their agent feels exposing even with
+ * consent. The UI gets only the distilled timeline and the taste profile — the
+ * abstractions that carry the meaning without the exposure.
+ */
 export function memberDetail(project: string, member: string) {
   const m = getMember(project, member);
   if (!m) return null;
@@ -73,13 +83,9 @@ export function memberDetail(project: string, member: string) {
   const pending = listPending(project)
     .filter((p) => p.member === member && p.status !== "done")
     .map((p) => ({ id: p.id, text: p.text, status: p.status, claimedBy: p.claimed_by, createdAt: p.created_at }));
-  const events = db
-    .prepare(
-      "SELECT kind, text, significance, source, created_at FROM events WHERE project = ? AND member = ? ORDER BY created_at DESC LIMIT 12"
-    )
-    .all(project, member)
-    .map((e: any) => ({ kind: e.kind, text: e.text, significance: e.significance, source: e.source, at: e.created_at }));
-  return { ...base, projectId: project, timeline, pending, events };
+  const profile = buildProfileView(project, member);
+  const resolvedHandoffsList = resolvedHandoffs(project, member).map(handoffView);
+  return { ...base, projectId: project, timeline, pending, profile, resolvedHandoffs: resolvedHandoffsList };
 }
 
 export function projectSnapshot(projectId: string) {

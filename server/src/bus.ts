@@ -8,6 +8,7 @@ export type ReinsEvent =
   | { type: "handoff.changed"; project: string }
   | { type: "goal.updated"; project: string }
   | { type: "goals.changed"; project: string }
+  | { type: "profile.changed"; project: string; member: string }
   | { type: "ingest"; project: string; member: string };
 
 class Bus extends EventEmitter {

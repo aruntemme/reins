@@ -43,6 +43,11 @@ export const env = {
     model: str("REINS_LLM_MODEL", "gpt-4o"),
     fastModel: str("REINS_LLM_MODEL_FAST") || str("REINS_LLM_MODEL", "gpt-4o"),
     maxTokens: num("REINS_LLM_MAX_TOKENS", 2000),
+    // Hard ceiling per request. A hung gateway (no response, no error) would
+    // otherwise wedge the serial distill queue forever; this turns a hang into a
+    // fast failure so the queue drains. Generous, since reasoning models legitimately
+    // take ~2 min. Tune via REINS_LLM_TIMEOUT_MS.
+    timeoutMs: num("REINS_LLM_TIMEOUT_MS", 180000),
   },
 
   // 0G — decentralized AI compute + storage. The chain wallet (a throwaway

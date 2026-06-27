@@ -27,10 +27,27 @@ export interface Member {
   timeline: TimelineEntry[];
 }
 
+export type TraitType = "tooling" | "quality" | "communication" | "concern" | "workflow";
+export interface Trait {
+  id: string;
+  member: string;
+  type: TraitType;
+  statement: string;
+  confidence: number;
+  level: "low" | "medium" | "high";
+  observations: number;
+  evidence: string | null;
+  lastSeen: number;
+}
+
 export interface MemberDetail extends Member {
   projectId: string;
   pending: { id: string; text: string; status: string; claimedBy?: string; createdAt: number }[];
-  events: { kind: string; text: string; significance?: string; at: number }[];
+  // Learned taste profile — durable working grain, strongest first. Raw prompts
+  // are never sent to the client.
+  profile: Trait[];
+  // Cleared handoffs directed at this member — the resolved history.
+  resolvedHandoffs: Handoff[];
 }
 export interface PendingItem {
   id: string;
@@ -190,6 +207,11 @@ export const api = {
     j(`/api/pending/${id}/done`, { method: "POST", body: JSON.stringify({ project }) }),
   handoff: (id: string, project: string, action: "ack" | "resolve") =>
     j(`/api/handoffs/${id}/${action}`, { method: "POST", body: JSON.stringify({ project }) }),
+  resolveHandoffs: (project: string, member: string, kind?: Handoff["kind"]) =>
+    j<{ ok: boolean; resolved: number }>(`/api/projects/${encodeURIComponent(project)}/handoffs/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ member, ...(kind ? { kind } : {}) }),
+    }),
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
   ogStatus: () => j<OgStatus>("/api/og/status"),
@@ -272,6 +294,11 @@ export const api = {
   goalProposals: (id: string) => j<{ proposals: GoalProposal[] }>(`/api/projects/${encodeURIComponent(id)}/goal-proposals`),
   acceptProposal: (pid: string) => j<{ ok: boolean }>(`/api/goal-proposals/${pid}/accept`, { method: "POST" }),
   dismissProposal: (pid: string) => j<{ ok: boolean }>(`/api/goal-proposals/${pid}/dismiss`, { method: "POST" }),
+
+  // ── Taste profile (a member curates their own learned grain) ──
+  patchTrait: (id: string, patch: { statement?: string; type?: TraitType }) =>
+    j<{ ok: boolean }>(`/api/traits/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteTrait: (id: string) => j<{ ok: boolean }>(`/api/traits/${id}`, { method: "DELETE" }),
 };
 
 export function timeAgo(ts: number): string {
