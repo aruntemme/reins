@@ -191,9 +191,14 @@ function ForYou({ items, projectId, member, onAct }: { items: MemberDetail["hand
             </button>
           ))}
         </div>
-        {filtered.length > 1 && (
-          <button className="tiny danger" onClick={resolveAll}>resolve all ({filtered.length})</button>
-        )}
+        <div className="foryou-actions">
+          {expanded && overflow > 0 && (
+            <button className="tl-more mini" onClick={() => setExpanded(false)}>collapse ▴</button>
+          )}
+          {filtered.length > 1 && (
+            <button className="tiny danger" onClick={resolveAll}>resolve all ({filtered.length})</button>
+          )}
+        </div>
       </div>
       <div className="handoffs">
         {shown.map((h) => (
