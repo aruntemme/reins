@@ -6,8 +6,67 @@ import { randomUUID } from "node:crypto";
 
 process.env.REINS_DB = join(tmpdir(), `reins-traits-${randomUUID()}.db`);
 const db = await import("../db.js");
+const { DistillSchema } = await import("../pipeline/schemas.js");
 
 const DAY = 24 * 60 * 60 * 1000;
+
+// Regression: a too-strict trait field once failed the WHOLE DistillSchema parse,
+// silently killing headline/goal/timeline for the event. Trait extraction must be
+// resilient — an odd trait op can never sink the rest of the distill.
+test("distill schema: an off-list trait type survives the parse (bucketing happens later)", () => {
+  const parsed = DistillSchema.parse({
+    significance: "minor",
+    headline: "doing a thing",
+    trait_ops: [{ op: "add", type: "code_style", statement: "terse functions", evidence: "small fns" }],
+  });
+  assert.equal(parsed.significance, "minor");
+  assert.equal(parsed.headline, "doing a thing", "core distill intact");
+  assert.equal(parsed.trait_ops.length, 1, "the op is preserved, not rejected");
+});
+
+test("distill schema: the nested {add:{...}} shape some models emit survives the parse", () => {
+  const parsed = DistillSchema.parse({
+    significance: "minor",
+    trait_ops: [{ add: { type: "testing_preference", statement: "real tests over mocks", evidence: "real DB" } }],
+  });
+  assert.equal(parsed.trait_ops.length, 1, "nested op is not dropped by the schema");
+});
+
+test("distill schema: a wholly malformed trait_ops drops itself but the distill survives", () => {
+  const parsed = DistillSchema.parse({
+    significance: "major",
+    headline: "still parses",
+    trait_ops: "not even an array",
+  });
+  assert.equal(parsed.headline, "still parses");
+  assert.deepEqual(parsed.trait_ops, [], "bad trait_ops degrades to empty, core distill intact");
+});
+
+// The exact bug seen live: glm-5.2 emits {add:{type,statement,evidence}} and odd
+// type labels. applyTraitOps must normalize both and bucket correctly.
+test("applyTraitOps normalizes the nested op shape and buckets odd type labels", () => {
+  db.ensureProject("nest", "Nest", "w1");
+  const n = db.applyTraitOps("nest", "g", [
+    { add: { type: "testing_preference", statement: "real tests over mocks", evidence: "real DB" } } as any,
+    { add: { type: "code_style", statement: "terse single-purpose functions", evidence: "small fns" } } as any,
+  ]);
+  assert.equal(n, 2, "both nested ops applied");
+  const prof = db.buildProfileView("nest", "g");
+  assert.equal(prof.length, 2);
+  assert.ok(prof.every((t) => t.type === "quality"), "testing_preference + code_style both bucket to quality");
+});
+
+test("applyTraitOps tolerates an unknown op and caps an over-long statement", () => {
+  db.ensureProject("tol", "Tol", "w1");
+  const long = "x".repeat(400);
+  const n = db.applyTraitOps("tol", "z", [
+    { op: "delete", statement: "ignored", evidence: "e" }, // unknown op -> skipped
+    { op: "add", type: "tooling", statement: long, evidence: "e" },
+  ]);
+  assert.equal(n, 1, "only the valid op applied");
+  const t = db.buildProfileView("tol", "z")[0]!;
+  assert.equal(t.statement.length, 160, "statement capped");
+});
 
 test("add seeds a trait; reinforce grows confidence and observation count", () => {
   db.ensureProject("t1", "T1", "w1");

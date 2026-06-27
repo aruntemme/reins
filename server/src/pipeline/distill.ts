@@ -1,6 +1,7 @@
 import { db, findOpenPending, listMembers, resolveMember, createHandoff } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
 import { getProject, openGoalItemsForMatch, openGoalsForMatch, applyGoalOps, openTraitsForMatch, applyTraitOps } from "../db.js";
+import type { TraitOp } from "../db.js";
 import { bus } from "../bus.js";
 import { DistillSchema } from "./schemas.js";
 import { applyOps } from "./reconcile.js";
@@ -33,10 +34,14 @@ Return ONLY a JSON object:
   listed goal not already an item; "block_goal" {goalId, reason} when clearly blocked on it. Empty if
   unsure — a wrong proposal wastes the owner's time.
 - "trait_ops": the person's durable WORKING GRAIN (taste) — how they like to work, NOT this one task.
-  "reinforce" {traitId, evidence} when the event re-confirms a trait in MY TASTE PROFILE below; "revise"
-  {traitId, type, statement, evidence} to sharpen one; "add" {type, statement, evidence} for a clear new
-  preference not listed. Be conservative — prefer reinforce, add rarely, empty for routine work. CRITICAL:
-  evidence is a SHORT PARAPHRASE of the signal — never the raw prompt, code, secrets, paths, or identifiers.
+  Each op is a FLAT object with an "op" field. type is exactly one of: tooling | quality |
+  communication | concern | workflow. Shapes:
+    {"op":"add","type":"quality","statement":"prefers real tests over mocks","evidence":"chose real DB tests"}
+    {"op":"reinforce","traitId":"<id from MY TASTE PROFILE>","evidence":"did it again"}
+    {"op":"revise","traitId":"<id>","type":"workflow","statement":"...","evidence":"..."}
+  Use "reinforce" when the event re-confirms a listed trait; "add" for a clear new preference not listed;
+  "revise" to sharpen one. When a clear preference is stated, DO emit it — but skip routine activity.
+  CRITICAL: evidence is a SHORT PARAPHRASE — never the raw prompt, code, secrets, paths, or identifiers.
 
 Be faithful — never invent. If nothing meaningful changed, return just the significance.`;
 
@@ -97,8 +102,9 @@ ${text}`,
   // Taste profile: learn/reinforce the member's working grain from this signal.
   // Applied directly (not a proposal) — it's an evolving, decaying, member-editable
   // abstraction, never the raw prompt, so a stray trait is low-cost and fades.
-  if (ops.trait_ops?.length) {
-    const changed = applyTraitOps(project, member, ops.trait_ops as any);
+  const traitOps = (Array.isArray(ops.trait_ops) ? ops.trait_ops : []) as TraitOp[];
+  if (traitOps.length) {
+    const changed = applyTraitOps(project, member, traitOps);
     if (changed > 0) bus.emitChange({ type: "profile.changed", project, member });
   }
 

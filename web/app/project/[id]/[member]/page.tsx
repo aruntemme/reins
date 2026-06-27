@@ -134,22 +134,6 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
               )}
             </Section>
 
-            <Section label="signal pulse">
-              {m.signals.length === 0 ? <div className="empty">No signals yet.</div> : (
-                <>
-                  <div className="rawlist">
-                    {m.signals.map((e, k) => (
-                      <div className="rawrow" key={k}>
-                        <span className={`tk2 ${e.significance === "noise" ? "noise" : ""}`}>{e.kind}{e.significance ? `·${e.significance}` : ""}</span>
-                        <span className="rawtext muted">·</span>
-                        <span className="mono">{timeAgo(e.at)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mono priv-note">Raw prompts stay private — distilled into the timeline and profile above.</div>
-                </>
-              )}
-            </Section>
           </div>
         </div>
       </main>

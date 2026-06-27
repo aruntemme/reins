@@ -100,9 +100,8 @@ test("taste profile: readable by the team, editable only by its owner", async ()
     assert.equal(meDetail.status, 200, JSON.stringify(meDetail.body));
     assert.equal(meDetail.body.profile.length, 1);
     assert.equal(meDetail.body.profile[0].statement, "prefers TypeScript");
-    assert.ok(Array.isArray(meDetail.body.signals), "signal pulse present");
     assert.ok(!("events" in meDetail.body), "no raw events array leaks to the client");
-    for (const s of meDetail.body.signals) assert.ok(!("text" in s), "signals carry no prompt text");
+    assert.ok(!("signals" in meDetail.body), "no raw-prompt surface at all on member detail");
 
     const myTraitId = meDetail.body.profile[0].id as string;
 

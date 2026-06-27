@@ -1099,25 +1099,64 @@ function insertTrait(t: { project: string; member: string; type: string; stateme
   return id;
 }
 
-/** Apply the distiller's trait_ops. Returns how many traits were created/changed. */
-export function applyTraitOps(project: string, member: string, ops: TraitOp[]): number {
+const cap = (s: string | null | undefined, n: number): string | null =>
+  s == null ? null : String(s).trim().slice(0, n) || null;
+
+// Models improvise trait categories ("code_style", "testing_preference",
+// "process"…). Coerce any value into one of the five canonical buckets so a stray
+// label never lands in "workflow" by accident — keyword match first, default last.
+function normalizeTraitType(t: any): TraitType {
+  const s = String(t ?? "").trim().toLowerCase().replace(/[_\-]+/g, " ");
+  if ((TRAIT_TYPES as string[]).includes(s)) return s as TraitType;
+  if (/(test|mock|stub|quality|polish|style|correct|robust|clean|craft)/.test(s)) return "quality";
+  if (/(tool|lang|framework|library|stack|tech|sdk|runtime|db|database)/.test(s)) return "tooling";
+  if (/(secur|perf|cost|risk|privacy|scal|concern|prior|value)/.test(s)) return "concern";
+  if (/(comm|tone|writ|phras|verbos|terse|direct|explain)/.test(s)) return "communication";
+  return "workflow";
+}
+
+// Models emit trait ops two ways: flat ({op:"add", type, statement,...}) or with
+// the op as a WRAPPING KEY ({add:{type, statement,...}}). Normalize to flat so
+// the rest of applyTraitOps is shape-agnostic.
+function normalizeTraitOp(raw: any): { op: string; traitId?: string; type?: string; statement?: string; evidence?: string } {
+  if (raw && typeof raw === "object") {
+    if (typeof raw.op === "string") return raw;
+    for (const op of ["add", "reinforce", "revise"]) {
+      if (raw[op] && typeof raw[op] === "object") return { op, ...raw[op] };
+    }
+  }
+  return raw ?? {};
+}
+
+/** Apply the distiller's trait_ops. Tolerant by design — the model improvises, so
+ *  a malformed op is skipped (not thrown). Returns how many traits changed. */
+export function applyTraitOps(
+  project: string,
+  member: string,
+  ops: ReadonlyArray<Record<string, any>>
+): number {
   let n = 0;
-  for (const op of ops) {
-    if (op.op === "add") {
-      if (!op.statement?.trim() || !TRAIT_TYPES.includes(op.type)) continue;
+  for (const r of ops) {
+    const raw = normalizeTraitOp(r);
+    const op = (raw?.op || "").toLowerCase();
+    const type = normalizeTraitType((raw as any).type);
+    const statement = cap((raw as any).statement, 160);
+    const evidence = cap((raw as any).evidence, 200);
+    if (op === "add") {
+      if (!statement) continue;
       // Defensive dedupe: an "add" that matches an existing active trait reinforces it.
-      const existing = findActiveTraitByStatement(project, member, op.type, op.statement);
-      if (existing) reinforceTrait(existing, { evidence: op.evidence });
-      else insertTrait({ project, member, type: op.type, statement: op.statement, evidence: op.evidence });
+      const existing = findActiveTraitByStatement(project, member, type, statement);
+      if (existing) reinforceTrait(existing, { evidence });
+      else insertTrait({ project, member, type, statement, evidence });
       n++;
-    } else {
-      const row = getTrait(op.traitId);
+    } else if (op === "reinforce" || op === "revise") {
+      const row = getTrait((raw as any).traitId);
       if (!row || row.project !== project || row.member !== member || row.status !== "active") continue;
-      if (op.op === "revise") {
-        if (!op.statement?.trim()) continue;
-        reinforceTrait(row, { type: op.type, statement: op.statement, evidence: op.evidence });
+      if (op === "revise") {
+        if (!statement) continue;
+        reinforceTrait(row, { type, statement, evidence });
       } else {
-        reinforceTrait(row, { evidence: op.evidence });
+        reinforceTrait(row, { evidence });
       }
       n++;
     }

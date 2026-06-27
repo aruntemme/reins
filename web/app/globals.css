@@ -226,13 +226,6 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
 .plist { display: grid; gap: 10px; }
 .prow { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .prow .ptext { font-size: 14.5px; color: var(--ink); }
-.rawlist { display: grid; gap: 10px; }
-.rawrow { display: grid; grid-template-columns: 92px 1fr auto; gap: 12px; align-items: baseline; font-size: 13px; color: var(--ink-2); }
-.tk2 { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--blue); }
-.tk2.noise { color: var(--ink-3); }
-.rawtext { color: var(--ink-2); line-height: 1.45; }
-.priv-note { margin-top: 10px; font-size: 11px; color: var(--ink-3); }
-
 /* Taste profile ("grain") */
 .grain { display: grid; gap: 16px; }
 .grain-grp { display: grid; gap: 7px; }

@@ -1,5 +1,4 @@
 import {
-  db,
   getProject,
   listProjects,
   listMembers,
@@ -62,14 +61,14 @@ export function memberView(project: string, m: any) {
 }
 
 /**
- * Full per-member detail: long timeline, their pending, and a privacy-safe
- * pulse of recent signals.
+ * Full per-member detail: long timeline, their pending, and the learned taste
+ * profile.
  *
- * Raw prompt text is deliberately NOT returned here. It still lives in the
- * `events` table for the distillation pipeline to read, but surfacing the raw
+ * Raw prompt text is deliberately NOT returned. It still lives in the `events`
+ * table for the distillation pipeline to read, but surfacing the raw
  * back-and-forth a teammate had with their agent feels exposing even with
- * consent. The UI gets only signal metadata (kind, significance, cadence) — the
- * distilled timeline above and the taste profile carry the actual meaning.
+ * consent. The UI gets only the distilled timeline and the taste profile — the
+ * abstractions that carry the meaning without the exposure.
  */
 export function memberDetail(project: string, member: string) {
   const m = getMember(project, member);
@@ -83,14 +82,8 @@ export function memberDetail(project: string, member: string) {
   const pending = listPending(project)
     .filter((p) => p.member === member && p.status !== "done")
     .map((p) => ({ id: p.id, text: p.text, status: p.status, claimedBy: p.claimed_by, createdAt: p.created_at }));
-  const signals = db
-    .prepare(
-      "SELECT kind, significance, source, created_at FROM events WHERE project = ? AND member = ? ORDER BY created_at DESC LIMIT 12"
-    )
-    .all(project, member)
-    .map((e: any) => ({ kind: e.kind, significance: e.significance, source: e.source, at: e.created_at }));
   const profile = buildProfileView(project, member);
-  return { ...base, projectId: project, timeline, pending, signals, profile };
+  return { ...base, projectId: project, timeline, pending, profile };
 }
 
 export function projectSnapshot(projectId: string) {

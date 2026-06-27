@@ -43,9 +43,8 @@ export interface Trait {
 export interface MemberDetail extends Member {
   projectId: string;
   pending: { id: string; text: string; status: string; claimedBy?: string; createdAt: number }[];
-  // Privacy-safe signal pulse: no raw prompt text, only metadata + cadence.
-  signals: { kind: string; significance?: string; source?: string; at: number }[];
-  // Learned taste profile — durable working grain, strongest first.
+  // Learned taste profile — durable working grain, strongest first. Raw prompts
+  // are never sent to the client.
   profile: Trait[];
 }
 export interface PendingItem {
