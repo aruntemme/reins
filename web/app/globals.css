@@ -165,7 +165,7 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
 .chip.warn { background: #fbf1e3; border-color: #f0dcc0; color: #9a6a2c; }
 
 /* member cards */
-.team { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+.team { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; align-items: start; }
 .mcard { padding: 20px 22px; display: flex; flex-direction: column; gap: 13px; }
 .mcard .top { display: flex; align-items: center; justify-content: space-between; }
 .mcard .who { display: flex; align-items: center; gap: 11px; }
@@ -210,6 +210,16 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); }
 .handoff .hkind { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); }
 .handoff .htext { font-size: 13.5px; color: var(--ink); line-height: 1.4; }
 .handoff .hacts { display: flex; gap: 6px; }
+.handoff-collapse {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  border: 1px solid var(--line-2); background: var(--panel); border-radius: 10px;
+  padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--ink); transition: .15s;
+}
+.handoff-collapse:hover { border-color: var(--ink-3); }
+.handoff-collapse .hc-n { font-weight: 600; }
+.handoff-collapse .hc-b { color: var(--ink-3); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-collapse .hc-x { color: var(--ink-3); font-size: 11px; }
+.handoff-collapse.hide { justify-content: center; gap: 6px; border-style: dashed; color: var(--ink-3); }
 
 /* ── member detail (creed-style doc) ─────────────────── */
 .dash.member { gap: 22px; }
