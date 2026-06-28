@@ -11,7 +11,6 @@ import {
   listHandoffs,
   buildProfileView,
 } from "./db.js";
-import { storageExplorerUrl } from "./llm/og-storage.js";
 
 function handoffView(h: any) {
   return {
@@ -116,15 +115,6 @@ export function projectSnapshot(projectId: string) {
           collisions: JSON.parse(rollup.collisions || "[]"),
           risks: JSON.parse(rollup.risks || "[]"),
           updatedAt: rollup.updated_at,
-          // 0G Storage provenance for this snapshot (empty until anchored).
-          provenance: rollup.root_hash
-            ? {
-                rootHash: rollup.root_hash,
-                txHash: rollup.tx_hash,
-                anchoredAt: rollup.anchored_at,
-                storageUrl: storageExplorerUrl(rollup.root_hash),
-              }
-            : null,
         }
       : null,
   };

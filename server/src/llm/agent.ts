@@ -1,6 +1,5 @@
 import OpenAI from "openai";
-import { env } from "../env.js";
-import { llm } from "./client.js";
+import { resolveBackend } from "./client.js";
 
 type Msg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -27,7 +26,8 @@ export async function runToolAgent(opts: {
   model?: string;
   maxSteps?: number;
 }): Promise<AgentResult> {
-  const model = opts.model ?? env.llm.model;
+  const backend = resolveBackend();
+  const model = opts.model ?? backend.model;
   const maxSteps = opts.maxSteps ?? 8;
   const toolMap = new Map(opts.tools.map((t) => [t.name, t]));
   const toolDefs = opts.tools.map((t) => ({
@@ -42,9 +42,9 @@ export async function runToolAgent(opts: {
   const executed: { name: string; args: any }[] = [];
 
   for (let step = 0; step < maxSteps; step++) {
-    const res = await llm.chat.completions.create({
+    const res = await backend.client.chat.completions.create({
       model,
-      max_tokens: env.llm.maxTokens,
+      max_tokens: backend.maxTokens,
       messages,
       tools: toolDefs,
       tool_choice: "auto",

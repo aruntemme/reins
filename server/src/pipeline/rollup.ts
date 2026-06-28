@@ -3,18 +3,12 @@ import {
   listPending,
   getProject,
   saveRollup,
-  setRollupProvenance,
-  recordSnapshot,
-  projectWorkspace,
   resolveMember,
   createHandoff,
 } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
 import { bus } from "../bus.js";
 import { env } from "../env.js";
-import { putSnapshot } from "../llm/og-storage.js";
-import { anchorRootHash } from "../llm/og-chain.js";
-import { buildContextPack } from "../context-pack.js";
 import { RollupSchema } from "./schemas.js";
 import { postDigest } from "../integrations/digest.js";
 
@@ -84,30 +78,6 @@ ${pendingBlock}`,
     void postDigest(project, proj?.name || project, r).catch((e) =>
       console.error("[digest]", e.message)
     );
-  }
-
-  // Persist the canonical Context Pack to 0G Storage so the shared context is
-  // verifiable and portable: addressable by Merkle root hash, not locked in one
-  // server's DB. The MCP retrieval reads this exact pack back FROM 0G Storage.
-  if (env.og.storageEnabled) {
-    void putSnapshot(buildContextPack(project))
-      .then(({ rootHash, txHash }) => {
-        setRollupProvenance(project, rootHash, txHash);
-        // Append to the snapshot ledger (history of every 0G Storage write).
-        // Cross-instance sync reads it; chain anchoring fills anchored_tx.
-        recordSnapshot({ workspaceId: projectWorkspace(project) ?? "default", project, rootHash, txHash });
-        // Workstream D (on-chain anchoring): commit the root hash to the 0G chain
-        // as a tamper-evident anchor. Fire-and-forget so it never blocks or fails
-        // the rollup; anchorRootHash fills anchored_tx on the ledger row.
-        if (env.og.anchorEnabled) {
-          void anchorRootHash(rootHash)
-            .then(({ txHash: anchorTx }) => console.log(`[0g-anchor] ${rootHash} -> ${anchorTx}`))
-            .catch((e) => console.error("[0g-anchor]", e.message));
-        }
-        bus.emitChange({ type: "rollup.updated", project });
-        console.log(`[0g-storage] ${project} context pack -> ${rootHash}`);
-      })
-      .catch((e) => console.error("[0g-storage]", e.message));
   }
 
   // Turn synthesized cross-team nudges into directed handoffs (deduped).

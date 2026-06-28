@@ -162,31 +162,28 @@ export interface Token {
   revoked: 0 | 1;
 }
 
-export interface OgStatus {
-  enabled: boolean;
-  network?: string;
-  chainId?: number;
-  explorer?: string;
-  compute?: {
-    mode: "router" | "broker";
-    private: boolean;
-    ready: boolean;
-    provider?: string;
-    model: string;
-    endpoint: string;
-    requests: number;
-    verified: number;
-    unverifiable: number;
-    balance: number | null;
-    lastError?: string;
-  } | null;
-  storage?: {
-    uploads: number;
-    lastRootHash?: string;
-    explorer: string;
-    lastError?: string;
-  } | null;
+// LLM provider config as exposed to the dashboard. The API key is never sent
+// back to the client — only whether one is set (`hasKey`) and a masked preview.
+export interface Provider {
+  id: string;
+  label: string;
+  baseURL: string;
+  model: string;
+  fastModel: string;
+  maxTokens: number;
+  active: boolean;
+  hasKey: boolean;
+  keyMask: string;
 }
+export interface ProviderInput {
+  label: string;
+  baseURL: string;
+  model: string;
+  fastModel?: string;
+  maxTokens?: number;
+  apiKey?: string; // omit on edit to keep the existing key
+}
+export interface ActiveModel { model: string; fastModel: string; label: string }
 
 export const api = {
   me: () => j<Me>("/api/auth/me"),
@@ -214,7 +211,22 @@ export const api = {
     }),
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
-  ogStatus: () => j<OgStatus>("/api/og/status"),
+  // ── LLM providers (admin-managed; keys encrypted server-side) ──
+  providers: () => j<{ providers: Provider[]; active: ActiveModel }>("/api/providers"),
+  createProvider: (p: ProviderInput) =>
+    j<{ provider: Provider }>("/api/providers", { method: "POST", body: JSON.stringify(p) }),
+  updateProvider: (id: string, p: Partial<ProviderInput>) =>
+    j<{ provider: Provider }>(`/api/providers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(p),
+    }),
+  activateProvider: (id: string) =>
+    j<{ ok: boolean; active: ActiveModel }>(`/api/providers/${encodeURIComponent(id)}/activate`, {
+      method: "POST",
+    }),
+  deleteProvider: (id: string) =>
+    j<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
   invite: (name: string, access: boolean) =>
     j<{ ok: boolean; name: string | null; ingest: string; access?: string }>("/api/admin/invite", {
       method: "POST",

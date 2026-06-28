@@ -22,35 +22,50 @@ test("source attribution: defaults to claude-code when omitted", () => {
   assert.equal(row.source, "claude-code");
 });
 
-test("snapshot ledger: record / list / latest are append-only and ordered", () => {
-  db.ensureProject("p2", "P2", "ws1");
-  const a = db.recordSnapshot({ workspaceId: "ws1", project: "p2", rootHash: "0xaaa", txHash: "0xt1" });
-  const b = db.recordSnapshot({ workspaceId: "ws1", project: "p2", rootHash: "0xbbb", txHash: "0xt2" });
-  assert.notEqual(a, b);
+test("providers: first created becomes active; key round-trips encrypted", () => {
+  const p = db.createProvider({
+    label: "OpenAI",
+    baseURL: "https://api.openai.com/v1",
+    model: "gpt-4o",
+    apiKey: "sk-secret-123",
+  });
+  assert.equal(p.active, true, "first provider is auto-activated");
 
-  const list = db.listSnapshots("p2");
-  assert.equal(list.length, 2);
-  // newest first
-  assert.equal(list[0]?.root_hash, "0xbbb");
-  assert.equal(list[1]?.root_hash, "0xaaa");
+  // The stored ciphertext is NOT the plaintext key.
+  const row = db.db.prepare("SELECT api_key_enc FROM providers WHERE id = ?").get(p.id) as {
+    api_key_enc: string;
+  };
+  assert.notEqual(row.api_key_enc, "sk-secret-123");
+  assert.ok(row.api_key_enc.length > 0);
 
-  const latest = db.latestSnapshot("p2");
-  assert.equal(latest?.root_hash, "0xbbb");
-  assert.equal(latest?.workspace_id, "ws1");
-  assert.equal(latest?.anchored_tx, "");
+  // getActiveProvider decrypts it back.
+  const active = db.getActiveProvider();
+  assert.equal(active?.id, p.id);
+  assert.equal(active?.apiKey, "sk-secret-123");
 });
 
-test("snapshot ledger: setSnapshotAnchor records the on-chain anchor tx", () => {
-  db.recordSnapshot({ workspaceId: "ws1", project: "p3", rootHash: "0xccc" });
-  const ok = db.setSnapshotAnchor("0xccc", "0xANCHORTX");
-  assert.equal(ok, true);
-  const latest = db.latestSnapshot("p3");
-  assert.equal(latest?.anchored_tx, "0xANCHORTX");
+test("providers: activate switches exactly one active; update keeps key when omitted", () => {
+  const a = db.createProvider({ label: "A", baseURL: "https://a.test/v1", model: "m", apiKey: "key-a" });
+  const b = db.createProvider({ label: "B", baseURL: "https://b.test/v1", model: "m", apiKey: "key-b" });
 
-  // unknown root hash -> no-op, returns false
-  assert.equal(db.setSnapshotAnchor("0xdoesnotexist", "0xZ"), false);
+  assert.equal(db.setActiveProvider(b.id), true);
+  const actives = db.listProviders().filter((p) => p.active);
+  assert.equal(actives.length, 1);
+  assert.equal(actives[0]?.id, b.id);
+
+  // Update label without an apiKey leaves the encrypted key intact.
+  db.updateProvider(a.id, { label: "A2" });
+  const reread = db.listProviders().find((p) => p.id === a.id);
+  assert.equal(reread?.label, "A2");
+  assert.equal(reread?.apiKey, "key-a");
 });
 
-test("snapshot ledger: latestSnapshot is undefined for a project with none", () => {
-  assert.equal(db.latestSnapshot("nope"), undefined);
+test("providers: deleting the active provider promotes another", () => {
+  const before = db.getActiveProvider();
+  assert.ok(before);
+  assert.equal(db.deleteProvider(before!.id), true);
+  // Some provider is still active (one of the remaining), never zero.
+  const after = db.getActiveProvider();
+  assert.ok(after, "an active provider remains after deleting the active one");
+  assert.notEqual(after!.id, before!.id);
 });

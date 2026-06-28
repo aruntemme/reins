@@ -14,8 +14,7 @@ Reins watches what each agent does, distills it into a short per-person and per-
 serves that in two places: a dashboard the team reads, and an MCP server any agent can query before
 it starts work.
 
-A small project, built for the 0G Zero Cup. Capture, distillation, and retrieval all work end to end
-today.
+Capture, distillation, and retrieval all work end to end today.
 
 ## How it works
 
@@ -23,7 +22,7 @@ today.
 Claude Code hook  ->  reins server  ->  distill (triage, extract, reconcile, rollup)
                           |
                           |-- dashboard (Next.js, live over SSE)
-                          |-- MCP server (reins_context, reins_pull_context, ...)
+                          |-- MCP server (reins_context, reins_projects, ...)
 ```
 
 A hook in each teammate's Claude Code posts their prompts and agent turns to the server, which runs
@@ -42,22 +41,21 @@ Each incoming event is processed in steps so that most of the noise is dropped e
 4. **Rollup** (debounced) summarizes the whole team for a lead: a short status, goal alignment,
    collisions (two people in the same file), and risks.
 
-If no inference backend is configured, Reins still captures raw events but does not distill them.
+If no model provider is configured, Reins still captures raw events but does not distill them.
 
-## Where 0G fits
+## Bring your own model
 
-- **Inference runs on 0G Compute.** The whole pipeline above calls the 0G Private Computer router,
-  which is OpenAI compatible.
-- **Snapshots live on 0G Storage.** Each snapshot is addressed by its Merkle root hash, so the
-  shared context can be pulled and verified from anywhere, not just this server's database. The MCP
-  `reins_pull_context` tool rebuilds a snapshot from a hash alone, with no local state.
+The whole pipeline runs on any OpenAI-compatible inference provider. Configure one or more providers
+from the dashboard (**Settings → model providers**) — base URL, model, and API key — and mark one
+active; the pipeline uses the active one. Add as many as you like and switch between them at any time.
+API keys are encrypted at rest (AES-256-GCM) on the server and never sent back to the browser.
 
 ## What works today
 
 - Capture from several coding agents through one hook core: Claude Code, plus adapters for Codex,
   OpenCode, and Aider, and a generic adapter for any agent that can run a shell command. Every event
   is attributed to its agent, so a team on mixed tools shares one context.
-- Distillation on 0G Compute: triage, extract, reconcile, and a debounced team rollup.
+- Distillation through any OpenAI-compatible provider: triage, extract, reconcile, and a debounced team rollup.
 - A current status per person (headline, goal, working on, timeline, pending items) and a team
   rollup for a lead (summary, goal alignment, file collisions, risks).
 - Short-term goals beneath the project's global goal: admins set common team goals, and each teammate
@@ -71,11 +69,8 @@ If no inference backend is configured, Reins still captures raw events but does 
   so items get picked up without a person typing.
 - Scoped retrieval: the MCP context tool narrows to a member or a query and trims to a token budget,
   so an agent pulls only what its task needs.
-- Verifiable, portable snapshots on 0G Storage: `reins_pull_context` rebuilds context from a hash,
-  and `reins_sync_push` / `reins_sync_pull` let two instances share context by handing over one root
-  hash, with no shared server.
-- Optional on-chain anchoring on 0G Chain: every snapshot root hash can be committed as a
-  tamper-evident transaction.
+- Pluggable model providers: add any number of OpenAI-compatible providers in the dashboard, switch the
+  active one at any time; keys are encrypted at rest.
 - Optional Slack and Discord digests of each rollup.
 - Real accounts on the multi-tenant model: sign up for a workspace, log in with email and password,
   invite teammates with a link, and roles (owner, admin, member). Each account links to the identity its
@@ -91,8 +86,6 @@ If no inference backend is configured, Reins still captures raw events but does 
 - Sub-agents without a human in the loop. The autonomous agent claims and resolves work today; next is
   capturing from sub-agents that a parent agent fans out, so context keeps updating during deep loops.
 - Embedding-based retrieval. Scoping ranks by lexical overlap today; swap in embeddings for semantic recall.
-- Richer on-chain provenance. Anchoring writes a witness transaction today; a small contract could index
-  the full history of a workspace's snapshot hashes.
 - Email for invites and resets. Both work over one-time links today; sending them by email is next.
 
 ## Quick start
@@ -100,15 +93,15 @@ If no inference backend is configured, Reins still captures raw events but does 
 ```bash
 npm run install:all
 
-# 1) configure inference (runs on 0G Compute, via the 0G Private Computer router)
+# 1) start server + dashboard
 cp server/.env.example server/.env
-#   set REINS_LLM_PROVIDER=0g-router, OG_ROUTER_API_KEY, REINS_LLM_MODEL, OG_STORAGE=on
-#   (or REINS_LLM_PROVIDER=openai with REINS_LLM_BASE_URL for any OpenAI-compatible endpoint)
-
-# 2) run server + dashboard
 npm run dev
 #   server    on http://localhost:4319
 #   dashboard on http://localhost:4320
+
+# 2) add a model provider in the dashboard: Settings -> model providers
+#    (base URL, model, API key for any OpenAI-compatible endpoint).
+#    Optional: seed a fallback via REINS_LLM_* in server/.env instead.
 
 # 3) optional: populate a demo board without wiring agents
 npm run seed
@@ -146,8 +139,7 @@ directly:
 
 Tools:
 
-- `reins_context` reads a project's current status, fetched and verified from 0G Storage.
-- `reins_pull_context` rebuilds a snapshot from a 0G Storage root hash alone, with no database.
+- `reins_context` reads a project's current distilled status (optionally scoped to a member, query, or token budget).
 - `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs`, `reins_goals`, `reins_profile` for narrower reads.
 - `reins_note`, `reins_claim`, `reins_resolve`, `reins_handoff_ack`, `reins_goal_add`, `reins_goal_check` let an agent write back.
 
@@ -180,7 +172,9 @@ proxies `/api/*` to the backend so the browser stays first party. See [`deploy/D
 
 ## Configuration
 
-All server config is environment variables (`server/.env`, see `server/.env.example`). Inference
-runs on 0G Compute (`REINS_LLM_PROVIDER=0g-router` with `OG_ROUTER_API_KEY`) and snapshots persist
-to 0G Storage (`OG_STORAGE=on`). To use a different inference backend, set `REINS_LLM_PROVIDER=openai`
-with `REINS_LLM_BASE_URL` and any OpenAI-compatible endpoint.
+Server config is environment variables (`server/.env`, see `server/.env.example`). Model providers
+are configured at runtime from the dashboard (**Settings → model providers**) and stored encrypted in
+the database. As an optional fallback used only until a provider is added there, set `REINS_LLM_BASE_URL`,
+`REINS_LLM_MODEL`, and `REINS_LLM_API_KEY` for any OpenAI-compatible endpoint. Set `REINS_SECRET_KEY`
+to a long random value to pin the encryption master key (otherwise one is auto-generated into
+`.reins-secret`).

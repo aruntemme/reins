@@ -1,12 +1,7 @@
 /**
  * Context Pack — the canonical, portable representation of a project's shared
- * context. This is the exact object that gets written to 0G Storage on every
- * rollup, and the exact object the MCP `reins_context` tool reads back FROM 0G
- * Storage (verified by its Merkle root hash) to answer an agent.
- *
- * Because the retrieval path deserializes this pack straight from 0G Storage,
- * 0G Storage is load-bearing: remove it and cross-agent context retrieval stops
- * returning the verifiable shared brain.
+ * context. This is the exact object the MCP `reins_context` tool renders to
+ * answer an agent, and the unit cross-instance merge operates on.
  */
 import { getProject, listMembers, listPending, getRollup } from "./db.js";
 
@@ -153,8 +148,8 @@ export function buildScopedContextPack(project: string, opts: ScopeOptions = {})
 
 /**
  * Apply scoping to an already-built pack in memory. Split out from
- * buildScopedContextPack so the 0G Storage read path can fetch the full pack
- * from storage and then scope it without touching the DB.
+ * buildScopedContextPack so a caller that already holds a full pack can scope it
+ * without rebuilding from the DB.
  */
 export function scopePack(pack: ContextPack, opts: ScopeOptions = {}): ContextPack {
   const { member, query, limit } = opts;
@@ -227,14 +222,10 @@ export function scopePack(pack: ContextPack, opts: ScopeOptions = {}): ContextPa
 /** Render a pack to the markdown an agent reads. `source` notes where it came from. */
 export function renderContextPack(
   pack: ContextPack,
-  source?: { from: "0g-storage" | "local"; rootHash?: string; url?: string; note?: string }
+  source?: { from: "local"; note?: string }
 ): string {
   const lines: string[] = [];
-  const verified =
-    source?.from === "0g-storage"
-      ? " (retrieved from 0G Storage, Merkle-verified)"
-      : "";
-  lines.push(`# ${pack.name} — shared context${verified}`);
+  lines.push(`# ${pack.name} — shared context`);
   lines.push(`Goal: ${pack.goal || "(not set)"}`);
 
   if (pack.rollup) {
@@ -261,12 +252,6 @@ export function renderContextPack(
   lines.push(`\n## Pending / up for grabs`);
   lines.push(open.map((p) => `- [${p.status}] (${p.member}) ${p.text}`).join("\n") || "(none)");
 
-  if (source?.rootHash) {
-    lines.push(
-      `\n## Provenance\nSource: 0G Storage · root hash ${source.rootHash}` +
-        (source.url ? `\n${source.url}` : "")
-    );
-  }
   if (source?.note) lines.push(`\n_${source.note}_`);
   return lines.join("\n");
 }

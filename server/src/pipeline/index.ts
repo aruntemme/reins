@@ -86,7 +86,7 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
 const inflight = new Map<string, number>();
 
 async function distill(eventId: string, input: IngestInput): Promise<void> {
-  if (!llmConfigured) {
+  if (!llmConfigured()) {
     // No LLM configured: degrade gracefully — log a raw timeline entry so the
     // board still shows life, just without distillation.
     addTimeline(input.project, input.member, "did", input.text.slice(0, 200));

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { api, type Me } from "@/lib/api";
 import { TopBar } from "@/components/ui";
 import { Members } from "@/components/members";
+import { Providers } from "@/components/providers";
 
 /** Each account sets the capture identity (the hook's --me) it acts as, tying the
  *  account to its activity and goals. Available to every logged-in user. */
@@ -88,7 +89,10 @@ export default function Settings() {
                   </p>
                 </div>
               ) : (
-                <Members workspaceId={workspace.id} currentEmail={me?.user?.email} />
+                <div style={{ display: "grid", gap: 28 }}>
+                  <Providers />
+                  <Members workspaceId={workspace.id} currentEmail={me?.user?.email} />
+                </div>
               )}
             </>
           )}

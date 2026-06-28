@@ -46,7 +46,7 @@ test("sendEvent redacts the secret in the body that hits the wire", async () => 
       url: srv.url,
       project: "p",
       member: "me",
-      text: "set OG_ROUTER_API_KEY to sk-cv-7eb3688b7fdc4d5ea894fded00897332 and run",
+      text: "set OPENAI_API_KEY to sk-cv-7eb3688b7fdc4d5ea894fded00897332 and run",
     });
     assert.equal(res.ok, true);
     const sent = srv.get();

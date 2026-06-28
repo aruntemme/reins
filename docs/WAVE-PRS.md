@@ -3,15 +3,13 @@
 Seven feature branches plus the seam base, all branched from `main` and integrated on `wave/base`.
 Each was built in its own git worktree, then independently re-verified by an adversarial agent
 (re-ran tests, typechecked, scanned the diff for stubs) before merge. All tests are real: local HTTP
-receivers, temp SQLite DBs, child-process servers, and real 0G testnet calls. No stubs or mocks of the
-unit under test.
+receivers, temp SQLite DBs, and child-process servers. No stubs or mocks of the unit under test.
 
-Merge order on `wave/base`: S0 -> C -> G -> D -> F -> B -> A -> E, all clean (only `db.ts`, `env.ts`,
+Merge order on `wave/base`: S0 -> G -> F -> B -> A -> E, all clean (only `db.ts`, `env.ts`,
 `rollup.ts` were touched by more than one branch; git auto-merged every one).
 
-Suite on `wave/base`: 34 server tests pass + 2 honest skips (the live-0G tests, which run with
-`OG_STORAGE=on`), 25 CLI tests pass, server + web typecheck clean, MCP boots with 12 tools, and a live
-end-to-end run (real ingest -> openadapter distillation -> rollup) passes.
+Suite on `wave/base`: server tests pass, 25 CLI tests pass, server + web typecheck clean, MCP boots,
+and a live end-to-end run (real ingest -> openadapter distillation -> rollup) passes.
 
 Recommended: one PR per branch in the order below. A single squashed "wave" PR is also fine; the
 per-branch split keeps review focused.
@@ -20,13 +18,11 @@ per-branch split keeps review focused.
 
 ## S0 — shared seams (base for everything)
 Branch: folded into `wave/base` (commits `d16d01e`, `679691e`)
-Title: **Shared seams: source attribution, snapshot ledger, capture core**
+Title: **Shared seams: source attribution, capture core**
 
 Adds the small contracts the rest of the wave builds on:
 - `events.source` column (+ migration) attributing each event to the agent that captured it; threaded
   through `IngestInput`, `POST /api/ingest`, and member detail.
-- An append-only `snapshots` ledger (`recordSnapshot`/`listSnapshots`/`latestSnapshot`/`setSnapshotAnchor`)
-  recording every 0G Storage context-pack write; the rollup push now writes to it.
 - Reusable capture core `cli/lib/capture.mjs` (`resolveMember`, `lastAssistantText`, `sendEvent`);
   `reins-hook.mjs` becomes a thin Claude Code adapter over it.
 - Server + CLI test scripts (`node:test` via tsx).
@@ -61,30 +57,6 @@ Title: **Autonomous agent: claim and resolve up-for-grabs work without a human**
 
 ---
 
-## C — cross-instance sync over 0G Storage
-Branch: `feat/og-sync`
-Title: **Cross-instance context sync over 0G Storage**
-
-- `server/src/sync.ts`: `mergePack` (pure, idempotent merge), `syncPush` (build pack -> 0G Storage ->
-  ledger), `syncPull` (fetch by root hash -> merge). `db.ts` gains `upsertMemberState`.
-- MCP tools `reins_sync_push` and `reins_sync_pull`: two instances share context by handing over a hash.
-- Tests: pure merge + idempotency; a REAL 0G round-trip (push returns a Merkle root, a second DB pulls and
-  reconstructs the project), gated on `OG_STORAGE=on` + a funded wallet.
-
----
-
-## D — on-chain anchoring on 0G Chain
-Branch: `feat/og-anchor`
-Title: **On-chain anchoring: commit snapshot root hashes to 0G Chain**
-
-- `server/src/llm/og-chain.ts`: `anchorRootHash` sends a minimal self-transaction whose calldata commits
-  `reins:<rootHash>`, records the tx on the ledger row, and exposes `anchorStats`. Env gate `OG_ANCHOR`.
-- Wired (fire-and-forget) into the rollup push; surfaced in `GET /api/og/status` as an `anchor` block.
-- Tests: calldata encode/decode round-trip; a REAL testnet anchor tx (asserts chainId 16602 and that the
-  ledger row records the broadcast tx hash), gated on `OG_STORAGE=on` + a funded wallet.
-
----
-
 ## F — Slack / Discord digests
 Branch: `feat/digests`
 Title: **Rollup digests to Slack and Discord**
@@ -113,7 +85,7 @@ Title: **Smarter retrieval: scope and trim reins_context**
 
 - `context-pack.ts`: `scoreRelevance` (pure lexical overlap), `buildScopedContextPack` / `scopePack`
   rank by focused-member -> relevance -> recency and trim to an approximate token budget while always
-  keeping the goal and rollup. `buildContextPack` unchanged (back-compat; the 0G write path is untouched).
-- `mcp.ts`: `reins_context` takes optional `member` / `query` / `limit`, applied in-memory on both the
-  local and 0G-storage read paths (full pack still Merkle-verified before trimming).
+  keeping the goal and rollup. `buildContextPack` unchanged (back-compat).
+- `mcp.ts`: `reins_context` takes optional `member` / `query` / `limit`, applied in-memory before
+  trimming.
 - Tests: `scoreRelevance` units; scoped ranking + trimming; back-compat; scoped render is smaller than full.
