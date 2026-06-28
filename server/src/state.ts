@@ -11,6 +11,7 @@ import {
   listHandoffs,
   buildProfileView,
 } from "./db.js";
+import { STALE_MS } from "./liveness.js";
 
 function handoffView(h: any) {
   return {
@@ -23,10 +24,6 @@ function handoffView(h: any) {
     createdAt: h.created_at,
   };
 }
-
-// A member whose last signal is older than this reads as no longer live; an
-// "active" headline from hours ago should not be presented as the present.
-const STALE_MS = 20 * 60 * 1000;
 
 function parseArr(s: unknown): string[] {
   try {

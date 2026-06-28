@@ -10,6 +10,37 @@ process.env.REINS_DB = join(tmpdir(), `reins-seams-${randomUUID()}.db`);
 process.env.REINS_SECRET_KEY = "test-master-key-for-seams-provider-encryption";
 
 const db = await import("../db.js");
+const { liveness, livenessLabel, handoffAllowed, STALE_MS, AWAY_MS } = await import("../liveness.js");
+
+test("liveness: active within stale window, idle between, away past AWAY_MS", () => {
+  const now = 1_000_000_000_000;
+  assert.equal(liveness(now - 1_000, now), "active");
+  assert.equal(liveness(now - (STALE_MS + 1_000), now), "idle");
+  assert.equal(liveness(now - (AWAY_MS + 1_000), now), "away");
+  // Missing last_seen reads as away (never signalled).
+  assert.equal(liveness(null, now), "away");
+  // Boundaries: exactly STALE_MS is no longer active; exactly AWAY_MS is away.
+  assert.equal(liveness(now - STALE_MS, now), "idle");
+  assert.equal(liveness(now - AWAY_MS, now), "away");
+});
+
+test("livenessLabel: human-readable away/idle ages", () => {
+  const now = 1_000_000_000_000;
+  assert.equal(livenessLabel(now - 1_000, now), "active");
+  assert.match(livenessLabel(now - (AWAY_MS + 60 * 60 * 1000), now), /^AWAY \d+d$/);
+});
+
+test("handoffAllowed: away gets only blockers; present gets everything", () => {
+  // Away: drop manufactured fyi/collision, keep a genuine blocker.
+  assert.equal(handoffAllowed("away", "fyi"), false);
+  assert.equal(handoffAllowed("away", "collision"), false);
+  assert.equal(handoffAllowed("away", "blocker"), true);
+  // Present teammates receive any kind.
+  for (const k of ["fyi", "collision", "blocker"]) {
+    assert.equal(handoffAllowed("active", k), true);
+    assert.equal(handoffAllowed("idle", k), true);
+  }
+});
 
 test("source attribution: insertEvent persists an explicit source", () => {
   db.ensureProject("p1", "P1", "ws1");
