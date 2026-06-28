@@ -69,8 +69,16 @@ export function encryptSecret(plaintext: string): string {
   return Buffer.concat([iv, tag, enc]).toString("base64");
 }
 
-/** Decrypt base64(iv | tag | ciphertext) -> plaintext. Returns "" on any failure. */
+/**
+ * Decrypt base64(iv | tag | ciphertext) -> plaintext. Returns "" on failure.
+ *
+ * A failure here almost always means the master key changed (REINS_SECRET_KEY
+ * rotated, or a lost ./.reins-secret regenerated) so a previously-stored key no
+ * longer decrypts. That would silently drop the pipeline to degraded mode, so we
+ * log it loudly rather than fail in the dark. Empty input is not an error.
+ */
 export function decryptSecret(blob: string): string {
+  if (!blob) return "";
   try {
     const buf = Buffer.from(blob, "base64");
     const iv = buf.subarray(0, 12);
@@ -79,7 +87,12 @@ export function decryptSecret(blob: string): string {
     const decipher = createDecipheriv("aes-256-gcm", key(), iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
-  } catch {
+  } catch (e: any) {
+    console.error(
+      "[crypto] failed to decrypt a stored secret — the master key likely changed " +
+        "(REINS_SECRET_KEY rotated or .reins-secret lost). Re-enter the provider API key. " +
+        `(${e?.message ?? e})`
+    );
     return "";
   }
 }

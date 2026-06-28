@@ -93,8 +93,9 @@ export async function reconcile(input: {
   project: string;
   member: string;
   facts: Extract;
+  workspaceId?: string;
 }): Promise<void> {
-  const { project, member, facts } = input;
+  const { project, member, facts, workspaceId } = input;
 
   const current: any =
     db.prepare("SELECT * FROM members WHERE project = ? AND member = ?").get(project, member) ?? {};
@@ -104,6 +105,7 @@ export async function reconcile(input: {
     schema: ReconcileSchema,
     system: SYSTEM,
     maxTokens: 3000,
+    workspaceId,
     user: `CURRENT STATE
 headline: ${current.headline || "(none)"}
 goal: ${current.goal || "(none)"}

@@ -10,6 +10,7 @@ export async function extract(input: {
   member: string;
   text: string;
   projectGoal: string;
+  workspaceId?: string;
 }): Promise<Extract> {
   const goal = input.projectGoal
     ? `\n\nPROJECT GOAL (for relevance only): ${input.projectGoal}`
@@ -19,5 +20,6 @@ export async function extract(input: {
     system: SYSTEM,
     user: `TEAMMATE: ${input.member}${goal}\n\nEVENT:\n${input.text}`,
     maxTokens: 2500,
+    workspaceId: input.workspaceId,
   });
 }

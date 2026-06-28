@@ -86,7 +86,8 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
 const inflight = new Map<string, number>();
 
 async function distill(eventId: string, input: IngestInput): Promise<void> {
-  if (!llmConfigured()) {
+  const workspaceId = input.workspaceId ?? "default";
+  if (!llmConfigured(workspaceId)) {
     // No LLM configured: degrade gracefully — log a raw timeline entry so the
     // board still shows life, just without distillation.
     addTimeline(input.project, input.member, "did", input.text.slice(0, 200));
@@ -95,7 +96,7 @@ async function distill(eventId: string, input: IngestInput): Promise<void> {
   }
 
   if (PIPELINE_MODE === "multi") {
-    const t = await triage({ kind: input.kind, text: input.text });
+    const t = await triage({ kind: input.kind, text: input.text, workspaceId });
     setEventSignificance(eventId, t.significance);
     if (t.significance === "noise") return;
 
@@ -104,14 +105,16 @@ async function distill(eventId: string, input: IngestInput): Promise<void> {
       member: input.member,
       text: input.text,
       projectGoal: proj?.goal ?? "",
+      workspaceId,
     });
-    await reconcile({ project: input.project, member: input.member, facts });
+    await reconcile({ project: input.project, member: input.member, facts, workspaceId });
   } else {
     const sig = await distillCombined({
       project: input.project,
       member: input.member,
       text: input.text,
       eventId,
+      workspaceId,
     });
     setEventSignificance(eventId, sig);
   }

@@ -5,6 +5,7 @@ import {
   saveRollup,
   resolveMember,
   createHandoff,
+  projectWorkspace,
 } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
 import { bus } from "../bus.js";
@@ -66,6 +67,7 @@ ${memberBlock}
 PENDING / UP-FOR-GRABS:
 ${pendingBlock}`,
     maxTokens: 3500,
+    workspaceId: projectWorkspace(project) ?? "default",
   });
 
   saveRollup(project, r);
