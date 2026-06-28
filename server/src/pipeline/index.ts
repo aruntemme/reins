@@ -69,6 +69,9 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
     try {
       await distill(eventId, input);
     } catch (e: any) {
+      // distill() already degrades gracefully on an LLM failure (raw timeline
+      // fallback). Reaching here means something unexpected slipped past that
+      // guard; log it, but the event is already persisted so we never lose it.
       console.error("[pipeline]", input.project, input.member, e?.message ?? e);
     } finally {
       const n = (inflight.get(input.project) ?? 1) - 1;
@@ -89,31 +92,54 @@ async function distill(eventId: string, input: IngestInput): Promise<void> {
   if (!llmConfigured) {
     // No LLM configured: degrade gracefully — log a raw timeline entry so the
     // board still shows life, just without distillation.
-    addTimeline(input.project, input.member, "did", input.text.slice(0, 200));
-    bus.emitChange({ type: "timeline.added", project: input.project, member: input.member });
+    rawFallback(input);
     return;
   }
 
-  if (PIPELINE_MODE === "multi") {
-    const t = await triage({ kind: input.kind, text: input.text });
-    setEventSignificance(eventId, t.significance);
-    if (t.significance === "noise") return;
+  try {
+    if (PIPELINE_MODE === "multi") {
+      const t = await triage({ kind: input.kind, text: input.text });
+      setEventSignificance(eventId, t.significance);
+      if (t.significance === "noise") return;
 
-    const proj = getProject(input.project);
-    const facts = await extract({
-      member: input.member,
-      text: input.text,
-      projectGoal: proj?.goal ?? "",
-    });
-    await reconcile({ project: input.project, member: input.member, facts });
-  } else {
-    const sig = await distillCombined({
-      project: input.project,
-      member: input.member,
-      text: input.text,
-      eventId,
-    });
-    setEventSignificance(eventId, sig);
+      const proj = getProject(input.project);
+      const facts = await extract({
+        member: input.member,
+        text: input.text,
+        projectGoal: proj?.goal ?? "",
+      });
+      await reconcile({ project: input.project, member: input.member, facts });
+    } else {
+      const sig = await distillCombined({
+        project: input.project,
+        member: input.member,
+        text: input.text,
+        eventId,
+      });
+      setEventSignificance(eventId, sig);
+    }
+  } catch (e: any) {
+    // The LLM backend failed mid-distill — provider out of balance (402),
+    // throttled past our retry budget (429), or a malformed response. Without a
+    // fallback the timeline silently stalls while the signal timestamp keeps
+    // moving (touchMember is synchronous), so the board looks alive but frozen.
+    // Degrade to a raw timeline entry so activity stays visible until the
+    // provider recovers; the raw event is already persisted regardless.
+    console.error("[pipeline]", input.project, input.member, "distill failed, raw fallback:", e?.message ?? e);
+    rawFallback(input);
   }
   // Rollup is scheduled by the settle-gate in ingest() once the queue drains.
+}
+
+/**
+ * Degraded path: write the captured text straight to the timeline when the
+ * distiller is unavailable (no LLM configured, or the provider failed). Skips
+ * trivial/empty captures so an outage doesn't flood the board with "ok"/"ls"
+ * noise the distiller would normally drop. Secrets are already redacted upstream.
+ */
+function rawFallback(input: IngestInput): void {
+  const text = input.text.trim();
+  if (text.length < 12) return; // too thin to be a useful timeline entry
+  addTimeline(input.project, input.member, "did", text.slice(0, 200));
+  bus.emitChange({ type: "timeline.added", project: input.project, member: input.member });
 }
