@@ -54,8 +54,9 @@ export async function distillCombined(input: {
   member: string;
   text: string;
   eventId?: string;
+  workspaceId?: string;
 }): Promise<"noise" | "minor" | "major"> {
-  const { project, member, text, eventId } = input;
+  const { project, member, text, eventId, workspaceId } = input;
   const current: any =
     db.prepare("SELECT * FROM members WHERE project = ? AND member = ?").get(project, member) ?? {};
   const openPending = findOpenPending(project, member);
@@ -71,6 +72,7 @@ export async function distillCombined(input: {
     schema: DistillSchema,
     system: SYSTEM,
     maxTokens: 3500,
+    workspaceId,
     user: `PROJECT GOAL (for relevance): ${proj?.goal || "(not set)"}
 TEAMMATE ROSTER (use these exact names for mentions): ${roster.join(", ") || "(no other teammates yet)"}
 

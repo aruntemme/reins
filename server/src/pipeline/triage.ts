@@ -1,4 +1,3 @@
-import { env } from "../env.js";
 import { jsonComplete } from "../llm/client.js";
 import { TriageSchema, type Triage } from "./schemas.js";
 
@@ -18,12 +17,14 @@ Respond ONLY as JSON: {"significance","kind","reason"}.`;
 export async function triage(input: {
   kind: string;
   text: string;
+  workspaceId?: string;
 }): Promise<Triage> {
   return jsonComplete({
     schema: TriageSchema,
     system: SYSTEM,
     user: `EVENT KIND (hint): ${input.kind}\n\nEVENT TEXT:\n${input.text}`,
-    model: env.llm.fastModel,
+    fast: true,
     maxTokens: 1200,
+    workspaceId: input.workspaceId,
   });
 }

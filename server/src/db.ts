@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { env } from "./env.js";
+import { encryptSecret, decryptSecret } from "./crypto.js";
 
 export const db = new Database(env.dbPath);
 db.pragma("journal_mode = WAL");
@@ -108,23 +109,24 @@ CREATE TABLE IF NOT EXISTS rollup (
   updated_at  INTEGER NOT NULL
 );
 
--- LLM provider configurations (instance-wide). Operators add one or more
--- OpenAI-compatible providers and mark one active; the distillation pipeline
--- uses the active one. API keys are stored encrypted (AES-256-GCM) — never
--- plaintext. See crypto.ts.
+-- LLM provider configurations, scoped per workspace. A workspace's own active
+-- provider OVERRIDES the instance default (the operator's REINS_LLM_* env config,
+-- which is not editable from the dashboard) for that workspace's projects.
+-- Workspace admins manage only their own workspace's providers. API keys are
+-- stored encrypted (AES-256-GCM) — never plaintext. See crypto.ts.
 CREATE TABLE IF NOT EXISTS providers (
-  id          TEXT PRIMARY KEY,
-  label       TEXT NOT NULL,                  -- human name, e.g. "OpenAI", "Together"
-  base_url    TEXT NOT NULL,                  -- OpenAI-compatible /v1 endpoint
-  model       TEXT NOT NULL,                  -- default model id
-  fast_model  TEXT NOT NULL DEFAULT '',       -- optional cheaper/faster model
-  max_tokens  INTEGER NOT NULL DEFAULT 2000,
-  api_key_enc TEXT NOT NULL DEFAULT '',       -- AES-256-GCM(base64) ciphertext
-  active      INTEGER NOT NULL DEFAULT 0,      -- exactly one row should be 1
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default',
+  label        TEXT NOT NULL,                  -- human name, e.g. "OpenAI", "Together"
+  base_url     TEXT NOT NULL,                  -- OpenAI-compatible /v1 endpoint
+  model        TEXT NOT NULL,                  -- default model id
+  fast_model   TEXT NOT NULL DEFAULT '',       -- optional cheaper/faster model
+  max_tokens   INTEGER NOT NULL DEFAULT 2000,
+  api_key_enc  TEXT NOT NULL DEFAULT '',       -- AES-256-GCM(base64) ciphertext
+  active       INTEGER NOT NULL DEFAULT 0,      -- at most one active row PER workspace
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_providers_active ON providers(active);
 
 -- ── Accounts (human identity on top of workspaces) ──────────────
 -- A user signs up with email + password; signup also creates their first
@@ -267,6 +269,15 @@ const memCols = db.prepare("PRAGMA table_info(memberships)").all() as { name: st
 if (!memCols.some((c) => c.name === "member")) {
   db.exec("ALTER TABLE memberships ADD COLUMN member TEXT");
 }
+
+// Providers gained per-workspace scoping: pre-scoping rows belong to 'default'.
+// The index is created here (not in the schema block above) so it lands AFTER the
+// column exists on already-created provider tables.
+const providerCols = db.prepare("PRAGMA table_info(providers)").all() as { name: string }[];
+if (providerCols.length && !providerCols.some((c) => c.name === "workspace_id")) {
+  db.exec("ALTER TABLE providers ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'");
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_providers_ws ON providers(workspace_id, active)");
 
 // Source attribution: pre-source databases get the column with the historical
 // default so old events read as Claude Code (the only harness before S0).
@@ -601,11 +612,14 @@ export function saveRollup(
   });
 }
 
-// ── LLM providers (instance-wide, encrypted keys) ────────────────
-import { encryptSecret, decryptSecret } from "./crypto.js";
+// ── LLM providers (per-workspace, encrypted keys) ────────────────
+// A workspace's active provider overrides the instance default (REINS_LLM_* env)
+// for that workspace. Rows are owned by a workspace; callers pass workspaceId so
+// one workspace can never read or mutate another's (or the global env) config.
 
 export interface ProviderRow {
   id: string;
+  workspace_id: string;
   label: string;
   base_url: string;
   model: string;
@@ -620,6 +634,7 @@ export interface ProviderRow {
 /** A provider as exposed to callers: decrypted key + a masked preview for UI. */
 export interface ProviderConfig {
   id: string;
+  workspaceId: string;
   label: string;
   baseURL: string;
   model: string;
@@ -632,6 +647,7 @@ export interface ProviderConfig {
 function toConfig(r: ProviderRow): ProviderConfig {
   return {
     id: r.id,
+    workspaceId: r.workspace_id,
     label: r.label,
     baseURL: r.base_url,
     model: r.model,
@@ -651,31 +667,40 @@ export interface ProviderInput {
   apiKey?: string; // plaintext; encrypted before storage. Omit to keep existing.
 }
 
-/** All providers, newest first. */
-export function listProviders(): ProviderConfig[] {
-  return (db.prepare("SELECT * FROM providers ORDER BY created_at DESC").all() as ProviderRow[]).map(
-    toConfig
-  );
+/** A workspace's providers, newest first. */
+export function listProviders(workspaceId: string): ProviderConfig[] {
+  return (
+    db
+      .prepare("SELECT * FROM providers WHERE workspace_id = ? ORDER BY created_at DESC")
+      .all(workspaceId) as ProviderRow[]
+  ).map(toConfig);
 }
 
-/** The active provider's config, or undefined if none configured. */
-export function getActiveProvider(): ProviderConfig | undefined {
+/** A workspace's active provider, or undefined (caller falls back to the env default). */
+export function getActiveProvider(workspaceId: string): ProviderConfig | undefined {
   const r = db
-    .prepare("SELECT * FROM providers WHERE active = 1 ORDER BY updated_at DESC LIMIT 1")
-    .get() as ProviderRow | undefined;
+    .prepare(
+      "SELECT * FROM providers WHERE workspace_id = ? AND active = 1 ORDER BY updated_at DESC LIMIT 1"
+    )
+    .get(workspaceId) as ProviderRow | undefined;
   return r ? toConfig(r) : undefined;
 }
 
-/** Create a provider. The first provider ever created becomes active automatically. */
-export function createProvider(input: ProviderInput): ProviderConfig {
+/** Create a provider in a workspace. The first one in that workspace auto-activates. */
+export function createProvider(workspaceId: string, input: ProviderInput): ProviderConfig {
   const id = randomUUID();
-  const count = (db.prepare("SELECT COUNT(*) AS n FROM providers").get() as { n: number }).n;
+  const count = (
+    db.prepare("SELECT COUNT(*) AS n FROM providers WHERE workspace_id = ?").get(workspaceId) as {
+      n: number;
+    }
+  ).n;
   const t = now();
   db.prepare(
-    `INSERT INTO providers (id, label, base_url, model, fast_model, max_tokens, api_key_enc, active, created_at, updated_at)
-     VALUES (@id, @label, @base_url, @model, @fast_model, @max_tokens, @api_key_enc, @active, @created_at, @updated_at)`
+    `INSERT INTO providers (id, workspace_id, label, base_url, model, fast_model, max_tokens, api_key_enc, active, created_at, updated_at)
+     VALUES (@id, @workspace_id, @label, @base_url, @model, @fast_model, @max_tokens, @api_key_enc, @active, @created_at, @updated_at)`
   ).run({
     id,
+    workspace_id: workspaceId,
     label: input.label,
     base_url: input.baseURL,
     model: input.model,
@@ -689,9 +714,19 @@ export function createProvider(input: ProviderInput): ProviderConfig {
   return toConfig(db.prepare("SELECT * FROM providers WHERE id = ?").get(id) as ProviderRow);
 }
 
-/** Update a provider. A missing apiKey leaves the stored key untouched. */
-export function updateProvider(id: string, input: Partial<ProviderInput>): ProviderConfig | undefined {
-  const existing = db.prepare("SELECT * FROM providers WHERE id = ?").get(id) as ProviderRow | undefined;
+/**
+ * Update a provider that belongs to `workspaceId`. A missing apiKey leaves the
+ * stored key untouched. Returns undefined if the id isn't found in that
+ * workspace (so a workspace can't edit another's provider).
+ */
+export function updateProvider(
+  id: string,
+  workspaceId: string,
+  input: Partial<ProviderInput>
+): ProviderConfig | undefined {
+  const existing = db
+    .prepare("SELECT * FROM providers WHERE id = ? AND workspace_id = ?")
+    .get(id, workspaceId) as ProviderRow | undefined;
   if (!existing) return undefined;
   db.prepare(
     `UPDATE providers SET
@@ -711,28 +746,30 @@ export function updateProvider(id: string, input: Partial<ProviderInput>): Provi
   return toConfig(db.prepare("SELECT * FROM providers WHERE id = ?").get(id) as ProviderRow);
 }
 
-/** Delete a provider. If it was active, promote the most recent remaining one. */
-export function deleteProvider(id: string): boolean {
-  const wasActive =
-    (db.prepare("SELECT active FROM providers WHERE id = ?").get(id) as { active: number } | undefined)
-      ?.active === 1;
-  const r = db.prepare("DELETE FROM providers WHERE id = ?").run(id);
-  if (r.changes === 0) return false;
-  if (wasActive) {
+/** Delete a workspace's provider. If it was active, promote that workspace's next newest. */
+export function deleteProvider(id: string, workspaceId: string): boolean {
+  const existing = db
+    .prepare("SELECT active FROM providers WHERE id = ? AND workspace_id = ?")
+    .get(id, workspaceId) as { active: number } | undefined;
+  if (!existing) return false;
+  db.prepare("DELETE FROM providers WHERE id = ?").run(id);
+  if (existing.active === 1) {
     const next = db
-      .prepare("SELECT id FROM providers ORDER BY created_at DESC LIMIT 1")
-      .get() as { id: string } | undefined;
-    if (next) setActiveProvider(next.id);
+      .prepare("SELECT id FROM providers WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(workspaceId) as { id: string } | undefined;
+    if (next) setActiveProvider(next.id, workspaceId);
   }
   return true;
 }
 
-/** Make exactly one provider active. Returns false if the id doesn't exist. */
-export function setActiveProvider(id: string): boolean {
-  const exists = db.prepare("SELECT 1 FROM providers WHERE id = ?").get(id);
+/** Make one provider active within its workspace. Returns false if not found there. */
+export function setActiveProvider(id: string, workspaceId: string): boolean {
+  const exists = db
+    .prepare("SELECT 1 FROM providers WHERE id = ? AND workspace_id = ?")
+    .get(id, workspaceId);
   if (!exists) return false;
   const tx = db.transaction(() => {
-    db.prepare("UPDATE providers SET active = 0").run();
+    db.prepare("UPDATE providers SET active = 0 WHERE workspace_id = ?").run(workspaceId);
     db.prepare("UPDATE providers SET active = 1, updated_at = ? WHERE id = ?").run(now(), id);
   });
   tx();

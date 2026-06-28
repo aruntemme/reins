@@ -89,13 +89,15 @@ export function Providers() {
     <section>
       <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> model providers</div>
       <p className="sub" style={{ fontSize: 14, marginBottom: 14 }}>
-        Connect any OpenAI-compatible inference provider. Add as many as you like and mark one active —
-        the distillation pipeline uses the active one. API keys are encrypted at rest and never leave the server.
+        Connect any OpenAI-compatible inference provider for <strong>this workspace</strong>. Add as many as
+        you like and mark one active — it overrides the instance default for your team&rsquo;s projects. With
+        none added, your workspace uses the instance default. API keys are encrypted at rest and never leave the server.
       </p>
       {active?.model && (
         <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
           active model: <strong style={{ color: "var(--ink)" }}>{active.model}</strong>
           {active.label ? ` · ${active.label}` : ""}
+          {providers && providers.length === 0 ? " (instance default)" : ""}
         </p>
       )}
       {err && <div className="mono" style={{ color: "var(--blocked)", marginBottom: 12 }}>{err}</div>}

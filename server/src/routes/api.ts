@@ -364,9 +364,11 @@ api.delete("/traits/:id", requireViewer, (req, res) => {
   res.json({ ok: true });
 });
 
-// ── LLM providers (instance-wide; admin-managed; keys encrypted at rest) ──
-// API keys are NEVER returned to the client — only a masked preview + whether a
-// key is set. Mutations are admin-gated (open instance = always admin).
+// ── LLM providers (per-workspace; admin-managed; keys encrypted at rest) ──
+// A workspace's own providers override the instance default (operator REINS_LLM_*
+// env, which is NOT editable here). All routes are admin-gated and scoped to the
+// caller's workspace, so one workspace can't read or touch another's. API keys
+// are NEVER returned — only a masked preview + whether a key is set.
 function publicProvider(p: ReturnType<typeof listProviders>[number]) {
   const key = p.apiKey || "";
   const masked = key ? `${key.slice(0, 3)}…${key.slice(-4)}` : "";
@@ -383,6 +385,8 @@ function publicProvider(p: ReturnType<typeof listProviders>[number]) {
   };
 }
 
+const wsOf = (req: Request) => req.workspaceId ?? "default";
+
 const ProviderBody = z.object({
   label: z.string().min(1).max(80),
   baseURL: z.string().url(),
@@ -392,17 +396,18 @@ const ProviderBody = z.object({
   apiKey: z.string().max(400).optional(),
 });
 
-api.get("/providers", requireViewer, (_req, res) => {
+api.get("/providers", requireAdmin, (req, res) => {
+  const ws = wsOf(req);
   res.json({
-    providers: listProviders().map(publicProvider),
-    active: activeModel(),
+    providers: listProviders(ws).map(publicProvider),
+    active: activeModel(ws),
   });
 });
 
 api.post("/providers", requireAdmin, (req, res) => {
   const parsed = ProviderBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const created = createProvider(parsed.data);
+  const created = createProvider(wsOf(req), parsed.data);
   bus.emitChange({ type: "providers.changed" } as any);
   res.json({ provider: publicProvider({ ...created }) });
 });
@@ -410,20 +415,21 @@ api.post("/providers", requireAdmin, (req, res) => {
 api.put("/providers/:id", requireAdmin, (req, res) => {
   const parsed = ProviderBody.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const updated = updateProvider(req.params.id!, parsed.data);
+  const updated = updateProvider(req.params.id!, wsOf(req), parsed.data);
   if (!updated) return res.status(404).json({ error: "no such provider" });
   bus.emitChange({ type: "providers.changed" } as any);
   res.json({ provider: publicProvider({ ...updated }) });
 });
 
 api.post("/providers/:id/activate", requireAdmin, (req, res) => {
-  if (!setActiveProvider(req.params.id!)) return res.status(404).json({ error: "no such provider" });
+  const ws = wsOf(req);
+  if (!setActiveProvider(req.params.id!, ws)) return res.status(404).json({ error: "no such provider" });
   bus.emitChange({ type: "providers.changed" } as any);
-  res.json({ ok: true, active: activeModel() });
+  res.json({ ok: true, active: activeModel(ws) });
 });
 
 api.delete("/providers/:id", requireAdmin, (req, res) => {
-  if (!deleteProvider(req.params.id!)) return res.status(404).json({ error: "no such provider" });
+  if (!deleteProvider(req.params.id!, wsOf(req))) return res.status(404).json({ error: "no such provider" });
   bus.emitChange({ type: "providers.changed" } as any);
   res.json({ ok: true });
 });
