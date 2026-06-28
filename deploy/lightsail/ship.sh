@@ -57,6 +57,7 @@ fi
 echo "→ copying server + compose to ${IP}"
 rsync -az -e "ssh -i $KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
   --exclude node_modules --exclude '*.db*' --exclude '.env' \
+  --exclude '.reins-secret' --exclude '.0g-key' \
   "$ROOT/server" "$ROOT/docker-compose.yml" "ubuntu@${IP}:/home/ubuntu/reins/"
 if [ "$HAS_ENV" = 1 ]; then
   echo "→ pushing .env.deploy"

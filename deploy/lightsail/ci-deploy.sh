@@ -51,6 +51,7 @@ fi
 
 echo "→ syncing code + rebuilding"
 rsync -a --delete --exclude node_modules --exclude '*.db*' --exclude '.env' \
+  --exclude '.reins-secret' --exclude '.0g-key' \
   "${SRC}/server" "${SRC}/docker-compose.yml" "${APP}/"
 docker compose up -d --build
 

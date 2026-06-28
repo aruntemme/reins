@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 
 // Isolate the DB on a fresh temp file BEFORE importing anything that opens it.
 process.env.REINS_DB = join(tmpdir(), `reins-seams-${randomUUID()}.db`);
+// Pin the encryption key so the provider tests never auto-generate a .reins-secret file.
+process.env.REINS_SECRET_KEY = "test-master-key-for-seams-provider-encryption";
 
 const db = await import("../db.js");
 

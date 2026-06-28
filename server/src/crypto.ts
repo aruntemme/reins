@@ -14,7 +14,7 @@ import {
   scryptSync,
 } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const CONTEXT = "reins:provider-secret:v1"; // scrypt salt — domain-separates the key
 
@@ -27,11 +27,21 @@ function key(): Buffer {
   return _key;
 }
 
+/**
+ * Location of the auto-generated key file: alongside the DB (REINS_DB). This way
+ * it lands on the same persistent volume as the database in production (so it
+ * survives container rebuilds) and in /tmp during tests — never the repo tree.
+ */
+function secretFilePath(): string {
+  const dbPath = process.env.REINS_DB?.trim() || "./reins.db";
+  return resolve(dirname(resolve(process.cwd(), dbPath)), ".reins-secret");
+}
+
 /** The raw master secret: REINS_SECRET_KEY, else a persisted local key file. */
 function masterSecret(): string {
   const fromEnv = process.env.REINS_SECRET_KEY?.trim();
   if (fromEnv) return fromEnv;
-  const p = resolve(process.cwd(), ".reins-secret");
+  const p = secretFilePath();
   try {
     if (existsSync(p)) return readFileSync(p, "utf8").trim();
     const generated = randomBytes(32).toString("hex");
