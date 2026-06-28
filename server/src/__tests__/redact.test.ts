@@ -47,7 +47,7 @@ test("masks key=secret style assignments, keeping the field name", () => {
 });
 
 test("leaves ordinary content and hex hashes alone", () => {
-  // 0G Storage root hashes / git SHAs must remain readable.
+  // Hex hashes / git SHAs must remain readable.
   const keep = [
     "rolled up the digest job",
     "root hash 0x3f9a1c2bd4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081920a3b4c5",

@@ -49,8 +49,8 @@ export default function Dashboard() {
 
         {!llm && loaded && (
           <div className="banner" style={{ marginBottom: 24 }}>
-            ⚠ No LLM configured: running in degraded mode (raw capture, no distillation). Set
-            <code style={{ margin: "0 4px" }}>REINS_LLM_API_KEY</code> in the server.
+            ⚠ No model provider configured: running in degraded mode (raw capture, no distillation). Add one in{" "}
+            <Link href="/settings" style={{ textDecoration: "underline" }}>settings → model providers</Link>.
           </div>
         )}
 

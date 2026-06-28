@@ -108,21 +108,23 @@ CREATE TABLE IF NOT EXISTS rollup (
   updated_at  INTEGER NOT NULL
 );
 
--- Append-only ledger of every context-pack snapshot written to 0G Storage.
--- The rollup table holds only the latest pointer per project; this keeps the
--- full history. Cross-instance sync (C) reads/writes it; chain anchoring (D)
--- fills anchored_tx with the on-chain anchor transaction.
-CREATE TABLE IF NOT EXISTS snapshots (
-  id           TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL DEFAULT 'default',
-  project      TEXT NOT NULL,
-  root_hash    TEXT NOT NULL,             -- 0G Storage Merkle root (content address)
-  tx_hash      TEXT NOT NULL DEFAULT '',  -- 0G Storage upload tx
-  anchored_tx  TEXT NOT NULL DEFAULT '',  -- 0G Chain anchor tx (set by anchoring)
-  created_at   INTEGER NOT NULL
+-- LLM provider configurations (instance-wide). Operators add one or more
+-- OpenAI-compatible providers and mark one active; the distillation pipeline
+-- uses the active one. API keys are stored encrypted (AES-256-GCM) — never
+-- plaintext. See crypto.ts.
+CREATE TABLE IF NOT EXISTS providers (
+  id          TEXT PRIMARY KEY,
+  label       TEXT NOT NULL,                  -- human name, e.g. "OpenAI", "Together"
+  base_url    TEXT NOT NULL,                  -- OpenAI-compatible /v1 endpoint
+  model       TEXT NOT NULL,                  -- default model id
+  fast_model  TEXT NOT NULL DEFAULT '',       -- optional cheaper/faster model
+  max_tokens  INTEGER NOT NULL DEFAULT 2000,
+  api_key_enc TEXT NOT NULL DEFAULT '',       -- AES-256-GCM(base64) ciphertext
+  active      INTEGER NOT NULL DEFAULT 0,      -- exactly one row should be 1
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_snapshots ON snapshots(project, created_at);
-CREATE INDEX IF NOT EXISTS idx_snapshots_root ON snapshots(root_hash);
+CREATE INDEX IF NOT EXISTS idx_providers_active ON providers(active);
 
 -- ── Accounts (human identity on top of workspaces) ──────────────
 -- A user signs up with email + password; signup also creates their first
@@ -264,18 +266,6 @@ if (!projCols.some((c) => c.name === "workspace_id")) {
 const memCols = db.prepare("PRAGMA table_info(memberships)").all() as { name: string }[];
 if (!memCols.some((c) => c.name === "member")) {
   db.exec("ALTER TABLE memberships ADD COLUMN member TEXT");
-}
-
-// 0G Storage provenance: each rollup snapshot is uploaded to 0G Storage and
-// addressed by its Merkle root hash (+ the upload tx). These columns hold the
-// latest verifiable pointer for the project's shared context.
-const rollupCols = db.prepare("PRAGMA table_info(rollup)").all() as { name: string }[];
-for (const [col, ddl] of [
-  ["root_hash", "ALTER TABLE rollup ADD COLUMN root_hash TEXT NOT NULL DEFAULT ''"],
-  ["tx_hash", "ALTER TABLE rollup ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''"],
-  ["anchored_at", "ALTER TABLE rollup ADD COLUMN anchored_at INTEGER NOT NULL DEFAULT 0"],
-] as const) {
-  if (!rollupCols.some((c) => c.name === col)) db.exec(ddl);
 }
 
 // Source attribution: pre-source databases get the column with the historical
@@ -611,62 +601,142 @@ export function saveRollup(
   });
 }
 
-/** Record the 0G Storage pointer for a project's latest rollup snapshot. */
-export function setRollupProvenance(project: string, rootHash: string, txHash: string) {
-  db.prepare(
-    `UPDATE rollup SET root_hash = @root_hash, tx_hash = @tx_hash, anchored_at = @anchored_at
-     WHERE project = @project`
-  ).run({ project, root_hash: rootHash, tx_hash: txHash, anchored_at: now() });
-}
+// ── LLM providers (instance-wide, encrypted keys) ────────────────
+import { encryptSecret, decryptSecret } from "./crypto.js";
 
-// ── Snapshot ledger (history of 0G Storage context-pack writes) ──
-export interface SnapshotRow {
+export interface ProviderRow {
   id: string;
-  workspace_id: string;
-  project: string;
-  root_hash: string;
-  tx_hash: string;
-  anchored_tx: string;
+  label: string;
+  base_url: string;
+  model: string;
+  fast_model: string;
+  max_tokens: number;
+  api_key_enc: string;
+  active: number;
   created_at: number;
+  updated_at: number;
 }
 
-/** Append a snapshot pointer to the ledger. Returns the new row id. */
-export function recordSnapshot(s: {
-  workspaceId?: string;
-  project: string;
-  rootHash: string;
-  txHash?: string;
-}): string {
+/** A provider as exposed to callers: decrypted key + a masked preview for UI. */
+export interface ProviderConfig {
+  id: string;
+  label: string;
+  baseURL: string;
+  model: string;
+  fastModel: string;
+  maxTokens: number;
+  apiKey: string; // decrypted (server-side use)
+  active: boolean;
+}
+
+function toConfig(r: ProviderRow): ProviderConfig {
+  return {
+    id: r.id,
+    label: r.label,
+    baseURL: r.base_url,
+    model: r.model,
+    fastModel: r.fast_model || r.model,
+    maxTokens: r.max_tokens,
+    apiKey: r.api_key_enc ? decryptSecret(r.api_key_enc) : "",
+    active: r.active === 1,
+  };
+}
+
+export interface ProviderInput {
+  label: string;
+  baseURL: string;
+  model: string;
+  fastModel?: string;
+  maxTokens?: number;
+  apiKey?: string; // plaintext; encrypted before storage. Omit to keep existing.
+}
+
+/** All providers, newest first. */
+export function listProviders(): ProviderConfig[] {
+  return (db.prepare("SELECT * FROM providers ORDER BY created_at DESC").all() as ProviderRow[]).map(
+    toConfig
+  );
+}
+
+/** The active provider's config, or undefined if none configured. */
+export function getActiveProvider(): ProviderConfig | undefined {
+  const r = db
+    .prepare("SELECT * FROM providers WHERE active = 1 ORDER BY updated_at DESC LIMIT 1")
+    .get() as ProviderRow | undefined;
+  return r ? toConfig(r) : undefined;
+}
+
+/** Create a provider. The first provider ever created becomes active automatically. */
+export function createProvider(input: ProviderInput): ProviderConfig {
   const id = randomUUID();
+  const count = (db.prepare("SELECT COUNT(*) AS n FROM providers").get() as { n: number }).n;
+  const t = now();
   db.prepare(
-    `INSERT INTO snapshots (id, workspace_id, project, root_hash, tx_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, s.workspaceId ?? "default", s.project, s.rootHash, s.txHash ?? "", now());
-  return id;
+    `INSERT INTO providers (id, label, base_url, model, fast_model, max_tokens, api_key_enc, active, created_at, updated_at)
+     VALUES (@id, @label, @base_url, @model, @fast_model, @max_tokens, @api_key_enc, @active, @created_at, @updated_at)`
+  ).run({
+    id,
+    label: input.label,
+    base_url: input.baseURL,
+    model: input.model,
+    fast_model: input.fastModel ?? "",
+    max_tokens: input.maxTokens ?? 2000,
+    api_key_enc: input.apiKey ? encryptSecret(input.apiKey) : "",
+    active: count === 0 ? 1 : 0,
+    created_at: t,
+    updated_at: t,
+  });
+  return toConfig(db.prepare("SELECT * FROM providers WHERE id = ?").get(id) as ProviderRow);
 }
 
-/** Most recent snapshots for a project, newest first. */
-export function listSnapshots(project: string, limit = 20): SnapshotRow[] {
-  return db
-    .prepare("SELECT * FROM snapshots WHERE project = ? ORDER BY created_at DESC LIMIT ?")
-    .all(project, limit) as SnapshotRow[];
+/** Update a provider. A missing apiKey leaves the stored key untouched. */
+export function updateProvider(id: string, input: Partial<ProviderInput>): ProviderConfig | undefined {
+  const existing = db.prepare("SELECT * FROM providers WHERE id = ?").get(id) as ProviderRow | undefined;
+  if (!existing) return undefined;
+  db.prepare(
+    `UPDATE providers SET
+       label = @label, base_url = @base_url, model = @model, fast_model = @fast_model,
+       max_tokens = @max_tokens, api_key_enc = @api_key_enc, updated_at = @updated_at
+     WHERE id = @id`
+  ).run({
+    id,
+    label: input.label ?? existing.label,
+    base_url: input.baseURL ?? existing.base_url,
+    model: input.model ?? existing.model,
+    fast_model: input.fastModel ?? existing.fast_model,
+    max_tokens: input.maxTokens ?? existing.max_tokens,
+    api_key_enc: input.apiKey ? encryptSecret(input.apiKey) : existing.api_key_enc,
+    updated_at: now(),
+  });
+  return toConfig(db.prepare("SELECT * FROM providers WHERE id = ?").get(id) as ProviderRow);
 }
 
-/** The latest snapshot for a project, or undefined if none recorded. */
-export function latestSnapshot(project: string): SnapshotRow | undefined {
-  return db
-    .prepare("SELECT * FROM snapshots WHERE project = ? ORDER BY created_at DESC LIMIT 1")
-    .get(project) as SnapshotRow | undefined;
+/** Delete a provider. If it was active, promote the most recent remaining one. */
+export function deleteProvider(id: string): boolean {
+  const wasActive =
+    (db.prepare("SELECT active FROM providers WHERE id = ?").get(id) as { active: number } | undefined)
+      ?.active === 1;
+  const r = db.prepare("DELETE FROM providers WHERE id = ?").run(id);
+  if (r.changes === 0) return false;
+  if (wasActive) {
+    const next = db
+      .prepare("SELECT id FROM providers ORDER BY created_at DESC LIMIT 1")
+      .get() as { id: string } | undefined;
+    if (next) setActiveProvider(next.id);
+  }
+  return true;
 }
 
-/** Record a 0G Chain anchor tx against the most recent snapshot with this root hash. */
-export function setSnapshotAnchor(rootHash: string, anchoredTx: string): boolean {
-  const row = db
-    .prepare("SELECT id FROM snapshots WHERE root_hash = ? ORDER BY created_at DESC LIMIT 1")
-    .get(rootHash) as { id: string } | undefined;
-  if (!row) return false;
-  const r = db.prepare("UPDATE snapshots SET anchored_tx = ? WHERE id = ?").run(anchoredTx, row.id);
-  return r.changes > 0;
+/** Make exactly one provider active. Returns false if the id doesn't exist. */
+export function setActiveProvider(id: string): boolean {
+  const exists = db.prepare("SELECT 1 FROM providers WHERE id = ?").get(id);
+  if (!exists) return false;
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE providers SET active = 0").run();
+    db.prepare("UPDATE providers SET active = 1, updated_at = ? WHERE id = ?").run(now(), id);
+  });
+  tx();
+  return true;
 }
 
 // ── Short-term goals ──────────────────────────────────────────
@@ -1272,21 +1342,16 @@ export function reassignProjects(fromWs: string, toWs: string): number {
 }
 
 /**
- * Move a single project (and its snapshot ledger) to another workspace. Child
- * rows — events, members, timeline, pending, handoffs, rollup — are keyed by
- * project id alone, so they follow without touching; only `snapshots` carries
- * its own workspace_id and is updated here. Returns false if the project or the
- * target workspace doesn't exist. Runs in one transaction.
+ * Move a single project to another workspace. Child rows — events, members,
+ * timeline, pending, handoffs, rollup — are keyed by project id alone, so they
+ * follow without touching. Returns false if the project or the target workspace
+ * doesn't exist.
  */
 export function moveProject(projectId: string, toWs: string): boolean {
   const wsExists = db.prepare("SELECT 1 FROM workspaces WHERE id = ?").get(toWs);
   if (!wsExists) return false;
   if (!projectWorkspace(projectId)) return false;
-  const tx = db.transaction(() => {
-    db.prepare("UPDATE projects SET workspace_id = ?, updated_at = ? WHERE id = ?").run(toWs, now(), projectId);
-    db.prepare("UPDATE snapshots SET workspace_id = ? WHERE project = ?").run(toWs, projectId);
-  });
-  tx();
+  db.prepare("UPDATE projects SET workspace_id = ?, updated_at = ? WHERE id = ?").run(toWs, now(), projectId);
   return true;
 }
 

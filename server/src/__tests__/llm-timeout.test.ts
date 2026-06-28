@@ -21,7 +21,6 @@ const { server, port } = await hangingServer();
 
 // Point the LLM client at the hung server with a short timeout BEFORE importing it.
 process.env.REINS_DB = join(tmpdir(), `reins-timeout-${randomUUID()}.db`);
-process.env.REINS_LLM_PROVIDER = "openai";
 process.env.REINS_LLM_BASE_URL = `http://127.0.0.1:${port}/v1`;
 process.env.REINS_LLM_API_KEY = "test-key";
 process.env.REINS_LLM_MODEL = "test-model";

@@ -6,7 +6,7 @@
  * "decided" entry). Conservative by design: it masks recognised credential
  * shapes — provider API keys, PEM private keys, JWTs, and `key = "secret"`
  * assignments — and leaves ordinary content alone, including hex hashes such as
- * 0G Storage root hashes, which must stay readable.
+ * git SHAs, which must stay readable.
  *
  * Keep this in sync with cli/lib/redact.mjs (the client-side mirror).
  */

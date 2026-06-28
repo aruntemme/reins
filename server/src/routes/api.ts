@@ -12,13 +12,13 @@ import {
 } from "../db.js";
 import type { GoalRow, TraitRow, TraitType } from "../db.js";
 import { bus } from "../bus.js";
-import { llmConfigured } from "../llm/client.js";
-import { ogStats, ogRefreshBalance } from "../llm/og-compute.js";
-import { storageStats } from "../llm/og-storage.js";
-import { anchorStats } from "../llm/og-chain.js";
-import { env, usesOG, usesRouter } from "../env.js";
+import { llmConfigured, activeModel } from "../llm/client.js";
+import {
+  listProviders, createProvider, updateProvider, deleteProvider, setActiveProvider,
+} from "../db.js";
+import { env } from "../env.js";
 import type { Request, Response } from "express";
-import { requireIngest, requireViewer, authorizeProject, isWorkspaceAdmin } from "../middleware.js";
+import { requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin } from "../middleware.js";
 
 export const api = Router();
 
@@ -48,7 +48,7 @@ api.post("/ingest", requireIngest, async (req, res) => {
 // ── Read ──────────────────────────────────────────────────────
 api.get("/projects", requireViewer, (req, res) => {
   const ws = env.authEnabled ? req.workspaceId : undefined;
-  res.json({ projects: projectsList(ws), llm: llmConfigured, auth: env.authEnabled });
+  res.json({ projects: projectsList(ws), llm: llmConfigured(), auth: env.authEnabled });
 });
 
 api.get("/projects/:id", requireViewer, (req, res) => {
@@ -364,46 +364,66 @@ api.delete("/traits/:id", requireViewer, (req, res) => {
   res.json({ ok: true });
 });
 
-// ── 0G status (powering the dashboard's "running on 0G" surface) ──
-api.get("/og/status", requireViewer, async (_req, res) => {
-  const computeOn = usesOG || usesRouter;
-  if (!computeOn && !env.og.storageEnabled) return res.json({ enabled: false });
-  if (usesOG) await ogRefreshBalance();
+// ── LLM providers (instance-wide; admin-managed; keys encrypted at rest) ──
+// API keys are NEVER returned to the client — only a masked preview + whether a
+// key is set. Mutations are admin-gated (open instance = always admin).
+function publicProvider(p: ReturnType<typeof listProviders>[number]) {
+  const key = p.apiKey || "";
+  const masked = key ? `${key.slice(0, 3)}…${key.slice(-4)}` : "";
+  return {
+    id: p.id,
+    label: p.label,
+    baseURL: p.baseURL,
+    model: p.model,
+    fastModel: p.fastModel,
+    maxTokens: p.maxTokens,
+    active: p.active,
+    hasKey: Boolean(key),
+    keyMask: masked,
+  };
+}
+
+const ProviderBody = z.object({
+  label: z.string().min(1).max(80),
+  baseURL: z.string().url(),
+  model: z.string().min(1).max(120),
+  fastModel: z.string().max(120).optional(),
+  maxTokens: z.number().int().positive().max(200000).optional(),
+  apiKey: z.string().max(400).optional(),
+});
+
+api.get("/providers", requireViewer, (_req, res) => {
   res.json({
-    enabled: true,
-    network: "0G Galileo Testnet",
-    chainId: 16602,
-    explorer: env.og.explorer,
-    compute: computeOn
-      ? {
-          mode: ogStats.mode, // "router" (pc.0g.ai) | "broker" (SDK)
-          private: ogStats.private,
-          ready: ogStats.ready,
-          provider: ogStats.provider || undefined,
-          model: ogStats.model,
-          endpoint: ogStats.endpoint,
-          requests: ogStats.requests,
-          verified: ogStats.verified,
-          unverifiable: ogStats.unverifiable,
-          balance: ogStats.balance,
-          lastError: ogStats.lastError || undefined,
-        }
-      : null,
-    storage: env.og.storageEnabled
-      ? {
-          uploads: storageStats.uploads,
-          lastRootHash: storageStats.lastRootHash || undefined,
-          explorer: env.og.storageExplorer,
-          lastError: storageStats.lastError || undefined,
-        }
-      : null,
-    // On-chain anchoring audit trail: every snapshot root committed to 0G Chain.
-    anchor: {
-      enabled: env.og.anchorEnabled,
-      anchors: anchorStats.anchors,
-      lastTx: anchorStats.lastTx || undefined,
-      explorer: env.og.explorer,
-      lastError: anchorStats.lastError || undefined,
-    },
+    providers: listProviders().map(publicProvider),
+    active: activeModel(),
   });
+});
+
+api.post("/providers", requireAdmin, (req, res) => {
+  const parsed = ProviderBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const created = createProvider(parsed.data);
+  bus.emitChange({ type: "providers.changed" } as any);
+  res.json({ provider: publicProvider({ ...created }) });
+});
+
+api.put("/providers/:id", requireAdmin, (req, res) => {
+  const parsed = ProviderBody.partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const updated = updateProvider(req.params.id!, parsed.data);
+  if (!updated) return res.status(404).json({ error: "no such provider" });
+  bus.emitChange({ type: "providers.changed" } as any);
+  res.json({ provider: publicProvider({ ...updated }) });
+});
+
+api.post("/providers/:id/activate", requireAdmin, (req, res) => {
+  if (!setActiveProvider(req.params.id!)) return res.status(404).json({ error: "no such provider" });
+  bus.emitChange({ type: "providers.changed" } as any);
+  res.json({ ok: true, active: activeModel() });
+});
+
+api.delete("/providers/:id", requireAdmin, (req, res) => {
+  if (!deleteProvider(req.params.id!)) return res.status(404).json({ error: "no such provider" });
+  bus.emitChange({ type: "providers.changed" } as any);
+  res.json({ ok: true });
 });

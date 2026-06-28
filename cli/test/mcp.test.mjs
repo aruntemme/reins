@@ -60,7 +60,7 @@ function mcpClient(child) {
 test("HTTP MCP: handshake, list, and read/write tools over the real API", async () => {
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
-  const env = { ...process.env, PORT: String(port), REINS_DB: join(tmpdir(), `reins-mcp-${randomUUID()}.db`), REINS_AUTH: "on", REINS_SESSION_SECRET: "mcp-test", REINS_LLM_PROVIDER: "openai", REINS_LLM_API_KEY: "" };
+  const env = { ...process.env, PORT: String(port), REINS_DB: join(tmpdir(), `reins-mcp-${randomUUID()}.db`), REINS_AUTH: "on", REINS_SESSION_SECRET: "mcp-test", REINS_LLM_API_KEY: "" };
   const server = spawn(process.execPath, ["--import", "tsx", SERVER_INDEX], { cwd: SERVER_DIR, env, stdio: ["ignore", "pipe", "pipe"] });
   server.stderr.on("data", (d) => process.stderr.write(`[server] ${d}`));
 

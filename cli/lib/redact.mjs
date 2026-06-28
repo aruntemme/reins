@@ -5,7 +5,7 @@
  *
  * Dependency-free (Node built-ins only). Keep in sync with server/src/redact.ts.
  * Conservative: masks recognised credential shapes and leaves ordinary content,
- * including hex hashes like 0G root hashes, untouched.
+ * including hex hashes like git SHAs, untouched.
  */
 
 const MASK = "‹redacted›";

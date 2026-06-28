@@ -28,7 +28,7 @@ running the whole thing yourself.
 ## 1. How the pieces fit
 
 ```
-                          your AI provider (OpenAI-compatible, or 0G Compute)
+                          your AI provider (any OpenAI-compatible endpoint)
                                           ^
                                           | inference (distillation)
                                           |
@@ -59,7 +59,7 @@ the box directly (and calls the backend for writes).
 
 - **Node.js 22** recommended (the Docker image uses `node:22`; the CLI requires `>=18`).
 - **An OpenAI-compatible inference endpoint.** Anything that speaks the OpenAI API works: OpenAI,
-  OpenRouter, Together, Groq, a local vLLM, Ollama, or LM Studio, or the 0G Private Computer router.
+  OpenRouter, Together, Groq, a local vLLM, Ollama, or LM Studio.
   Without one, Reins still captures raw events but will not distill them into status.
 - `git`, and a coding agent (Claude Code) on each teammate's machine for the hook.
 
@@ -83,25 +83,21 @@ The backend lives in `server/`. It is Express + `better-sqlite3`, run with `tsx`
 cp server/.env.example server/.env
 ```
 
-Open `server/.env` and set, at minimum, your inference provider. The two common shapes:
+There are two ways to configure inference:
 
-**Any OpenAI-compatible provider (default):**
+**Recommended -- configure model providers in the dashboard.** Once the backend and dashboard
+are running, go to **Settings -> model providers** and add a provider (base URL, model, API key).
+Provider API keys are encrypted at rest (AES-256-GCM) with `REINS_SECRET_KEY` as the master key
+(auto-generated into `.reins-secret` if you do not set one).
+
+**Fallback -- set env vars in `server/.env`.** If no provider is configured in the dashboard, the
+backend falls back to these:
 
 ```bash
-REINS_LLM_PROVIDER=openai
 REINS_LLM_BASE_URL=https://api.openai.com/v1   # or OpenRouter / Ollama / vLLM / LM Studio
 REINS_LLM_API_KEY=sk-...                        # any non-empty string for local servers
 REINS_LLM_MODEL=gpt-4o                          # your main reasoning model
 REINS_LLM_MODEL_FAST=gpt-4o-mini                # optional cheaper model for the triage gate
-```
-
-**0G Compute (via the 0G Private Computer router, OpenAI-compatible):**
-
-```bash
-REINS_LLM_PROVIDER=0g-router
-OG_ROUTER_API_KEY=...
-REINS_LLM_MODEL=...
-OG_STORAGE=on            # optional: verifiable snapshots on 0G Storage
 ```
 
 See the [full env reference](#11-full-environment-variable-reference) for every variable.
@@ -143,8 +139,8 @@ the first time the server starts.
 - **Companion files:** SQLite in WAL mode also writes `reins.db-wal` and `reins.db-shm`. These are
   normal; leave them next to the main file. All three are gitignored (`*.db`, `*.db-wal`, `*.db-shm`).
 - **What it holds:** workspaces, users, memberships, tokens, projects, raw events, per-member state,
-  timeline, pending items, handoffs, goals and checklist items, the team rollup, and (if 0G Storage is
-  on) the snapshot ledger.
+  timeline, pending items, handoffs, goals and checklist items, the team rollup, and the encrypted
+  model-provider settings.
 
 ### Backups
 
@@ -313,8 +309,7 @@ uses. The HTTP MCP above is the right choice for everyone else.
 
 Reads: `reins_context`, `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs`,
 `reins_goals`, `reins_profile`. Writes: `reins_note`, `reins_claim`, `reins_resolve`,
-`reins_handoff_ack`, `reins_goal_add`, `reins_goal_check`. The local MCP additionally exposes
-`reins_pull_context` (rebuild a snapshot from a 0G Storage root hash alone).
+`reins_handoff_ack`, `reins_goal_add`, `reins_goal_check`.
 
 ---
 
@@ -428,12 +423,15 @@ which overrides the file). `server/.env.example` ships the common ones; this is 
 | `REINS_COOKIE_SECURE` | `auto` | Session cookie Secure flag: `auto` (prod only) \| `on` \| `off`. |
 | `REINS_CORS_ORIGIN` | (empty) | Comma-separated dashboard origins for credentialed CORS. Empty = unrestricted. |
 | `REINS_INGEST_KEY` | (empty) | Legacy shared ingest key, honored only when `REINS_AUTH=off`. |
+| `REINS_SECRET_KEY` | (auto) | Master key for encrypting model-provider API keys at rest (AES-256-GCM). Auto-generated into `.reins-secret` if unset. |
 
 ### Inference (LLM)
 
+Providers are normally configured in the dashboard (**Settings -> model providers**) and stored
+encrypted in the database. These env vars are the fallback used when no provider is configured there.
+
 | Var | Default | Purpose |
 |---|---|---|
-| `REINS_LLM_PROVIDER` | `openai` | `openai` \| `0g-router` \| `0g`. |
 | `REINS_LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint. |
 | `REINS_LLM_API_KEY` | (empty) | API key for the endpoint (any non-empty string for local servers). |
 | `REINS_LLM_MODEL` | `gpt-4o` | Main model: extract, reconcile, rollup. |
@@ -454,35 +452,6 @@ which overrides the file). `server/.env.example` ships the common ones; this is 
 |---|---|---|
 | `REINS_SLACK_WEBHOOK` | (empty) | Post a digest to Slack on each team rollup. |
 | `REINS_DISCORD_WEBHOOK` | (empty) | Same, for Discord. |
-
-### 0G Compute -- Private Computer router
-
-| Var | Default | Purpose |
-|---|---|---|
-| `OG_ROUTER_API_KEY` | (empty) | Router API key (manage at the 0G PC dashboard). |
-| `OG_ROUTER_BASE_URL` | `https://router-api-testnet.integratenetwork.work/v1` | Router endpoint. Override for mainnet. |
-| `OG_PRIVATE` | `off` | Route inference to privacy-enabled TEE providers. |
-| `OG_MAX_OUTPUT` | `2048` | Output token cap for the router. |
-
-### 0G Compute -- broker SDK (advanced)
-
-| Var | Default | Purpose |
-|---|---|---|
-| `OG_PRIVATE_KEY` | (empty, else `./.0g-key`) | Chain wallet key; signs inference billing and storage uploads. |
-| `OG_COMPUTE_PROVIDER` | (empty) | Pin a specific provider address; else auto-pick. |
-| `OG_LEDGER_TOPUP` | `1` | Top the broker ledger up to N 0G when low (`0` = never). |
-
-### 0G Storage and Chain
-
-| Var | Default | Purpose |
-|---|---|---|
-| `OG_STORAGE` | `off` | Store verifiable, content-addressed snapshots on 0G Storage. |
-| `OG_STORAGE_INDEXER` | `https://indexer-storage-testnet-turbo.0g.ai` | 0G Storage indexer. |
-| `OG_STORAGE_RPC` | falls back to `OG_RPC_URL` | RPC for storage transactions. |
-| `OG_RPC_URL` | `https://evmrpc-testnet.0g.ai` | 0G chain RPC. |
-| `OG_ANCHOR` | `off` | Commit each snapshot's Merkle root to 0G Chain (spends gas). |
-| `OG_EXPLORER` | `https://chainscan-galileo.0g.ai` | Block explorer URL (display). |
-| `OG_STORAGE_EXPLORER` | `https://storagescan-galileo.0g.ai` | Storage explorer URL (display). |
 
 ### Frontend (web)
 

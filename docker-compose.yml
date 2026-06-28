@@ -12,21 +12,15 @@ services:
       REINS_COOKIE_SECURE: "on"
       REINS_DB: "/data/reins.db" # persist SQLite on the volume across rebuilds
       REINS_CORS_ORIGIN: "${REINS_CORS_ORIGIN}" # your Vercel dashboard origin
-      # Inference backend: 0g-router | openai | 0g
-      REINS_LLM_PROVIDER: "${REINS_LLM_PROVIDER:-openai}"
-      REINS_LLM_MODEL: "${REINS_LLM_MODEL}"
-      # 0G Compute (0G Private Computer router)
-      OG_ROUTER_API_KEY: "${OG_ROUTER_API_KEY:-}"
-      OG_ROUTER_BASE_URL: "${OG_ROUTER_BASE_URL:-}"
-      OG_PRIVATE: "${OG_PRIVATE:-off}"
-      # 0G Storage
-      OG_STORAGE: "${OG_STORAGE:-off}"
-      OG_PRIVATE_KEY: "${OG_PRIVATE_KEY:-}"
-      OG_RPC_URL: "${OG_RPC_URL:-}"
-      OG_STORAGE_INDEXER: "${OG_STORAGE_INDEXER:-}"
-      # OpenAI-compatible fallback (used only when REINS_LLM_PROVIDER=openai)
-      REINS_LLM_BASE_URL: "${REINS_LLM_BASE_URL}"
-      REINS_LLM_API_KEY: "${REINS_LLM_API_KEY}"
+      # Master key for encrypting stored provider API keys at rest (AES-256-GCM).
+      # Set a long random value; otherwise the server generates one into /data/.reins-secret.
+      REINS_SECRET_KEY: "${REINS_SECRET_KEY:-}"
+      # Model providers are normally configured in the dashboard (Settings → model
+      # providers; encrypted in the DB). These env vars are an optional fallback
+      # used only until a provider is added there.
+      REINS_LLM_MODEL: "${REINS_LLM_MODEL:-}"
+      REINS_LLM_BASE_URL: "${REINS_LLM_BASE_URL:-}"
+      REINS_LLM_API_KEY: "${REINS_LLM_API_KEY:-}"
     volumes:
       - reins-data:/data
 
