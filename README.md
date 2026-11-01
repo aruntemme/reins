@@ -31,15 +31,22 @@ streams updates over SSE; the MCP server lets any agent pull the same status as 
 
 ## The distillation pipeline
 
-Each incoming event is processed in steps so that most of the noise is dropped early:
+By default (`REINS_PIPELINE_MODE=combined`) each incoming event takes **one** model call that does
+three jobs at once; `REINS_PIPELINE_MODE=multi` runs them as separate calls:
 
-1. **Triage** (fast model) sorts the event into noise, minor, or major. Low-value events stop here.
+1. **Triage** sorts the event into noise, minor, or major. Noise stops here.
 2. **Extract** pulls structured facts: intent, actions, files touched, decisions, blockers, next steps.
-3. **Reconcile** merges those facts into the person's current status by calling tools that update
-   state: `set_headline`, `set_goal`, `set_status`, `add_timeline`, `add_pending`, `resolve_pending`,
-   `set_working_on`.
-4. **Rollup** (debounced) summarizes the whole team for a lead: a short status, goal alignment,
-   collisions (two people in the same file), and risks.
+3. **Reconcile** merges those facts into the person's current status as a small set of updates:
+   headline, goal, status, working-on files, new timeline entries, pending items added or resolved.
+
+Then a **rollup** summarizes the whole team for a lead: a short status, goal alignment, collisions,
+and risks. It runs once the queue settles, at most once a minute per project. Collisions are
+computed, not guessed: when two present teammates list the same file in what they're working on,
+both get a collision handoff and the rollup reports it.
+
+Captured text is redacted for secrets on the machine and again on the server, and is passed to the
+model as fenced, untrusted data. Events still queued when the server stops are picked up again on
+the next start.
 
 If no model provider is configured, Reins still captures raw events but does not distill them.
 
@@ -62,16 +69,18 @@ API keys are encrypted at rest (AES-256-GCM) on the server and never sent back t
   keeps their own, each a checklist with progress. An agent can declare and tick its own goals over MCP.
   Auto-tracked: the pipeline watches each teammate's activity and proposes which items look done (and
   new ones it spotted), with a reason and a link to the event, for the owner to confirm or dismiss.
-- Handoffs and @mentions, created automatically when two agents touch the same file or one is blocked
-  on another's work.
+- Handoffs and @mentions, created automatically when two present teammates are working on the same
+  file (from each one's distilled working-on list), when one is blocked on another's work, or when
+  someone names a teammate.
 - A live dashboard over SSE, and an MCP server so any agent can read or write the shared context.
 - An autonomous agent that watches up-for-grabs work and claims then resolves it over MCP and HTTP,
   so items get picked up without a person typing.
-- Scoped retrieval: the MCP context tool narrows to a member or a query and trims to a token budget,
-  so an agent pulls only what its task needs.
+- Scoped retrieval: the context tool in both MCP servers narrows to a member or a query and trims to a
+  token budget, so an agent pulls only what its task needs.
 - Pluggable model providers: add any number of OpenAI-compatible providers in the dashboard, switch the
   active one at any time; keys are encrypted at rest.
-- Optional Slack and Discord digests of each rollup.
+- Optional Slack and Discord digests of each rollup. The webhooks are instance-wide, so they post only
+  for a single-tenant instance (auth off) or the `default` workspace.
 - Real accounts on the multi-tenant model: sign up for a workspace, log in with email and password,
   invite teammates with a link, and roles (owner, admin, member). Each account links to the identity its
   agent reports as, so the server can tell whose goals and activity are whose. Tokens still authenticate
@@ -85,7 +94,8 @@ API keys are encrypted at rest (AES-256-GCM) on the server and never sent back t
   get first-class adapters.
 - Sub-agents without a human in the loop. The autonomous agent claims and resolves work today; next is
   capturing from sub-agents that a parent agent fans out, so context keeps updating during deep loops.
-- Embedding-based retrieval. Scoping ranks by lexical overlap today; swap in embeddings for semantic recall.
+- Embedding-based retrieval. Scoping ranks by lexical overlap today (IDF-weighted, with light stemming);
+  swap in embeddings for semantic recall.
 - Email for invites and resets. Both work over one-time links today; sending them by email is next.
 
 ## Quick start

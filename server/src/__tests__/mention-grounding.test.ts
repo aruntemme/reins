@@ -62,3 +62,16 @@ test("the full mention guard drops hallucinated targets but keeps real ones", ()
   // name not on the roster -> dropped.
   assert.equal(wouldHandOff("mg2", "arun", "Bob", "ping Bob about the deploy"), false, "off-roster name -> no handoff");
 });
+
+test("an ambiguous first name resolves to nobody instead of guessing", () => {
+  db.ensureProject("amb", "Amb");
+  db.ensureMember("amb", "asha.r", "Asha Rao");
+  db.ensureMember("amb", "asha.k", "Asha Kumar");
+  db.ensureMember("amb", "ravi", "Ravi Shankar");
+  assert.equal(db.resolveMember("amb", "Asha"), null, "two Ashas: don't pick one");
+  assert.equal(db.resolveMember("amb", "Asha Kumar"), "asha.k", "a full name still resolves");
+  assert.equal(db.resolveMember("amb", "ravi"), "ravi");
+  assert.equal(db.resolveMember("amb", "Ravi"), "ravi", "a unique first name resolves");
+  assert.equal(db.memberNamedIn("amb", "asha.r", "heads up Asha, the build broke"), false, "a shared first name doesn't ground a mention");
+  assert.equal(db.memberNamedIn("amb", "asha.r", "heads up Asha Rao, the build broke"), true);
+});

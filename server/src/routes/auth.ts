@@ -17,10 +17,11 @@ import {
   getUserByEmail,
   getUserById,
   createUser,
-  verifyPassword,
+  verifyPasswordAsync,
   addMembership,
   getMembership,
   setMembershipMember,
+  memberClaimedByOther,
   effectiveMember,
   listMemberships,
   touchUserLogin,
@@ -34,7 +35,7 @@ import {
   removeMembership,
   countOwners,
 } from "../auth.js";
-import { COOKIE, requireAdmin, requireUser, readCookie } from "../middleware.js";
+import { COOKIE, requireAdmin, requireUser, readCookie, asyncHandler, counterMap, recentHits, addHit, overLimit } from "../middleware.js";
 
 export const auth = Router();
 
@@ -55,29 +56,23 @@ function setSessionCookie(res: { setHeader(n: string, v: string): void }, value:
 }
 
 // ── In-memory abuse guards ────────────────────────────────────
-// Per-IP rate limit for signup (cheap defense against bulk account creation)
-// and per-email failed-login backoff (defense against password guessing).
-// In-memory is intentional: a single instance, and a restart only relaxes the
-// guard, never tightens it. Distributed enforcement would need shared state.
+// Per-IP rate limit for signup (cheap defense against bulk account creation and
+// email enumeration), a per-IP cap on login attempts (bounds password-hashing
+// work and spraying), and per-(IP, email) failed-login backoff against guessing.
+// Failures are keyed by IP + email, not email alone, so nobody can lock a user
+// out of their own account from elsewhere. req.ip honours REINS_TRUST_PROXY.
 const SIGNUP_WINDOW_MS = 60_000;
-const SIGNUP_MAX = 5; // signups per IP per window
-const signupHits = new Map<string, number[]>();
+const SIGNUP_MAX = 5; // signup attempts per IP per window
+const signupHits = counterMap();
 
-const LOGIN_FAIL_WINDOW_MS = 15 * 60_000;
-const LOGIN_FAIL_MAX = 8; // failed attempts per email before temporary lockout
-const loginFails = new Map<string, number[]>();
+const LOGIN_WINDOW_MS = 15 * 60_000;
+const LOGIN_IP_MAX = 50; // login attempts per IP per window
+const loginIpHits = counterMap();
+const LOGIN_FAIL_MAX = 8; // failed attempts per (IP, email) before temporary lockout
+const loginFails = counterMap();
 
 function clientIp(req: Request): string {
-  // trust the socket address; behind a proxy the operator should set trust proxy,
-  // but for the guard a stable-enough key is sufficient.
   return (req.ip || req.socket.remoteAddress || "unknown").toString();
-}
-
-function recentHits(map: Map<string, number[]>, key: string, windowMs: number): number[] {
-  const cutoff = Date.now() - windowMs;
-  const hits = (map.get(key) ?? []).filter((t) => t > cutoff);
-  map.set(key, hits);
-  return hits;
 }
 
 // Exchange an access/admin token for a session cookie.
@@ -88,7 +83,7 @@ auth.post("/auth/session", (req, res) => {
   if (!info || (info.kind !== "access" && info.kind !== "admin")) {
     return res.status(401).json({ error: "invalid token" });
   }
-  res.setHeader("Set-Cookie", `${COOKIE}=${signSession(info.workspaceId, info.kind)}; ${cookieOpts()}`);
+  res.setHeader("Set-Cookie", `${COOKIE}=${signSession(info.workspaceId, info.kind, info.id)}; ${cookieOpts()}`);
   res.json({ ok: true, workspace: getWorkspace(info.workspaceId), admin: info.kind === "admin" });
 });
 
@@ -139,13 +134,13 @@ auth.post("/auth/signup", (req, res) => {
     .safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
 
+  // Count every well-formed attempt — including one that hits an existing email —
+  // so the 409 below can't be used to enumerate accounts without limit.
+  addHit(signupHits, ip);
   const email = normalizeEmail(body.data.email);
   if (getUserByEmail(email)) {
     return res.status(409).json({ error: "an account with that email already exists" });
   }
-
-  // Count the attempt only once we know the request is well-formed.
-  signupHits.set(ip, [...hits, Date.now()]);
 
   const user = createUser(email, body.data.password);
   const localPart = email.split("@")[0] || "my";
@@ -165,23 +160,27 @@ auth.post("/auth/signup", (req, res) => {
 });
 
 // Log in. Generic 401 on any failure so we never reveal whether an email exists.
-auth.post("/auth/login", (req, res) => {
+auth.post("/auth/login", asyncHandler(async (req, res) => {
   const body = z.object({ email: EMAIL, password: z.string().min(1) }).safeParse(req.body);
   if (!body.success) return res.status(401).json({ error: "invalid email or password" });
 
+  const ip = clientIp(req);
+  if (overLimit(loginIpHits, ip, LOGIN_IP_MAX, LOGIN_WINDOW_MS)) {
+    return res.status(429).json({ error: "too many attempts, please try again later" });
+  }
   const email = normalizeEmail(body.data.email);
-  const fails = recentHits(loginFails, email, LOGIN_FAIL_WINDOW_MS);
-  if (fails.length >= LOGIN_FAIL_MAX) {
+  const failKey = `${ip}|${email}`;
+  if (recentHits(loginFails, failKey, LOGIN_WINDOW_MS).length >= LOGIN_FAIL_MAX) {
     // Backoff: stop checking passwords entirely while locked out.
     return res.status(429).json({ error: "too many attempts, please try again later" });
   }
 
   const row = getUserByEmail(email);
-  if (!row || !verifyPassword(body.data.password, row.password_hash)) {
-    loginFails.set(email, [...fails, Date.now()]);
+  if (!row || !(await verifyPasswordAsync(body.data.password, row.password_hash))) {
+    addHit(loginFails, failKey);
     return res.status(401).json({ error: "invalid email or password" });
   }
-  loginFails.delete(email); // successful login clears the backoff
+  loginFails.delete(failKey); // successful login clears the backoff
 
   const memberships = listMemberships(row.id);
   const primary = memberships[0];
@@ -197,7 +196,7 @@ auth.post("/auth/login", (req, res) => {
     workspace: getWorkspace(primary.id),
     workspaces: memberships,
   });
-});
+}));
 
 // Set the capture identity ("how your agent reports you") for the active
 // workspace, so the server can tie your account to your goals/activity. Empty
@@ -205,6 +204,11 @@ auth.post("/auth/login", (req, res) => {
 auth.post("/auth/member", requireUser, (req, res) => {
   const body = z.object({ member: z.string().trim().max(120) }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
+  // An identity is what goals/traits are authorized by, so it must be unique in
+  // the workspace: refuse one another account already uses (explicitly or as its email).
+  if (body.data.member && memberClaimedByOther(req.userId!, req.workspaceId!, body.data.member)) {
+    return res.status(409).json({ error: "another account in this workspace already uses that identity" });
+  }
   setMembershipMember(req.userId!, req.workspaceId!, body.data.member || null);
   res.json({ ok: true, member: effectiveMember(req.userId!, req.workspaceId!) ?? null });
 });
@@ -268,6 +272,9 @@ auth.post("/workspaces/:id/invites", requireAdmin, (req, res) => {
   if (!sameWorkspace(req, res)) return;
   const body = z.object({ role: ROLE, label: z.string().trim().max(60).optional() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
+  if (body.data.role === "owner" && req.userRole !== "owner") {
+    return res.status(403).json({ error: "only an owner can invite another owner" });
+  }
   const { code } = createInvite(req.params.id!, body.data.role, req.userId, body.data.label);
   // Build an absolute join URL from the caller's Origin when present; otherwise a
   // relative path the dashboard can resolve against its own host.
@@ -282,6 +289,10 @@ auth.post("/workspaces/:id/members/:userId/role", requireAdmin, (req, res) => {
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   const target = getMembership(req.params.userId!, req.params.id!);
   if (!target) return res.status(404).json({ error: "member not found" });
+  // Owner is the top role: only an owner may grant it or change an owner's role.
+  if ((body.data.role === "owner" || target.role === "owner") && req.userRole !== "owner") {
+    return res.status(403).json({ error: "only an owner can grant or change the owner role" });
+  }
   // Never leave a workspace without an owner.
   if (target.role === "owner" && body.data.role !== "owner" && countOwners(req.params.id!) <= 1) {
     return res.status(400).json({ error: "cannot demote the last owner" });
@@ -294,6 +305,9 @@ auth.delete("/workspaces/:id/members/:userId", requireAdmin, (req, res) => {
   if (!sameWorkspace(req, res)) return;
   const target = getMembership(req.params.userId!, req.params.id!);
   if (!target) return res.status(404).json({ error: "member not found" });
+  if (target.role === "owner" && req.userRole !== "owner") {
+    return res.status(403).json({ error: "only an owner can remove an owner" });
+  }
   if (target.role === "owner" && countOwners(req.params.id!) <= 1) {
     return res.status(400).json({ error: "cannot remove the last owner" });
   }
@@ -328,7 +342,8 @@ auth.post("/admin/invite", requireAdmin, (req, res) => {
 });
 
 auth.post("/admin/tokens/:id/revoke", requireAdmin, (req, res) => {
-  res.json({ ok: revokeToken(req.params.id!) });
+  if (!revokeToken(req.params.id!, req.workspaceId!)) return res.status(404).json({ error: "no such token" });
+  res.json({ ok: true });
 });
 
 // Admin can spin up an additional workspace (rare; usually via the CLI bootstrap).

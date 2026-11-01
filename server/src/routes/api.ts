@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
-import { ingest } from "../pipeline/index.js";
+import { ingest, accepting } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, getProject, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
+import { setGoal, setPendingStatus, claimPending, getProject, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
@@ -16,9 +16,13 @@ import { llmConfigured, activeModel } from "../llm/client.js";
 import {
   listProviders, createProvider, updateProvider, deleteProvider, setActiveProvider,
 } from "../db.js";
-import { env } from "../env.js";
+import { env, envLlmConfigured } from "../env.js";
 import type { Request, Response } from "express";
-import { requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin } from "../middleware.js";
+import {
+  requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin,
+  asyncHandler, counterMap, overLimit,
+} from "../middleware.js";
+import { buildScopedContextPack, renderContextPack } from "../context-pack.js";
 
 export const api = Router();
 
@@ -34,16 +38,38 @@ const IngestBody = z.object({
   source: z.string().max(40).optional(), // capturing agent harness (default claude-code)
 });
 
-api.post("/ingest", requireIngest, async (req, res) => {
+// Per-workspace rate limits (fixed windows, in memory). Generous for real use —
+// a busy hook sends a couple of events per prompt — but they bound what one
+// tenant (or a leaked token) can make the server store and pay the LLM for.
+const INGEST_MAX_PER_MIN = 300;
+const ROLLUP_MAX_PER_MIN = 6;
+const ingestHits = counterMap();
+const rollupHits = counterMap();
+
+api.post("/ingest", requireIngest, asyncHandler(async (req, res) => {
   // Back-compat single-key mode (only when full auth is off).
   if (!env.authEnabled && env.ingestKey && req.header("x-reins-key") !== env.ingestKey) {
     return res.status(401).json({ error: "bad key" });
   }
+  if (!accepting()) return res.status(503).json({ error: "server is shutting down, retry shortly" });
   const parsed = IngestBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues });
-  const { eventId } = await ingest({ ...parsed.data, workspaceId: req.workspaceId });
+  // Project ids are global and the hook defaults to the folder name, so another
+  // workspace may already own this id. Never write into it: refuse, and say how
+  // to fix it, instead of silently landing events on someone else's board.
+  const ws = req.workspaceId ?? "default";
+  const owner = projectWorkspace(parsed.data.project);
+  if (env.authEnabled && owner && owner !== ws) {
+    return res.status(403).json({
+      error: `project "${parsed.data.project}" belongs to another workspace — use a different project id (reins-hook install --project <id>)`,
+    });
+  }
+  if (overLimit(ingestHits, ws, INGEST_MAX_PER_MIN, 60_000)) {
+    return res.status(429).json({ error: "ingest rate limit reached for this workspace, slow down" });
+  }
+  const { eventId } = await ingest({ ...parsed.data, workspaceId: ws });
   res.json({ ok: true, eventId });
-});
+}));
 
 // ── Read ──────────────────────────────────────────────────────
 api.get("/projects", requireViewer, (req, res) => {
@@ -56,6 +82,24 @@ api.get("/projects/:id", requireViewer, (req, res) => {
   const snap = projectSnapshot(req.params.id!);
   if (!snap) return res.status(404).json({ error: "not found" });
   res.json(snap);
+});
+
+// Scoped, rendered shared context — the same text the local MCP's reins_context
+// returns (goal, status, collisions, risks, team, pending), optionally focused on
+// a member, ranked by a task query, and trimmed to a token budget. Lets the HTTP
+// MCP give remote agents the same scoping without duplicating the logic.
+api.get("/projects/:id/context", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
+  const q = z
+    .object({
+      member: z.string().trim().max(120).optional(),
+      query: z.string().trim().max(500).optional(),
+      limit: z.coerce.number().int().positive().max(100_000).optional(),
+    })
+    .safeParse(req.query);
+  if (!q.success) return res.status(400).json({ error: q.error.issues });
+  res.json({ context: renderContextPack(buildScopedContextPack(req.params.id!, q.data)) });
 });
 
 api.get("/projects/:id/members/:member", requireViewer, (req, res) => {
@@ -123,7 +167,11 @@ api.post("/pending/:id/claim", requireViewer, (req, res) => {
   const body = z.object({ by: z.string(), project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  setPendingStatus(req.params.id!, "claimed", body.data.by);
+  // Atomic: only an OPEN item in this project can be claimed, so two claimers
+  // racing (or an id from another project) can't both "win".
+  if (!claimPending(body.data.project, req.params.id!, body.data.by)) {
+    return res.status(409).json({ error: "that item is no longer open (already claimed, done, or not in this project)" });
+  }
   bus.emitChange({ type: "pending.changed", project: body.data.project });
   res.json({ ok: true });
 });
@@ -132,7 +180,7 @@ api.post("/pending/:id/done", requireViewer, (req, res) => {
   const body = z.object({ project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  setPendingStatus(req.params.id!, "done");
+  if (!setPendingStatus(body.data.project, req.params.id!, "done")) return res.status(404).json({ error: "not found" });
   bus.emitChange({ type: "pending.changed", project: body.data.project });
   res.json({ ok: true });
 });
@@ -143,7 +191,9 @@ api.post("/handoffs/:id/:action", requireViewer, (req, res) => {
   const body = z.object({ project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  setHandoffStatus(req.params.id!, action === "ack" ? "ack" : "resolved");
+  if (!setHandoffStatus(body.data.project, req.params.id!, action === "ack" ? "ack" : "resolved")) {
+    return res.status(404).json({ error: "not found" });
+  }
   bus.emitChange({ type: "handoff.changed", project: body.data.project });
   res.json({ ok: true });
 });
@@ -162,12 +212,21 @@ api.post("/projects/:id/handoffs/resolve", requireViewer, (req, res) => {
   res.json({ ok: true, resolved });
 });
 
-api.post("/projects/:id/rollup", requireViewer, async (req, res) => {
+api.post("/projects/:id/rollup", requireViewer, asyncHandler(async (req, res) => {
   if (!authorizeProject(req, res, req.params.id!)) return;
   if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
-  await runRollup(req.params.id!);
+  if (overLimit(rollupHits, req.workspaceId ?? "default", ROLLUP_MAX_PER_MIN, 60_000)) {
+    return res.status(429).json({ error: "too many resyncs, wait a minute and try again" });
+  }
+  try {
+    await runRollup(req.params.id!);
+  } catch (e: any) {
+    // A bad provider key / unreachable model is the caller's to fix — report it.
+    console.error("[rollup]", req.params.id, e?.message ?? e);
+    return res.status(502).json({ error: `rollup failed: ${e?.message ?? "model provider error"}` });
+  }
   res.json({ ok: true, rollup: projectSnapshot(req.params.id!)?.rollup ?? null });
-});
+}));
 
 // ── Short-term goals (declared layer beneath the project goal) ────
 // Common (team) goals are admin-authored; individual goals are open to any
@@ -329,12 +388,13 @@ api.post("/goal-proposals/:id/dismiss", requireViewer, (req, res) => {
 // ── Taste profile (member "grain") ────────────────────────────
 // The profile (an abstraction) is readable by any teammate via memberDetail.
 // Editing/removing a trait is restricted to its owner — a person curates their
-// own grain. A token session (an agent acting as that member) is allowed through,
-// mirroring goal access.
+// own grain — so it needs that person's signed-in account (identities are unique
+// per workspace). A token carries no identity, so it can't edit anyone's traits
+// (no agent tool writes traits).
 function accessTrait(req: Request, res: Response, trait: TraitRow | undefined): TraitRow | null {
   if (!trait) { res.status(404).json({ error: "not found" }); return null; }
   if (!authorizeProject(req, res, trait.project)) return null;
-  if (req.userId && req.member !== trait.member) {
+  if (env.authEnabled && (!req.userId || req.member !== trait.member)) {
     res.status(403).json({ error: "this trait belongs to another teammate" });
     return null;
   }
@@ -401,6 +461,9 @@ api.get("/providers", requireAdmin, (req, res) => {
   res.json({
     providers: listProviders(ws).map(publicProvider),
     active: activeModel(ws),
+    // Whether the operator's env fallback (REINS_LLM_*) has a key, so the UI can
+    // tell "no providers, instance default in use" from "nothing configured".
+    instanceDefault: envLlmConfigured,
   });
 });
 

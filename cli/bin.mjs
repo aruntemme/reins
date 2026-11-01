@@ -11,9 +11,9 @@
  * the hook config into the chosen settings.json without clobbering other hooks.
  * Dependency-free: only Node built-ins, so `npx` has nothing to install.
  */
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 import { runMcp } from "./reins-mcp.mjs";
 
@@ -98,16 +98,27 @@ function readJson(path) {
   catch { console.error(c.red(`! ${path} is not valid JSON — refusing to overwrite. Fix or remove it.`)); process.exit(1); }
 }
 
-function buildCommand(opts) {
+/**
+ * POSIX-quote a value for the `VAR=value` prefix. The command always runs under
+ * bash (shell: "bash" is pinned, including on Windows), so single quotes are
+ * right everywhere. Plain values stay unquoted so commands remain readable.
+ */
+export function shQuote(v) {
+  const s = String(v);
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+export function buildCommand(opts) {
   const agent = AGENTS[opts.agent || "claude-code"];
   const env = [];
-  if (opts.url) env.push(`REINS_URL=${opts.url}`);
-  if (opts.me) env.push(`REINS_MEMBER=${opts.me}`);
-  if (opts.project) env.push(`REINS_PROJECT=${opts.project}`);
-  if (opts.key) env.push(`REINS_KEY=${opts.key}`);
+  const set = (k, v) => env.push(`${k}=${shQuote(v)}`);
+  if (opts.url) set("REINS_URL", opts.url);
+  if (opts.me) set("REINS_MEMBER", opts.me);
+  if (opts.project) set("REINS_PROJECT", opts.project);
+  if (opts.key) set("REINS_KEY", opts.key);
   // The source label rides as an env var so the adapter (and the Claude hook,
   // which already reads REINS_SOURCE) stamps every event with the right origin.
-  env.push(`REINS_SOURCE=${opts.source || agent.source}`);
+  set("REINS_SOURCE", opts.source || agent.source);
   // Quote AND forward-slash the path. Claude Code runs hooks through bash, which
   // strips the backslashes in a Windows path (C:\Users\… → C:Users…) and would
   // also mishandle a path containing spaces. Forward slashes are valid for node
@@ -266,6 +277,14 @@ function uninstall(args) {
   if (!any) console.log(c.yellow(`Nothing to remove.`));
 }
 
+/** Hide the ingest token in a displayed command: keep a short prefix to tell tokens apart. */
+export function maskKey(cmd) {
+  return cmd.replace(/(REINS_KEY=)('[^']*'|\S+)/, (_m, k, v) => {
+    const raw = v.startsWith("'") ? v.slice(1, -1) : v;
+    return `${k}${raw.slice(0, Math.min(12, Math.floor(raw.length / 2)))}…`;
+  });
+}
+
 async function status(args) {
   const rows = [
     ["global", globalSettingsPath()],
@@ -279,7 +298,7 @@ async function status(args) {
     if (cmds.length) {
       const shared = label.includes("shared");
       console.log(`  ${shared ? c.yellow("!") : c.green("✓")} installed ${c.dim(`(${label}: ${path})`)}`);
-      console.log(`    ${c.dim(cmds[0])}`);
+      console.log(`    ${c.dim(maskKey(cmds[0]))}`);
       if (shared) console.log(`    ${c.yellow("this is committed — reinstall to move it to settings.local.json")}`);
     } else {
       console.log(`  ${c.dim("·")} not installed ${c.dim(`(${label}: ${path})`)}`);
@@ -330,9 +349,14 @@ function help() {
 `);
 }
 
+// Only run the CLI when executed, not when imported (tests import the helpers).
+const isMain = (() => {
+  try { return !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; }
+  catch { return false; }
+})();
 const args = parseArgs(process.argv.slice(2));
 const cmd = args._[0] || "help";
-(async () => {
+if (isMain) (async () => {
   if (cmd === "install") await install(args);
   else if (cmd === "uninstall") uninstall(args);
   else if (cmd === "status") await status(args);

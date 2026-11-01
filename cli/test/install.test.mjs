@@ -191,3 +191,26 @@ test("installing a second agent replaces ours but keeps foreign hooks", () => {
   assert.ok(cmds.some((c) => c.includes("adapters/opencode.mjs")));
   assert.ok(!cmds.some((c) => c.includes("adapters/codex.mjs")), "previous reins agent should be replaced");
 });
+
+test("--me with spaces/quotes is shell-quoted so bash hands the hook the exact value", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-quote-"));
+  runInstall(home, ["--me", "Asha O'Rao", "--url", "http://localhost:4319"]);
+  const ours = allCommands(settingsFor(home)).find((c) => c.includes("reins-hook.mjs"));
+  assert.ok(ours);
+  // Run the env prefix through real bash, swapping the hook for a printer.
+  const probe = ours.replace(/node "[^"]+"/, `node -e 'process.stdout.write(process.env.REINS_MEMBER)'`);
+  const got = execFileSync("bash", ["-c", probe], { encoding: "utf8" });
+  assert.equal(got, "Asha O'Rao");
+});
+
+test("status masks the ingest token instead of printing it", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-status-"));
+  runInstall(home, ["--token", "rk_ingest_0123456789abcdef0123", "--url", "http://127.0.0.1:9"]);
+  const out = execFileSync(process.execPath, [BIN, "status", "--url", "http://127.0.0.1:9"], {
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    cwd: home,
+    encoding: "utf8",
+  });
+  assert.ok(out.includes("REINS_KEY="), "the command is still shown");
+  assert.ok(!out.includes("rk_ingest_0123456789abcdef0123"), "the full token is not printed");
+});

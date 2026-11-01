@@ -123,6 +123,16 @@ export class AuthError extends Error {
   constructor() { super("auth required"); }
 }
 
+/** A non-2xx, non-401 response: keeps the HTTP status and the server's message. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+/** The message to show for a failed request (the server's own error when it gave one). */
+export function errorMessage(e: unknown): string {
+  return e instanceof Error && e.message ? e.message : "Something went wrong. Please try again.";
+}
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     ...init,
@@ -131,7 +141,16 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "include",
   });
   if (res.status === 401) throw new AuthError();
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) {
+    // Server errors are { error: string } or { error: ZodIssue[] }.
+    let msg = "";
+    try {
+      const err = (await res.json())?.error;
+      if (typeof err === "string") msg = err;
+      else if (Array.isArray(err)) msg = err.map((i) => i?.message).filter(Boolean).join("; ");
+    } catch { /* not JSON */ }
+    throw new ApiError(msg || `request failed (${res.status})`, res.status);
+  }
   return res.json();
 }
 
@@ -212,7 +231,8 @@ export const api = {
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
   // ── LLM providers (admin-managed; keys encrypted server-side) ──
-  providers: () => j<{ providers: Provider[]; active: ActiveModel }>("/api/providers"),
+  // instanceDefault: the operator's env fallback model is configured (has a key).
+  providers: () => j<{ providers: Provider[]; active: ActiveModel; instanceDefault: boolean }>("/api/providers"),
   createProvider: (p: ProviderInput) =>
     j<{ provider: Provider }>("/api/providers", { method: "POST", body: JSON.stringify(p) }),
   updateProvider: (id: string, p: Partial<ProviderInput>) =>
@@ -312,6 +332,20 @@ export const api = {
     j<{ ok: boolean }>(`/api/traits/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteTrait: (id: string) => j<{ ok: boolean }>(`/api/traits/${id}`, { method: "DELETE" }),
 };
+
+// Quote a value for a POSIX shell command line unless it is plainly safe.
+function shq(v: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(v) ? v : `'${v.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The one-line capture-hook install command; omitted options fall back to the hook's defaults. */
+export function installCommand(o: { url: string; me?: string | null; project?: string; token?: string | null }): string {
+  let cmd = `npx reins-hook install --url ${shq(o.url)}`;
+  if (o.me) cmd += ` --me ${shq(o.me)}`;
+  if (o.project) cmd += ` --project ${shq(o.project)}`;
+  if (o.token) cmd += ` --token ${shq(o.token)}`;
+  return cmd;
+}
 
 export function timeAgo(ts: number): string {
   const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));

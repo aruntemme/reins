@@ -81,3 +81,53 @@ test("mapClaudeHook maps Claude Code events to kinds", () => {
   const stop = mapClaudeHook({ hook_event_name: "Stop", transcript_path: "/nope/missing.jsonl" });
   assert.equal(stop.kind, "summary"); // text empty when transcript missing, but kind correct
 });
+
+test("sendEventDetached returns at once and the detached child still delivers", async () => {
+  const { sendEventDetached } = await import("../lib/capture.mjs");
+  // A server that answers slowly — the caller must not wait for it.
+  let received = null;
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      received = JSON.parse(body || "{}");
+      setTimeout(() => { res.writeHead(200); res.end("{}"); }, 1500);
+    });
+  });
+  server.listen(0);
+  await once(server, "listening");
+  try {
+    const t0 = Date.now();
+    const ok = sendEventDetached({
+      url: `http://127.0.0.1:${server.address().port}`,
+      project: "demo", member: "asha", kind: "intent",
+      text: "ship it with key sk-proj-ABCDEFGHIJKLMNOPQRST1234",
+    });
+    assert.equal(ok, true);
+    assert.ok(Date.now() - t0 < 500, "returned without waiting on the network");
+    const deadline = Date.now() + 8000;
+    while (!received && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(received, "the child posted the event");
+    assert.equal(received.project, "demo");
+    assert.ok(!received.text.includes("ABCDEFGHIJKLMNOPQRST1234"), "redacted before it left the parent");
+  } finally {
+    server.close();
+  }
+});
+
+test("lastAssistantText reads the tail and skips a corrupt line", async () => {
+  const { lastAssistantText } = await import("../lib/capture.mjs");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "reins-tx-"));
+  const p = join(dir, "t.jsonl");
+  const filler = JSON.stringify({ message: { role: "user", content: "x".repeat(4000) } });
+  const lines = [];
+  for (let i = 0; i < 400; i++) lines.push(filler); // ~1.6MB: larger than the tail window
+  lines.push(JSON.stringify({ message: { role: "assistant", content: [{ type: "text", text: "final answer" }] } }));
+  lines.push("{ this is not json");
+  writeFileSync(p, lines.join("\n") + "\n");
+  assert.equal(lastAssistantText(p), "final answer");
+  assert.equal(lastAssistantText(join(dir, "missing.jsonl")), "");
+});

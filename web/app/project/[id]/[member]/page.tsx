@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { api, timeAgo, type MemberDetail, type Trait, type TraitType } from "@/lib/api";
+import { api, ApiError, errorMessage, timeAgo, type MemberDetail, type Trait, type TraitType } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
@@ -19,16 +19,28 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
   const memberId = decodeURIComponent(member);
   const [m, setM] = useState<MemberDetail | null>(null);
   const [missing, setMissing] = useState(false);
+  // A failed load that is not a 404: transient, cleared on the next good load.
+  const [loadErr, setLoadErr] = useState("");
   const [meMember, setMeMember] = useState<string | null>(null);
+  // The last failed action (ack/resolve, remove trait), with the server's message.
+  const [actErr, setActErr] = useState("");
 
   const load = useCallback(async () => {
     try {
       setM(await api.member(id, memberId));
+      setMissing(false);
+      setLoadErr("");
     } catch (e) {
       if (handleAuth(e)) return;
-      setMissing(true);
+      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      else setLoadErr(errorMessage(e));
     }
   }, [id, memberId]);
+
+  const act = useCallback((p: Promise<unknown>) => {
+    setActErr("");
+    p.then(load, (e) => { if (!handleAuth(e)) setActErr(errorMessage(e)); });
+  }, [load]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.me().then((me) => setMeMember(me.member ?? null)).catch(() => {}); }, []);
@@ -38,7 +50,14 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
   if (missing)
     return (<><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">Not found. <Link href={`/project/${id}`} className="hl">Back</Link></div></div></main></>);
   if (!m)
-    return (<><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="empty">Loading…</div></div></main></>);
+    return (<><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash">
+      {loadErr ? (
+        <div className="card pad empty">
+          <span className="mono" style={{ color: "var(--blocked)" }}>Could not load this page: {loadErr}</span>{" "}
+          <button className="tiny" onClick={load}>retry</button>
+        </div>
+      ) : <div className="empty">Loading…</div>}
+    </div></main></>);
 
   const s = STATUS[m.displayStatus] ?? STATUS.idle;
 
@@ -53,6 +72,10 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
             <span className="label"><span className={`sq ${s.cls}`} /> {m.live ? s.label : "idle"}</span>
           </div>
 
+          {(loadErr || actErr) && (
+            <div className="mono" style={{ color: "var(--blocked)" }}>{actErr || `Could not refresh: ${loadErr}`}</div>
+          )}
+
           <div className="mhero">
             <Avatar name={m.displayName} i={2} />
             <div>
@@ -64,7 +87,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
           <div className="doc">
             {m.handoffs.length > 0 && (
               <Section label="for you" sq="blocked">
-                <ForYou items={m.handoffs} projectId={id} member={memberId} onAct={load} />
+                <ForYou items={m.handoffs} projectId={id} member={memberId} act={act} />
               </Section>
             )}
             <Section label="now">
@@ -87,7 +110,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
               {m.profile.length === 0 ? (
                 <div className="empty">No profile yet — {isMe ? "yours" : "theirs"} builds up from how {isMe ? "you" : "they"} work.</div>
               ) : (
-                <ProfileCard traits={m.profile} editable={isMe} onRemove={(tid) => api.deleteTrait(tid).then(load)} />
+                <ProfileCard traits={m.profile} editable={isMe} onRemove={(tid) => act(api.deleteTrait(tid))} />
               )}
             </Section>
 
@@ -156,7 +179,7 @@ const HKIND: Record<string, string> = { mention: "@mention", collision: "collisi
 // reloads) and the next slides in, so the stack never eats the page. "show more"
 // reveals the rest; "show less" folds back to 3.
 type HKind = MemberDetail["handoffs"][number]["kind"];
-function ForYou({ items, projectId, member, onAct }: { items: MemberDetail["handoffs"]; projectId: string; member: string; onAct: () => void }) {
+function ForYou({ items, projectId, member, act }: { items: MemberDetail["handoffs"]; projectId: string; member: string; act: (p: Promise<unknown>) => void }) {
   const TOP = 3;
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState<"all" | HKind>("all");
@@ -169,12 +192,11 @@ function ForYou({ items, projectId, member, onAct }: { items: MemberDetail["hand
   const shown = expanded ? filtered : filtered.slice(0, TOP);
   const overflow = filtered.length - TOP;
 
-  const resolveAll = async () => {
+  const resolveAll = () => {
     const label = active === "all" ? "" : `${HKIND[active] || active} `;
     if (!window.confirm(`Resolve all ${filtered.length} ${label}handoff${filtered.length > 1 ? "s" : ""}? This can't be undone.`)) return;
-    await api.resolveHandoffs(projectId, member, active === "all" ? undefined : active);
     setExpanded(false);
-    onAct();
+    act(api.resolveHandoffs(projectId, member, active === "all" ? undefined : active));
   };
 
   return (
@@ -210,9 +232,9 @@ function ForYou({ items, projectId, member, onAct }: { items: MemberDetail["hand
             <div className="htext">{h.text}</div>
             <div className="hacts">
               {h.status === "open" && (
-                <button className="tiny" onClick={() => api.handoff(h.id, projectId, "ack").then(onAct)}>ack</button>
+                <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "ack"))}>ack</button>
               )}
-              <button className="tiny" onClick={() => api.handoff(h.id, projectId, "resolve").then(onAct)}>resolve</button>
+              <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "resolve"))}>resolve</button>
             </div>
           </div>
         ))}

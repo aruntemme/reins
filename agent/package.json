@@ -8,8 +8,7 @@
   },
   "files": [
     "reins-agent.mjs",
-    "README.md",
-    "LICENSE"
+    "reins-agent.d.mts"
   ],
   "keywords": [
     "reins",

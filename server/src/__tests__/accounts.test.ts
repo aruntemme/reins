@@ -112,7 +112,62 @@ test("user session: signs uid+ws, role comes from membership, invalid when remov
   // tampered cookie rejected
   assert.equal(a.verifySession(cookie.slice(0, -3) + "zzz"), null);
 
-  // token (non-user) session still works
-  const tokenCookie = a.signSession(ws.id, "access");
+  // token (non-user) session still works while its token is live
+  const tok = a.verifyToken(a.mintToken(ws.id, "access"))!;
+  const tokenCookie = a.signSession(ws.id, "access", tok.id);
   assert.equal(a.verifySession(tokenCookie)?.kind, "access");
+});
+
+test("token session dies with its token; a token can't be revoked from another workspace", () => {
+  const ws = a.createWorkspace("Delta");
+  const other = a.createWorkspace("Epsilon");
+  const tok = a.verifyToken(a.mintToken(ws.id, "access"))!;
+  const cookie = a.signSession(ws.id, "access", tok.id);
+  assert.equal(a.verifySession(cookie)?.workspaceId, ws.id);
+
+  assert.equal(a.revokeToken(tok.id, other.id), false, "other workspace can't revoke it");
+  assert.ok(a.verifySession(cookie), "still valid after the cross-tenant attempt");
+
+  assert.equal(a.revokeToken(tok.id, ws.id), true);
+  assert.equal(a.verifySession(cookie), null, "revoking the token ends the session");
+});
+
+test("sessions expire server-side after the cookie max-age; legacy tid-less token sessions are refused", async () => {
+  const { createHmac } = await import("node:crypto");
+  const ws = a.createWorkspace("Zeta");
+  const u = a.createUser("old@z.com", "pw-old-1234");
+  a.addMembership(u.id, ws.id, "member");
+  const sign = (data: object) => {
+    const payload = Buffer.from(JSON.stringify(data)).toString("base64url");
+    const sig = createHmac("sha256", process.env.REINS_SESSION_SECRET!).update(payload).digest("base64url");
+    return `${payload}.${sig}`;
+  };
+  const fresh = sign({ uid: u.id, ws: ws.id, k: "user", role: "member", ep: 0, iat: Date.now() });
+  assert.ok(a.verifySession(fresh));
+  const stale = sign({ uid: u.id, ws: ws.id, k: "user", role: "member", ep: 0, iat: Date.now() - a.SESSION_MAX_AGE_MS - 1000 });
+  assert.equal(a.verifySession(stale), null, "older than 30 days is rejected");
+  assert.equal(a.verifySession(sign({ ws: ws.id, k: "admin", iat: Date.now() })), null, "no token id → refused");
+});
+
+test("a password reset ends the account's existing sessions", () => {
+  const ws = a.createWorkspace("Eta");
+  const u = a.createUser("reset-sess@e.com", "pw-before-12");
+  a.addMembership(u.id, ws.id, "member");
+  const before = a.signUserSession(u.id, ws.id, "member");
+  assert.ok(a.verifySession(before));
+  const { code } = a.createReset(u.id);
+  assert.equal(a.useReset(code, "pw-after-1234"), true);
+  assert.equal(a.verifySession(before), null, "pre-reset session is dead");
+  assert.ok(a.verifySession(a.signUserSession(u.id, ws.id, "member")), "a new login works");
+});
+
+test("accepting an invite never rewrites an existing membership role", () => {
+  const ws = a.createWorkspace("Theta");
+  const owner = a.createUser("sole-owner@t.com", "pw-owner-123");
+  a.addMembership(owner.id, ws.id, "owner");
+  const { code } = a.createInvite(ws.id, "member", owner.id);
+  const r = a.acceptInvite(code, owner.id);
+  assert.equal(r?.role, "owner");
+  assert.equal(a.getMembership(owner.id, ws.id)?.role, "owner", "sole owner is not demoted");
+  assert.equal(a.getInvite(code)?.valid, true, "invite stays unspent for its real recipient");
 });

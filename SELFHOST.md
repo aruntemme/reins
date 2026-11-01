@@ -57,7 +57,7 @@ the box directly (and calls the backend for writes).
 
 ## 2. Prerequisites
 
-- **Node.js 22** recommended (the Docker image uses `node:22`; the CLI requires `>=18`).
+- **Node.js 22** (the Docker image uses `node:22`; the CLI declares `>=22`).
 - **An OpenAI-compatible inference endpoint.** Anything that speaks the OpenAI API works: OpenAI,
   OpenRouter, Together, Groq, a local vLLM, Ollama, or LM Studio.
   Without one, Reins still captures raw events but will not distill them into status.
@@ -282,6 +282,8 @@ npx reins-hook mcp --url <backend-url> --token <access-token> [--ingest-token <i
 
 - Reads and most writes authenticate with the **access token** (`Authorization: Bearer`).
 - `reins_note` uses the optional **ingest token**.
+- `reins_context` takes the same `member` / `query` / `limit` scoping as the local MCP (served by
+  `GET /api/projects/:id/context`), and every request times out after 15 seconds.
 - It is dependency-free (Node built-ins only), so `npx` has nothing to install.
 
 ### 7b. Local MCP -- for an agent running on the server box
@@ -341,7 +343,17 @@ Admin CLI commands (`npm run admin -- <cmd>` from `server/`): `create-workspace`
 
 If the dashboard is on a different origin from the backend **and** you use direct mode
 (`NEXT_PUBLIC_REINS_URL`), set `REINS_CORS_ORIGIN` to the dashboard's origin (comma-separated for
-several). With the default same-origin rewrite, you do not need this.
+several). With the default same-origin rewrite, you do not need this. When it is empty, the backend
+allows no cross-origin browser access at all.
+
+### Client IPs behind a proxy (`REINS_TRUST_PROXY`)
+
+Signup and login are rate-limited per client IP. By default the server uses the socket address and
+ignores `X-Forwarded-For`, which is right when clients connect to it directly (the header is
+spoofable). Behind proxies, every request would otherwise share the proxy's IP, so set
+`REINS_TRUST_PROXY` to the number of proxies in front of the server: for example `2` for the Vercel
+rewrite plus Caddy, or `1` for Caddy alone. It also accepts Express values such as `loopback` or a
+comma-separated list of trusted addresses. Don't set it higher than the real number of hops.
 
 ---
 
@@ -390,10 +402,14 @@ For a shared team instance:
 3. **Run the backend as a service.** Docker (`server/Dockerfile`), or a process manager. The image
    defaults `REINS_DB` to `/data/reins.db`; mount a volume there.
 4. **Host the dashboard** anywhere Next.js runs (Vercel, a container, a Node host) with `REINS_URL`
-   pointing at the backend. The `/api/*` rewrite keeps the browser same-origin, so the backend can stay
-   plain HTTP behind it.
-5. **TLS / domain:** front the backend with Caddy, Cloudflare, or a load balancer if you want HTTPS
-   directly on it (needed only if you use `NEXT_PUBLIC_REINS_URL` direct mode).
+   pointing at the backend.
+5. **TLS / domain:** front the backend with Caddy, Cloudflare, or a load balancer and keep port 4319
+   closed to the internet. The dashboard rewrite, hooks, and the HTTP MCP all carry tokens and
+   session cookies, so they should only travel over HTTPS. Then set `REINS_TRUST_PROXY` (see
+   [section 8](#client-ips-behind-a-proxy-reins_trust_proxy)).
+6. **Shutdown and health:** the server drains on `SIGTERM` (in-flight distills finish, up to
+   `REINS_SHUTDOWN_GRACE_MS`; anything still queued is re-queued on the next start). `/health` checks
+   the database, and the Docker image has a `HEALTHCHECK`.
 
 The maintainer's concrete Lightsail + Vercel recipe, including provisioning and on-box CI/CD, is in
 [`deploy/DEPLOY.md`](deploy/DEPLOY.md). For HA / multi-instance, the SQLite layer in `server/src/db.ts`
@@ -421,7 +437,8 @@ which overrides the file). `server/.env.example` ships the common ones; this is 
 | `REINS_AUTH` | `off` | `on` enables workspaces + tokens; `off` is a single open instance. |
 | `REINS_SESSION_SECRET` | (required if auth on) | Signs dashboard sessions. `openssl rand -hex 32`. |
 | `REINS_COOKIE_SECURE` | `auto` | Session cookie Secure flag: `auto` (prod only) \| `on` \| `off`. |
-| `REINS_CORS_ORIGIN` | (empty) | Comma-separated dashboard origins for credentialed CORS. Empty = unrestricted. |
+| `REINS_CORS_ORIGIN` | (empty) | Comma-separated dashboard origins for credentialed CORS. Empty = no cross-origin access. |
+| `REINS_TRUST_PROXY` | (off) | Proxy hops to trust for the client IP used by login/signup limits, e.g. `2` for Vercel + Caddy. See [section 8](#client-ips-behind-a-proxy-reins_trust_proxy). |
 | `REINS_INGEST_KEY` | (empty) | Legacy shared ingest key, honored only when `REINS_AUTH=off`. |
 | `REINS_SECRET_KEY` | (auto) | Master key for encrypting model-provider API keys at rest (AES-256-GCM). Auto-generated into `.reins-secret` if unset. |
 
@@ -445,12 +462,15 @@ encrypted in the database. These env vars are the fallback used when no provider
 |---|---|---|
 | `REINS_DISTILL_CONCURRENCY` | `1` | Concurrent distillation jobs. `1` = strictly serial (safe for rate-limited gateways). |
 | `REINS_PIPELINE_MODE` | `combined` | Pipeline shape. `combined` does triage/extract/reconcile in one call. |
+| `REINS_ROLLUP_MIN_INTERVAL_MS` | `60000` | Minimum time between automatic rollups per project (a trailing run catches up). |
+| `REINS_EVENT_RETENTION_DAYS` | `30` | Raw captured event text older than this is blanked by the hourly cleanup; distilled state is kept. `0` keeps it forever. |
+| `REINS_SHUTDOWN_GRACE_MS` | `8000` | How long `SIGTERM` waits for running distills before exiting. |
 
 ### Integrations
 
 | Var | Default | Purpose |
 |---|---|---|
-| `REINS_SLACK_WEBHOOK` | (empty) | Post a digest to Slack on each team rollup. |
+| `REINS_SLACK_WEBHOOK` | (empty) | Post a digest to Slack on each team rollup. Instance-wide, so only rollups of the `default` workspace (or any rollup when auth is off) are posted. |
 | `REINS_DISCORD_WEBHOOK` | (empty) | Same, for Discord. |
 
 ### Frontend (web)

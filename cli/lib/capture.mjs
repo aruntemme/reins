@@ -8,13 +8,25 @@
  * non-blocking by contract — short timeout, never throws, resolves to a small
  * result object so adapters can `await` it in tests without crashing a session.
  */
-import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execSync, spawn } from "node:child_process";
+import { openSync, readSync, fstatSync, closeSync, realpathSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 import { redactSecrets } from "./redact.mjs";
 
 const DEFAULT_URL = "http://localhost:4319";
 const MAX_TEXT = 6000;
+// Only the end of a transcript matters (we want the LAST assistant turn), and a
+// long session's jsonl can be many MB — read just this much of the tail.
+const TAIL_BYTES = 1024 * 1024;
+
+/** Mask credentials, then bound the length (in that order, so a secret is never
+ *  half-kept by the cut). */
+function prepareText(raw) {
+  let text = redactSecrets(String(raw ?? "").trim());
+  if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
+  return text;
+}
 
 /** Resolve who the event is from: explicit env, then git email, then $USER. */
 export function resolveMember(env = process.env) {
@@ -30,13 +42,24 @@ export function resolveMember(env = process.env) {
   return os.userInfo().username || "unknown";
 }
 
-/** Pull the last assistant text block out of a Claude Code transcript jsonl. */
+/** Pull the last assistant text block out of a Claude Code transcript jsonl.
+ *  Reads only the file's tail, and skips (rather than aborts on) a bad line. */
 export function lastAssistantText(transcriptPath) {
+  let fd;
   try {
-    const lines = readFileSync(transcriptPath, "utf8").trim().split("\n");
+    fd = openSync(transcriptPath, "r");
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - TAIL_BYTES);
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    let lines = buf.toString("utf8").split("\n");
+    if (start > 0) lines = lines.slice(1); // the first line is cut mid-way
     for (let i = lines.length - 1; i >= 0; i--) {
-      const row = JSON.parse(lines[i]);
-      const msg = row.message ?? row;
+      const line = lines[i].trim();
+      if (!line) continue;
+      let row;
+      try { row = JSON.parse(line); } catch { continue; } // partial/garbled line
+      const msg = row?.message ?? row;
       if (msg?.role !== "assistant") continue;
       const content = msg.content;
       const txt = Array.isArray(content)
@@ -47,7 +70,9 @@ export function lastAssistantText(transcriptPath) {
       if (txt.trim()) return txt.trim();
     }
   } catch {
-    /* missing/partial transcript */
+    /* missing/unreadable transcript */
+  } finally {
+    if (fd !== undefined) try { closeSync(fd); } catch { /* ignore */ }
   }
   return "";
 }
@@ -72,12 +97,10 @@ export function lastAssistantText(transcriptPath) {
 export async function sendEvent(o) {
   const url = (o.url || process.env.REINS_URL || DEFAULT_URL).replace(/\/$/, "");
   const source = o.source || "claude-code";
-  let text = String(o.text ?? "").trim();
-  if (!text) return { ok: false, skipped: true };
   // Mask credentials before anything leaves the machine (the server masks again
-  // at ingest as a backstop). Redact first, then bound the length.
-  text = redactSecrets(text);
-  if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
+  // at ingest as a backstop).
+  const text = prepareText(o.text);
+  if (!text) return { ok: false, skipped: true };
 
   const body = JSON.stringify({
     project: o.project,
@@ -104,4 +127,42 @@ export async function sendEvent(o) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Hand the event to a detached, unref'd child process and return at once, so
+ * the host agent never waits on the network (a hook runs on every prompt). The
+ * child does the POST with a generous timeout and exits. Text is redacted and
+ * capped here first, so the payload is small and no secret ever reaches the
+ * child's environment. Returns false if the child couldn't be spawned (callers
+ * may then fall back to `sendEvent`).
+ */
+export function sendEventDetached(o) {
+  const text = prepareText(o.text);
+  if (!text) return true; // nothing to send
+  try {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...process.env, REINS_EVENT: JSON.stringify({ ...o, text }) },
+    });
+    child.on("error", () => {});
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Child entry for sendEventDetached: `node capture.mjs` with REINS_EVENT set.
+const isMain = (() => {
+  try { return !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; }
+  catch { return false; }
+})();
+if (isMain && process.env.REINS_EVENT) {
+  let o = null;
+  try { o = JSON.parse(process.env.REINS_EVENT); } catch { /* malformed → nothing to do */ }
+  if (!o) process.exit(0);
+  sendEvent({ ...o, timeoutMs: o.timeoutMs ?? 10000 }).finally(() => process.exit(0));
 }

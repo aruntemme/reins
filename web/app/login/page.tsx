@@ -2,14 +2,16 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, AuthError } from "@/lib/api";
+import { api, ApiError, AuthError } from "@/lib/api";
 import { TopBar } from "@/components/ui";
+import { safeNext } from "@/lib/guard";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  // Resume an invite flow after login, and surface the reset-done note.
-  const next = params.get("next") || "/dashboard";
+  // Resume an invite flow or deep link after login (same-origin paths only), and
+  // surface the reset-done note.
+  const next = safeNext(params.get("next"));
   const justReset = params.get("reset") === "1";
 
   const [email, setEmail] = useState("");
@@ -34,6 +36,7 @@ function LoginForm() {
       // 401 from the API surfaces as AuthError; treat it as bad credentials here
       // rather than bouncing, since we are already on the login page.
       if (e instanceof AuthError) setErr("That email and password did not match. Check them and try again.");
+      else if (e instanceof ApiError) setErr(`Could not log in: ${e.message}.`); // e.g. 429 lockout
       else setErr("Could not log in right now. Please try again.");
       setBusy(false);
     }

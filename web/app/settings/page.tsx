@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, type Me } from "@/lib/api";
+import { api, errorMessage, type Me } from "@/lib/api";
+import { toLogin } from "@/lib/guard";
 import { TopBar } from "@/components/ui";
 import { Members } from "@/components/members";
 import { Providers } from "@/components/providers";
@@ -11,9 +12,16 @@ import { Providers } from "@/components/providers";
 function IdentityCard({ me, onSaved }: { me: Me; onSaved: () => void }) {
   const [val, setVal] = useState(me.member ?? "");
   const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
   useEffect(() => { setVal(me.member ?? ""); }, [me.member]);
   const save = async () => {
-    await api.setMember(val.trim());
+    setErr("");
+    try {
+      await api.setMember(val.trim());
+    } catch (e) {
+      setErr(errorMessage(e));
+      return;
+    }
     setSaved(true);
     onSaved();
     setTimeout(() => setSaved(false), 1500);
@@ -30,6 +38,7 @@ function IdentityCard({ me, onSaved }: { me: Me; onSaved: () => void }) {
         <button className="btn solid" onClick={save}>Save</button>
         {saved && <span className="mono" style={{ color: "var(--active)", fontSize: 12 }}>saved</span>}
       </div>
+      {err && <div className="mono" style={{ color: "var(--blocked)", marginTop: 10 }}>{err}</div>}
     </div>
   );
 }
@@ -46,8 +55,9 @@ export default function Settings() {
   useEffect(() => {
     api.me()
       .then((m) => {
-        // No account session at all: send them to sign in.
-        if (m.auth && !m.user && typeof window !== "undefined") window.location.href = "/login";
+        // No session at all: send them to sign in. Token sessions (e.g. an admin
+        // token) have a workspace but no user, and may stay.
+        if (m.auth && !m.workspace) toLogin();
         setMe(m);
       })
       .catch(() => {})

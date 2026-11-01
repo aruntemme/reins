@@ -6,8 +6,10 @@ import {
   setEventSignificance,
   getProject,
   addTimeline,
+  undistilledEvents,
+  projectWorkspace,
 } from "../db.js";
-import { llmConfigured } from "../llm/client.js";
+import { llmConfigured, backendKey } from "../llm/client.js";
 import { redactSecrets } from "../redact.js";
 import { bus } from "../bus.js";
 import { triage } from "./triage.js";
@@ -15,11 +17,17 @@ import { extract } from "./extract.js";
 import { reconcile } from "./reconcile.js";
 import { distillCombined } from "./distill.js";
 import { scheduleRollup } from "./rollup.js";
-import { enqueueDistill } from "./queue.js";
+import { enqueueDistill, pauseDistill, distillQueueDepth } from "./queue.js";
 
 // "combined" = 1 LLM call/event (default — robust on rate-limited endpoints).
 // "multi"    = staged triage -> extract -> reconcile (3 calls/event).
 const PIPELINE_MODE = (process.env.REINS_PIPELINE_MODE || "combined").toLowerCase();
+
+// Server-side cap on stored/distilled event text (the hook caps at 6k already;
+// this bounds what any other client can make us store and pay to distill).
+export const MAX_EVENT_TEXT = 8000;
+// On boot, events younger than this that never finished distilling are re-queued.
+const RECOVER_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface IngestInput {
   project: string;
@@ -41,7 +49,7 @@ export interface IngestInput {
 export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
   // Mask any credential in the captured text BEFORE it is stored or seen by the
   // LLM, so a leaked key never lands in the event store or a distilled summary.
-  input.text = redactSecrets(input.text);
+  input.text = redactSecrets(input.text).slice(0, MAX_EVENT_TEXT);
 
   ensureProject(input.project, undefined, input.workspaceId ?? "default");
   ensureMember(input.project, input.member, input.displayName);
@@ -58,7 +66,12 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
   });
 
   bus.emitChange({ type: "ingest", project: input.project, member: input.member });
+  enqueueEvent(eventId, input);
+  return { eventId };
+}
 
+function enqueueEvent(eventId: string, input: IngestInput): void {
+  const workspaceId = input.workspaceId ?? "default";
   // Distillation runs through a serial queue (not fire-and-forget) so a burst of
   // events can't launch concurrent LLM calls into a rate-limited gateway. The
   // event is already persisted; the HTTP handler still returns immediately. The
@@ -70,6 +83,9 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
       await distill(eventId, input);
     } catch (e: any) {
       console.error("[pipeline]", input.project, input.member, e?.message ?? e);
+      // Final failure (retries exhausted): mark it so restart recovery doesn't
+      // re-run a poison event forever.
+      setEventSignificance(eventId, "error");
     } finally {
       const n = (inflight.get(input.project) ?? 1) - 1;
       inflight.set(input.project, n);
@@ -77,9 +93,44 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
       // fire mid-drain on a half-distilled board; gate on the project's queue.
       if (n <= 0) scheduleRollup(input.project, 1500);
     }
-  });
+  }, { lane: backendKey(workspaceId), key: `${input.project}\u0000${input.member}` });
+}
 
-  return { eventId };
+/**
+ * Restart recovery: the distill queue is in memory, so events that were queued
+ * (or mid-flight) when the process stopped are still significance NULL in the
+ * DB. Re-enqueue the recent ones, oldest first. Returns how many.
+ */
+export function recoverUndistilled(at = Date.now()): number {
+  const events = undistilledEvents(at - RECOVER_WINDOW_MS);
+  for (const e of events) {
+    enqueueEvent(e.id, {
+      project: e.project,
+      member: e.member,
+      kind: e.kind,
+      text: e.text,
+      source: e.source,
+      workspaceId: projectWorkspace(e.project) ?? "default",
+    });
+  }
+  return events.length;
+}
+
+/** Graceful shutdown: start no new distills, then wait (bounded) for the running
+ *  ones. Anything still queued is recovered on the next boot. */
+let draining = false;
+/** False once shutdown has begun — ingest then answers 503 so the hook retries later. */
+export const accepting = () => !draining;
+
+export async function drainPipeline(timeoutMs: number): Promise<boolean> {
+  draining = true;
+  pauseDistill();
+  const deadline = Date.now() + timeoutMs;
+  while (distillQueueDepth().active > 0) {
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return true;
 }
 
 // In-flight distillation count per project (queued + running; gates the rollup).
@@ -91,6 +142,7 @@ async function distill(eventId: string, input: IngestInput): Promise<void> {
     // No LLM configured: degrade gracefully — log a raw timeline entry so the
     // board still shows life, just without distillation.
     addTimeline(input.project, input.member, "did", input.text.slice(0, 200));
+    setEventSignificance(eventId, "raw"); // handled — never replay on restart
     bus.emitChange({ type: "timeline.added", project: input.project, member: input.member });
     return;
   }

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { api, timeAgo, type Project, type Goal, type GoalProposal } from "@/lib/api";
+import { api, ApiError, errorMessage, timeAgo, type Project, type Goal, type GoalProposal } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
@@ -9,24 +9,31 @@ import { Invite } from "@/components/invite";
 import { ManageTokens } from "@/components/admin";
 import { GoalsDrawer, GoalsRef } from "@/components/goals";
 
+type Viewer = { admin: boolean; me: string; auth: boolean };
+
 export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [proj, setProj] = useState<Project | null>(null);
   const [missing, setMissing] = useState(false);
+  // A failed load that is not a 404 (server down, 5xx): transient, cleared on the next good load.
+  const [loadErr, setLoadErr] = useState("");
+  // The last failed board action (resync, ack/resolve), with the server's message.
+  const [actErr, setActErr] = useState("");
 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [proposals, setProposals] = useState<GoalProposal[]>([]);
   const [goalsOpen, setGoalsOpen] = useState(false);
-  const [viewer, setViewer] = useState<{ admin: boolean; me: string }>({ admin: false, me: "" });
+  const [viewer, setViewer] = useState<Viewer>({ admin: false, me: "", auth: true });
 
   useEffect(() => {
     api.me()
       .then((m) =>
         setViewer({
           admin: !!m.admin || !m.auth,
-          // The account's capture identity drives which goals are "mine"; falls
-          // back to a local name only in the auth-off dev instance.
-          me: m.member || m.user?.email || (typeof localStorage !== "undefined" ? localStorage.getItem("reins-me") : "") || "",
+          // The account's capture identity drives which goals are "mine" and who
+          // claims; falls back to a local name only in the auth-off dev instance.
+          me: m.member || m.user?.email || (!m.auth ? localStorage.getItem("reins-me") : "") || "",
+          auth: m.auth,
         })
       )
       .catch(() => {});
@@ -39,11 +46,17 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   const load = useCallback(async () => {
     try {
       setProj(await api.project(id));
+      setMissing(false);
+      setLoadErr("");
     } catch (e) {
       if (handleAuth(e)) return;
-      setMissing(true);
+      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      else setLoadErr(errorMessage(e));
     }
   }, [id]);
+
+  const fail = useCallback((e: unknown) => { if (!handleAuth(e)) setActErr(errorMessage(e)); }, []);
+  const act = useCallback((p: Promise<unknown>) => { setActErr(""); p.then(load, fail); }, [load, fail]);
 
   const loadGoals = useCallback(async () => {
     try {
@@ -62,25 +75,35 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">No project “{id}”. <Link href="/dashboard" className="hl">Back</Link></div></div></main></>
   );
   if (!proj) return (
-    <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="empty">Loading…</div></div></main></>
+    <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash">
+      {loadErr ? (
+        <div className="card pad empty">
+          <span className="mono" style={{ color: "var(--blocked)" }}>Could not load “{id}”: {loadErr}</span>{" "}
+          <button className="tiny" onClick={load}>retry</button>
+        </div>
+      ) : <div className="empty">Loading…</div>}
+    </div></main></>
   );
 
   return (
     <>
       <TopBar
         live={live}
-        right={<button className="btn ghost" onClick={() => api.refreshRollup(id).then(load)}>resync</button>}
+        right={<button className="btn ghost" onClick={() => act(api.refreshRollup(id))}>resync</button>}
       />
       <main className="wrap">
         <div className="dash">
           <DashHead proj={proj} goals={goals} proposals={myProposals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
+          {(loadErr || actErr) && (
+            <div className="mono" style={{ color: "var(--blocked)" }}>{actErr || `Could not refresh the board: ${loadErr}`}</div>
+          )}
           <div className="cols">
             <div style={{ display: "grid", gap: 24 }}>
               <Rollup proj={proj} />
               <div>
-                <div className="label" style={{ marginBottom: 14, justifyContent: "space-between", display: "flex", alignItems: "center" }}>
+                <div className="label teamhead">
                   <span><span className="sq active" /> team · live</span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span className="teamhead-acts">
                     {proj.handoffs.length > 0 && (
                       <span className="hcount"><span className="sq blocked" /> {proj.handoffs.length} open handoff{proj.handoffs.length > 1 ? "s" : ""}</span>
                     )}
@@ -92,13 +115,13 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
                   <div className="card pad empty">No activity captured yet.</div>
                 ) : (
                   <div className="team">
-                    {proj.members.map((m, i) => <MemberCard key={m.member} m={m} i={i} projectId={proj.id} onAct={load} />)}
+                    {proj.members.map((m, i) => <MemberCard key={m.member} m={m} i={i} projectId={proj.id} act={act} />)}
                   </div>
                 )}
               </div>
             </div>
             <div className="rail">
-              <PendingRail proj={proj} onChange={onChange} />
+              <PendingRail proj={proj} viewer={viewer} onChange={onChange} />
             </div>
           </div>
         </div>
@@ -112,10 +135,17 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
 function DashHead({ proj, goals, proposals, onSaved, onOpenGoals }: { proj: Project; goals: Goal[]; proposals: GoalProposal[]; onSaved: () => void; onOpenGoals: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proj.goal);
+  const [err, setErr] = useState("");
   useEffect(() => setDraft(proj.goal), [proj.goal]);
 
   const save = async () => {
-    await api.setGoal(proj.id, draft.trim());
+    setErr("");
+    try {
+      await api.setGoal(proj.id, draft.trim());
+    } catch (e) {
+      if (!handleAuth(e)) setErr(errorMessage(e));
+      return;
+    }
     setEditing(false);
     onSaved();
   };
@@ -134,8 +164,9 @@ function DashHead({ proj, goals, proposals, onSaved, onOpenGoals }: { proj: Proj
             <textarea value={draft} rows={2} onChange={(e) => setDraft(e.target.value)} autoFocus />
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn solid" onClick={save}>Save goal</button>
-              <button className="btn ghost" onClick={() => setEditing(false)}>Cancel</button>
+              <button className="btn ghost" onClick={() => { setEditing(false); setErr(""); }}>Cancel</button>
             </div>
+            {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
           </div>
         ) : (
           <>
@@ -186,22 +217,23 @@ function Rollup({ proj }: { proj: Project }) {
 
 const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi" };
 
-function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number]; i: number; projectId: string; onAct: () => void }) {
+// The member's name is the link (not the whole card), so the handoff buttons
+// inside the card are never nested in an interactive element.
+function MemberCard({ m, i, projectId, act }: { m: Project["members"][number]; i: number; projectId: string; act: (p: Promise<unknown>) => void }) {
   const s = STATUS[m.displayStatus] ?? STATUS.idle;
-  const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
   return (
-    <Link href={`/project/${encodeURIComponent(projectId)}/${encodeURIComponent(m.member)}`} className={`card mcard${m.live ? "" : " stale"}`}>
+    <div className={`card mcard${m.live ? "" : " stale"}`}>
       <div className="top">
         <div className="who">
           <Avatar name={m.displayName} i={i} />
           <div>
-            <div className="name">{m.displayName}</div>
+            <Link href={`/project/${encodeURIComponent(projectId)}/${encodeURIComponent(m.member)}`} className="name">{m.displayName}</Link>
             <div className="mono">{m.live ? `active · ${timeAgo(m.lastSeen)}` : `last seen ${timeAgo(m.lastSeen)}`}</div>
           </div>
         </div>
         <span className="statuslabel"><span className={`sq ${s.cls}`} /> {s.label}</span>
       </div>
-      {m.handoffs.length > 0 && <Handoffs items={m.handoffs} projectId={projectId} onAct={onAct} />}
+      {m.handoffs.length > 0 && <Handoffs items={m.handoffs} projectId={projectId} act={act} />}
       <div className="headline">{m.headline || "…"}</div>
       {m.goal && <div className="goal">{m.goal}</div>}
       {m.workingOn.length > 0 && (
@@ -216,15 +248,14 @@ function MemberCard({ m, i, projectId, onAct }: { m: Project["members"][number];
           ))}
         </div>
       )}
-    </Link>
+    </div>
   );
 }
 
 // Incoming handoffs for a member. More than a couple would balloon the card, so
 // they collapse behind a count (with a kind breakdown) and expand on click.
-function Handoffs({ items, projectId, onAct }: { items: Project["members"][number]["handoffs"]; projectId: string; onAct: () => void }) {
+function Handoffs({ items, projectId, act }: { items: Project["members"][number]["handoffs"]; projectId: string; act: (p: Promise<unknown>) => void }) {
   const [open, setOpen] = useState(false);
-  const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
   const COLLAPSE_AT = 2;
   const collapsed = items.length > COLLAPSE_AT && !open;
 
@@ -234,7 +265,7 @@ function Handoffs({ items, projectId, onAct }: { items: Project["members"][numbe
       .map(([k, n]) => `${n} ${HKIND[k] || k}${n > 1 ? "s" : ""}`)
       .join(" · ");
     return (
-      <button className="handoff-collapse" onClick={(e) => { stop(e); setOpen(true); }}>
+      <button className="handoff-collapse" onClick={() => setOpen(true)}>
         <span className="sq blocked" />
         <span className="hc-n">{items.length} for you</span>
         <span className="mono hc-b">{breakdown}</span>
@@ -246,7 +277,7 @@ function Handoffs({ items, projectId, onAct }: { items: Project["members"][numbe
   return (
     <div className="handoffs">
       {items.length > COLLAPSE_AT && (
-        <button className="handoff-collapse hide" onClick={(e) => { stop(e); setOpen(false); }}>
+        <button className="handoff-collapse hide" onClick={() => setOpen(false)}>
           <span className="hc-x">▴</span> <span className="mono">{items.length} for you · collapse</span>
         </button>
       )}
@@ -259,9 +290,9 @@ function Handoffs({ items, projectId, onAct }: { items: Project["members"][numbe
           <div className="htext">{h.text}</div>
           <div className="hacts">
             {h.status === "open" && (
-              <button className="tiny" onClick={(e) => { stop(e); api.handoff(h.id, projectId, "ack").then(onAct); }}>ack</button>
+              <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "ack"))}>ack</button>
             )}
-            <button className="tiny" onClick={(e) => { stop(e); api.handoff(h.id, projectId, "resolve").then(onAct); }}>resolve</button>
+            <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "resolve"))}>resolve</button>
           </div>
         </div>
       ))}
@@ -269,19 +300,35 @@ function Handoffs({ items, projectId, onAct }: { items: Project["members"][numbe
   );
 }
 
-function PendingRail({ proj, onChange }: { proj: Project; onChange: () => void }) {
-  const [me, setMe] = useState("");
-  useEffect(() => { setMe(localStorage.getItem("reins-me") || ""); }, []);
-  const who = () => {
-    let v = me;
-    if (!v) { v = prompt("Your name (so peers know who claimed it):") || "someone"; localStorage.setItem("reins-me", v); setMe(v); }
+function PendingRail({ proj, viewer, onChange }: { proj: Project; viewer: Viewer; onChange: () => void }) {
+  const [local, setLocal] = useState("");
+  const [err, setErr] = useState("");
+  // Claim as the signed-in account. Only the auth-off local instance (no
+  // accounts) asks for a name, remembered in localStorage.
+  const who = (): string | null => {
+    if (viewer.me) return viewer.me;
+    if (viewer.auth) return null;
+    let v = local;
+    if (!v) { v = prompt("Your name (so peers know who claimed it):") || "someone"; localStorage.setItem("reins-me", v); setLocal(v); }
     return v;
+  };
+  // A failure (e.g. 409: someone else got there first) shows the server's reason
+  // and refreshes so the board reflects what actually happened.
+  const run = (p: Promise<unknown>) => {
+    setErr("");
+    p.then(onChange, (e) => { if (!handleAuth(e)) { setErr(errorMessage(e)); onChange(); } });
+  };
+  const claim = (id: string) => {
+    const by = who();
+    if (!by) { setErr("Log in with your account to claim items."); return; }
+    run(api.claim(id, proj.id, by));
   };
   const open = proj.pending.filter((p) => p.status !== "done");
 
   return (
     <div className="card pend">
       <div className="label"><span className="sq" /> pending · up for grabs</div>
+      {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
         {open.length === 0 ? (
           <div className="empty">Nothing waiting. Clean board.</div>
         ) : (
@@ -294,11 +341,11 @@ function PendingRail({ proj, onChange }: { proj: Project; onChange: () => void }
                 </span>
                 <div className="acts">
                   {p.status === "open" ? (
-                    <button className="tiny" onClick={() => api.claim(p.id, proj.id, who()).then(onChange)}>claim</button>
+                    <button className="tiny" onClick={() => claim(p.id)}>claim</button>
                   ) : (
                     <span className="tiny claimed">claimed</span>
                   )}
-                  <button className="tiny" onClick={() => api.done(p.id, proj.id).then(onChange)}>done</button>
+                  <button className="tiny" onClick={() => run(api.done(p.id, proj.id))}>done</button>
                 </div>
               </div>
             </div>

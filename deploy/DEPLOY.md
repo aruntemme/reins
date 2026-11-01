@@ -7,12 +7,13 @@
 **Backend + DB → AWS Lightsail** (one small VM, Docker, persistent disk) ·
 **Dashboard → Vercel** (Next.js).
 
-The dashboard proxies `/api/*` to the backend *server-side*, so the browser only ever talks to
-Vercel over HTTPS — the Lightsail backend can stay plain HTTP (no certs to manage) and sessions
-stay first-party.
+The dashboard proxies `/api/*` to the backend *server-side*, so sessions stay first-party. The
+backend itself is served over HTTPS by **Caddy** on the box (automatic Let's Encrypt), and port 4319
+is closed to the internet: the rewrite, hooks, and the HTTP MCP all carry tokens, so nothing talks
+to the backend in plain HTTP.
 
 ```
-  Browser ──https──▶ Vercel (dashboard) ──/api/* rewrite──▶ http://<lightsail-ip>:4319 ──▶ SQLite (disk)
+  Browser ──https──▶ Vercel (dashboard) ──/api/* rewrite──https──▶ Caddy :443 ──▶ localhost:4319 ──▶ SQLite (disk)
 ```
 
 ---
@@ -20,9 +21,14 @@ stay first-party.
 ## 1. Backend on Lightsail (profile: `mdd`)
 
 ```bash
-# one-time: provision a 2 GB Ubuntu box, open ports, grab the SSH key
+# one-time: provision a 2 GB Ubuntu box, open 22/80/443, grab the SSH key
 ./deploy/lightsail/provision.sh
-#   → prints the public IP
+#   → prints the public IP; point a DNS name (e.g. reins.example.com) at it
+
+# one-time, on the box: TLS in front of the backend
+sudo apt-get install -y caddy
+echo 'reins.example.com { reverse_proxy localhost:4319 }' | sudo tee /etc/caddy/Caddyfile
+sudo systemctl enable --now caddy && sudo systemctl reload caddy
 
 # fill in secrets, then ship
 cp deploy/lightsail/.env.deploy.example deploy/lightsail/.env.deploy
@@ -59,18 +65,11 @@ sudo systemctl start reins-ci.service      # force a run now
 sudo systemctl disable --now reins-ci.timer # pause it
 ```
 
-### CI/CD (GitHub Actions) — when Actions is available
+### CI (GitHub Actions)
 
-`.github/workflows/backend.yml` runs on every push/PR touching the backend:
-
-- **CI** (always): `npm ci`, `tsc --noEmit`, the server test suite, and the CLI tests.
-- **CD** (push to `main`, after CI is green): runs `ship.sh` against the box — backup,
-  rsync, rebuild, health check. It reuses the box's `.env`, so the only repo secrets needed are:
-  - `LIGHTSAIL_SSH_KEY` — the contents of `deploy/lightsail/reins-key.pem`
-  - `LIGHTSAIL_HOST` — the box's public IP
-
-  Add them under **Settings → Secrets and variables → Actions**. Until both are set, the
-  deploy job no-ops with a notice (CI still runs). The dashboard keeps auto-deploying on Vercel.
+`.github/workflows/ci.yml` runs on every PR and push to `main`: the server typecheck and test suite,
+the CLI tests, and the dashboard build. It does not deploy; deploys stay on-box (above) or manual
+(`ship.sh`). The dashboard keeps auto-deploying on Vercel.
 
 What you get: the container runs with `REINS_AUTH=on`, SQLite on the box's disk (survives
 restarts/redeploys), and three tokens (admin / ingest / access) from the bootstrap step.
@@ -84,7 +83,7 @@ restarts/redeploys), and three tokens (admin / ingest / access) from the bootstr
 Point Vercel at the **`web/`** directory:
 
 - **Root Directory:** `web`
-- **Env var:** `REINS_URL = http://<lightsail-ip>:4319`
+- **Env var:** `REINS_URL = https://reins.example.com` (the Caddy domain)
 - Framework auto-detected (Next.js). Deploy.
 
 `web/next.config.mjs` rewrites `/api/*` to `REINS_URL`, so the browser stays same-origin.
@@ -94,8 +93,8 @@ Point Vercel at the **`web/`** directory:
 ## 3. Onboard the team
 
 ```bash
-npx reins-hook install --url http://<lightsail-ip>:4319 --me asha --token <ingest-token>
-# teammates open the Vercel dashboard and paste the access token at /signin
+npx reins-hook install --url https://reins.example.com --me asha --token <ingest-token>
+# teammates sign up from an invite link on the Vercel dashboard
 ```
 
 ---
@@ -103,8 +102,8 @@ npx reins-hook install --url http://<lightsail-ip>:4319 --me asha --token <inges
 ## Notes
 - **Backups:** `ssh` in and `docker compose exec reins cp /data/reins.db /data/backup.db`, or
   snapshot the Lightsail instance.
-- **TLS (optional):** put the Lightsail box behind a Lightsail load balancer, or front it with
-  Caddy/Cloudflare if you later use `NEXT_PUBLIC_REINS_URL` direct mode.
+- **Client IPs:** with Vercel → Caddy in front, set `REINS_TRUST_PROXY=2` in the box's `.env` so
+  login/signup limits see real client IPs (see `SELFHOST.md`, section 8).
 - **Scale later:** SQLite-on-disk is fine for a team. For HA/multi-instance, swap `server/src/db.ts`
   to Postgres (small schema) and move to ECS/Fargate — see git history for the Docker/ECR setup
   (`server/Dockerfile`, `deploy/aws/push-ecr.sh`) which still apply.

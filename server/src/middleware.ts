@@ -19,6 +19,14 @@ declare global {
   }
 }
 
+/** Express 4 doesn't catch a rejected async handler (it becomes an unhandled
+ *  rejection that can kill the process). Route the rejection to the error handler. */
+export function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
+}
+
 export function readCookie(req: Request, name: string): string | undefined {
   const raw = req.headers.cookie;
   if (!raw) return undefined;
@@ -138,3 +146,43 @@ export function authorizeProject(req: Request, res: Response, projectId: string)
   res.status(404).json({ error: "not found" });
   return false;
 }
+
+// ── In-memory sliding-window counters (abuse guards, rate limits) ──
+// In-memory is intentional: a single instance, and a restart only relaxes a
+// guard, never tightens it. Every map is registered so a periodic sweep drops
+// keys that have gone quiet — otherwise one-off IPs/emails would pile up forever.
+const counters: Map<string, number[]>[] = [];
+const SWEEP_AGE_MS = 60 * 60_000; // longer than any window in use
+
+export function counterMap(): Map<string, number[]> {
+  const m = new Map<string, number[]>();
+  counters.push(m);
+  return m;
+}
+
+/** Timestamps for `key` within the window. Prunes, and deletes an emptied key. */
+export function recentHits(map: Map<string, number[]>, key: string, windowMs: number): number[] {
+  const cutoff = Date.now() - windowMs;
+  const hits = (map.get(key) ?? []).filter((t) => t > cutoff);
+  if (hits.length) map.set(key, hits);
+  else map.delete(key);
+  return hits;
+}
+
+/** Record one hit for `key`. */
+export function addHit(map: Map<string, number[]>, key: string): void {
+  const hits = map.get(key);
+  if (hits) hits.push(Date.now());
+  else map.set(key, [Date.now()]);
+}
+
+/** Count this attempt against `max` per window; true (and NOT counted) when over. */
+export function overLimit(map: Map<string, number[]>, key: string, max: number, windowMs: number): boolean {
+  if (recentHits(map, key, windowMs).length >= max) return true;
+  addHit(map, key);
+  return false;
+}
+
+setInterval(() => {
+  for (const m of counters) for (const key of [...m.keys()]) recentHits(m, key, SWEEP_AGE_MS);
+}, 10 * 60_000).unref();

@@ -286,6 +286,13 @@ if (!eventCols.some((c) => c.name === "source")) {
   db.exec("ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'claude-code'");
 }
 
+// Per-user session epoch: signed into every user session and bumped on password
+// reset, so a reset invalidates the account's other (stateless) sessions.
+const userCols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+if (!userCols.some((c) => c.name === "session_epoch")) {
+  db.exec("ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0");
+}
+
 export const now = () => Date.now();
 
 // ── Projects ──────────────────────────────────────────────────
@@ -403,27 +410,29 @@ export function listMembers(project: string): any[] {
     .all(project);
 }
 
-/** Resolve a free-text name (display name, id, or @handle) to a member id. */
+/** Resolve a free-text name (display name, id, or @handle) to a member id. An
+ *  exact id/display-name match wins; a first-name match is used only when exactly
+ *  one teammate has that first name — an ambiguous one resolves to null, not a guess. */
 export function resolveMember(project: string, name: string): string | null {
   const want = name.trim().replace(/^@/, "").toLowerCase();
   if (!want) return null;
-  for (const m of listMembers(project)) {
-    if (
-      m.member.toLowerCase() === want ||
-      (m.display_name || "").toLowerCase() === want ||
-      (m.display_name || "").toLowerCase().split(/\s+/)[0] === want
-    )
-      return m.member;
+  const members = listMembers(project);
+  for (const m of members) {
+    if (m.member.toLowerCase() === want || (m.display_name || "").toLowerCase() === want) return m.member;
   }
-  return null;
+  const byFirst = members.filter((m) => firstName(m.display_name) === want);
+  return byFirst.length === 1 ? byFirst[0].member : null;
 }
+
+const firstName = (displayName?: string | null) => (displayName || "").trim().toLowerCase().split(/\s+/)[0] || "";
 
 /** True only if `member` is actually NAMED in `text` (id, display name, first name, or @handle),
  *  matched on a word boundary. This grounds @mention handoffs: the distiller works off one
  *  person talking to their OWN agent, so an imperative ("review the codebase", "note it down for
  *  me") with no teammate named must NOT become a handoff to whoever is left on the roster. */
 export function memberNamedIn(project: string, member: string, text: string): boolean {
-  const m = listMembers(project).find((x) => x.member === member);
+  const roster = listMembers(project);
+  const m = roster.find((x) => x.member === member);
   if (!m || !text) return false;
   const tokens = new Set<string>();
   const add = (s?: string | null) => {
@@ -433,7 +442,9 @@ export function memberNamedIn(project: string, member: string, text: string): bo
   };
   add(m.member);
   add(m.display_name);
-  if (m.display_name) add(m.display_name.split(/\s+/)[0]);
+  // A first name only grounds the mention when no other teammate shares it.
+  const first = firstName(m.display_name);
+  if (first && roster.filter((x) => firstName(x.display_name) === first).length === 1) add(first);
   for (const tok of tokens) {
     const re = new RegExp(`(^|[^a-z0-9])@?${tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
     if (re.test(text)) return true;
@@ -471,6 +482,20 @@ export function insertEvent(e: {
 
 export function setEventSignificance(id: string, sig: string) {
   db.prepare("UPDATE events SET significance = ? WHERE id = ?").run(sig, id);
+}
+
+/** Events captured since `sinceMs` that never finished distilling (significance
+ *  still NULL — e.g. the process restarted with them queued), oldest first. */
+export function undistilledEvents(sinceMs: number): {
+  id: string; project: string; member: string; kind: string; text: string; source: string;
+}[] {
+  return db
+    .prepare(
+      `SELECT id, project, member, kind, text, source FROM events
+        WHERE significance IS NULL AND created_at >= ? AND text != ''
+        ORDER BY created_at ASC`
+    )
+    .all(sinceMs) as any;
 }
 
 // ── Timeline ──────────────────────────────────────────────────
@@ -523,10 +548,24 @@ export function upsertPending(project: string, member: string, text: string, id?
   return newId;
 }
 
-export function setPendingStatus(id: string, status: string, claimedBy?: string) {
-  db.prepare(
-    "UPDATE pending SET status = ?, claimed_by = ?, updated_at = ? WHERE id = ?"
-  ).run(status, claimedBy ?? null, now(), id);
+/** Set a pending item's status. Scoped to `project` so an id from another
+ *  project (or tenant) never matches. Returns rows changed. */
+export function setPendingStatus(project: string, id: string, status: string, claimedBy?: string): number {
+  return db
+    .prepare("UPDATE pending SET status = ?, claimed_by = ?, updated_at = ? WHERE id = ? AND project = ?")
+    .run(status, claimedBy ?? null, now(), id, project).changes;
+}
+
+/** Atomically claim an OPEN pending item. Returns false if it doesn't exist in
+ *  this project or someone else claimed/finished it first. */
+export function claimPending(project: string, id: string, by: string): boolean {
+  return (
+    db
+      .prepare(
+        "UPDATE pending SET status = 'claimed', claimed_by = ?, updated_at = ? WHERE id = ? AND project = ? AND status = 'open'"
+      )
+      .run(by, now(), id, project).changes > 0
+  );
 }
 
 // ── Handoffs / @mentions ──────────────────────────────────────
@@ -537,6 +576,21 @@ export function createHandoff(h: {
   kind: string;
   text: string;
 }): string | null {
+  // Collisions and blockers are about a relationship, not a phrasing: the LLM
+  // rewords them every rollup. Keep ONE open per (to, from, kind) and refresh its
+  // text in place instead of stacking near-duplicates.
+  if (h.kind === "collision" || h.kind === "blocker") {
+    const open = db
+      .prepare(
+        `SELECT id FROM handoffs WHERE project = ? AND to_member = ? AND COALESCE(from_member, '') = ?
+           AND kind = ? AND status != 'resolved' ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(h.project, h.toMember, h.fromMember ?? "", h.kind) as { id: string } | undefined;
+    if (open) {
+      db.prepare("UPDATE handoffs SET text = ?, updated_at = ? WHERE id = ?").run(h.text.slice(0, 300), now(), open.id);
+      return null;
+    }
+  }
   const sig = `${h.toMember}|${h.fromMember ?? ""}|${h.kind}|${h.text.trim().slice(0, 60).toLowerCase()}`;
   // Dedup: skip if an identical handoff is already open/ack (avoids re-firing every rollup).
   const dupe = db
@@ -574,8 +628,11 @@ export function resolvedHandoffs(project: string, member: string, limit = 30): a
     .all(project, member, limit);
 }
 
-export function setHandoffStatus(id: string, status: string) {
-  db.prepare("UPDATE handoffs SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), id);
+/** Set a handoff's status, scoped to `project`. Returns rows changed. */
+export function setHandoffStatus(project: string, id: string, status: string): number {
+  return db
+    .prepare("UPDATE handoffs SET status = ?, updated_at = ? WHERE id = ? AND project = ?")
+    .run(status, now(), id, project).changes;
 }
 
 /** Bulk-resolve open handoffs for a member, optionally limited to one kind.
@@ -1008,6 +1065,10 @@ export interface GoalProposalRow {
   updated_at: number;
 }
 
+// Upper bound on any list pasted into an LLM prompt, so prompt cost stays flat
+// as a project accumulates goals and pending work.
+export const PROMPT_LIST_CAP = 30;
+
 /** Open, not-done checklist items the matcher can reason about for a member:
  *  their own individual goals plus the project's team goals. */
 export function openGoalItemsForMatch(project: string, member: string): {
@@ -1023,18 +1084,23 @@ export function openGoalItemsForMatch(project: string, member: string): {
          FROM goal_items i JOIN goals g ON g.id = i.goal_id
         WHERE g.project = ? AND i.done = 0
           AND (g.scope = 'team' OR (g.scope = 'individual' AND g.member = ?))
-        ORDER BY g.scope = 'team' DESC, i.position ASC`
+        ORDER BY g.scope = 'team' DESC, i.position ASC
+        LIMIT ${PROMPT_LIST_CAP}`
     )
     .all(project, member) as any;
 }
 
-/** Goals (id + title) the member can have new items proposed onto. */
+/** Goals (id + title) the member can have new items proposed onto. Completed
+ *  goals (every item done) are left out — nothing left to propose onto them. */
 export function openGoalsForMatch(project: string, member: string): { id: string; title: string; scope: GoalScope }[] {
   return db
     .prepare(
-      `SELECT id, title, scope FROM goals
-        WHERE project = ? AND (scope = 'team' OR (scope = 'individual' AND member = ?))
-        ORDER BY scope = 'team' DESC, created_at ASC`
+      `SELECT g.id, g.title, g.scope FROM goals g
+        WHERE g.project = ? AND (g.scope = 'team' OR (g.scope = 'individual' AND g.member = ?))
+          AND NOT (EXISTS (SELECT 1 FROM goal_items i WHERE i.goal_id = g.id)
+                   AND NOT EXISTS (SELECT 1 FROM goal_items i WHERE i.goal_id = g.id AND i.done = 0))
+        ORDER BY g.scope = 'team' DESC, g.created_at ASC
+        LIMIT ${PROMPT_LIST_CAP}`
     )
     .all(project, member) as any;
 }
@@ -1410,4 +1476,24 @@ export function deleteWorkspace(id: string): boolean {
   db.prepare("DELETE FROM tokens WHERE workspace_id = ?").run(id);
   const r = db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
   return r.changes > 0;
+}
+
+// ── Housekeeping ──────────────────────────────────────────────
+/**
+ * Periodic cleanup: drop expired unaccepted invites and spent/expired password
+ * resets, and blank the raw text of events older than `retentionDays` (0 = keep
+ * forever). Distilled state (members, timeline, pending, handoffs, goals) is
+ * untouched; the event rows stay so counts and evidence ids remain valid.
+ */
+export function pruneStale(retentionDays: number, at = now()): { invites: number; resets: number; events: number } {
+  const invites = db.prepare("DELETE FROM invites WHERE accepted_at IS NULL AND expires_at < ?").run(at).changes;
+  const resets = db.prepare("DELETE FROM password_resets WHERE used_at IS NOT NULL OR expires_at < ?").run(at).changes;
+  let events = 0;
+  if (retentionDays > 0) {
+    const cutoff = at - retentionDays * 24 * 60 * 60 * 1000;
+    events = db
+      .prepare("UPDATE events SET text = '', meta = NULL WHERE created_at < ? AND (text != '' OR meta IS NOT NULL)")
+      .run(cutoff).changes;
+  }
+  return { invites, resets, events };
 }

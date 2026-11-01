@@ -11,6 +11,7 @@ process.env.REINS_DB = DB;
 const {
   scoreRelevance,
   tokenize,
+  idfWeights,
   buildContextPack,
   buildScopedContextPack,
   renderContextPack,
@@ -147,4 +148,31 @@ test("scoped render is smaller (fewer chars) than the full render", () => {
 test("focused member survives even when alone it exceeds the budget", () => {
   const scoped = buildScopedContextPack(PROJECT, { member: "alice", limit: 1 });
   assert.equal(scoped.members[0]?.member, "alice");
+});
+
+// ── Retrieval quality: camelCase/paths, stemming, IDF, timeline ─────
+test("tokenize splits camelCase and paths, and stems lightly", () => {
+  const t = tokenize("src/authFlow.ts testing fixes");
+  for (const want of ["src", "authflow", "auth", "flow", "ts", "test", "fix"]) assert.ok(t.includes(want), want);
+});
+
+test("IDF makes ubiquitous tokens (src, ts, server) near-worthless", () => {
+  const docs = ["server/src/a.ts", "server/src/b.ts", "server/src/c.ts", "server/src/billing.ts"];
+  const idf = idfWeights(docs);
+  assert.ok(idf("src") < 0.3 && idf("billing") > 1, `src=${idf("src")} billing=${idf("billing")}`);
+  // A query that shares only boilerplate with a doc scores far below a real match.
+  const q = "billing src ts";
+  assert.ok(scoreRelevance(docs[3]!, q, idf) > 3 * scoreRelevance(docs[0]!, q, idf));
+});
+
+test("recent timeline entries count toward a member's relevance", () => {
+  const P = "timeline-rank";
+  db.ensureProject(P, "TL");
+  db.ensureMember(P, "erin", "Erin");
+  db.upsertMemberState(P, "erin", { headline: "misc chores", workingOn: [] });
+  db.ensureMember(P, "fay", "Fay");
+  db.upsertMemberState(P, "fay", { headline: "misc chores", workingOn: [] });
+  db.addTimeline(P, "erin", "did", "rotated the webhook signing secrets");
+  const scoped = buildScopedContextPack(P, { query: "webhook signing" });
+  assert.equal(scoped.members[0]?.member, "erin");
 });

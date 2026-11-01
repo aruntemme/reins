@@ -1,6 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, type Goal, type GoalProposal } from "@/lib/api";
+import { api, errorMessage, type Goal, type GoalProposal } from "@/lib/api";
+
+// Who is looking: me is the account's capture identity ("" if unknown); auth is
+// false only on the auth-off local instance, the one place we ask for a name.
+type Viewer = { admin: boolean; me: string; auth: boolean };
+// Runs a goal mutation, then reloads or surfaces the server's error.
+type Run = (p: Promise<unknown>) => void;
 
 /**
  * Short-term goals pane: common TEAM goals (admin-managed) and per-person goals,
@@ -32,7 +38,7 @@ export function GoalsRef({ goals, proposals, onOpen }: { goals: Goal[]; proposal
 }
 
 /** The 'suggested by activity' strip: pipeline proposals the owner confirms/dismisses. */
-function ProposalStrip({ proposals, onChange }: { proposals: GoalProposal[]; onChange: () => void }) {
+function ProposalStrip({ proposals, run }: { proposals: GoalProposal[]; run: Run }) {
   if (!proposals.length) return null;
   return (
     <div className="goal-props">
@@ -46,8 +52,8 @@ function ProposalStrip({ proposals, onChange }: { proposals: GoalProposal[]; onC
           </div>
           <div className="goal-prop-why">{p.reason}{p.member ? ` · ${p.member}` : ""}</div>
           <div className="goal-prop-acts">
-            <button className="tiny solid" onClick={() => api.acceptProposal(p.id).then(onChange)}>confirm</button>
-            <button className="tiny" onClick={() => api.dismissProposal(p.id).then(onChange)}>dismiss</button>
+            <button className="tiny solid" onClick={() => run(api.acceptProposal(p.id))}>confirm</button>
+            <button className="tiny" onClick={() => run(api.dismissProposal(p.id))}>dismiss</button>
           </div>
         </div>
       ))}
@@ -64,7 +70,7 @@ export function GoalsDrawer({
   projectId: string;
   goals: Goal[];
   proposals: GoalProposal[];
-  viewer: { admin: boolean; me: string };
+  viewer: Viewer;
   onChange: () => void;
 }) {
   useEffect(() => {
@@ -75,7 +81,8 @@ export function GoalsDrawer({
   }, [open, onClose]);
 
   return (
-    <div className={`goals-drawer ${open ? "open" : ""}`} aria-hidden={!open}>
+    // inert when closed: off-screen controls must not take focus.
+    <div className={`goals-drawer ${open ? "open" : ""}`} aria-hidden={!open} inert={!open}>
       <div className="goals-drawer-scrim" onClick={onClose} />
       <aside className="goals-drawer-panel" role="dialog" aria-label="Short-term goals">
         <div className="goals-drawer-head">
@@ -90,48 +97,58 @@ export function GoalsDrawer({
   );
 }
 
-export function GoalsPane({ projectId, goals, proposals, viewer, onChange, embedded }: { projectId: string; goals: Goal[]; proposals: GoalProposal[]; viewer: { admin: boolean; me: string }; onChange: () => void; embedded?: boolean }) {
+export function GoalsPane({ projectId, goals, proposals, viewer, onChange, embedded }: { projectId: string; goals: Goal[]; proposals: GoalProposal[]; viewer: Viewer; onChange: () => void; embedded?: boolean }) {
   const admin = viewer.admin;
   const [me, setMe] = useState(viewer.me);
+  const [err, setErr] = useState("");
   useEffect(() => { if (viewer.me) setMe(viewer.me); }, [viewer.me]);
+  const run: Run = (p) => { setErr(""); p.then(onChange, (e) => setErr(errorMessage(e))); };
 
   const team = goals.filter((g) => g.scope === "team");
   const mine = goals.filter((g) => g.scope === "individual" && me && g.member === me);
   const others = goals.filter((g) => g.scope === "individual" && (!me || g.member !== me));
 
-  const ensureMe = (): string => {
+  // Your goals belong to your account's identity. Only the auth-off local
+  // instance (no accounts) asks for a name, remembered in localStorage.
+  const ensureMe = (): string | null => {
     if (me) return me;
+    if (viewer.auth) return null;
     const v = (prompt("Your name (the identity your agent reports as):") || "").trim();
     if (v) { localStorage.setItem("reins-me", v); setMe(v); }
     return v || "me";
   };
-  const load = onChange;
+  const addMine = (title: string) => {
+    const member = ensureMe();
+    if (!member) { setErr("Log in with your account to add your own goals."); return; }
+    run(api.addGoal(projectId, { scope: "individual", member, title }));
+  };
 
   return (
     <div className={embedded ? "goals goals-embedded" : "goals card pad"} id={embedded ? undefined : "goals"}>
       {!embedded && <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> short-term goals</div>}
 
-      <ProposalStrip proposals={proposals} onChange={onChange} />
+      {err && <div className="mono" style={{ color: "var(--blocked)", marginBottom: 12 }}>{err}</div>}
+      <ProposalStrip proposals={proposals} run={run} />
 
       <Section
         title="Team goals"
         count={team.length}
         canAdd={admin}
-        onAdd={(t) => api.addGoal(projectId, { scope: "team", title: t }).then(load)}
+        onAdd={(t) => run(api.addGoal(projectId, { scope: "team", title: t }))}
         empty={admin ? "Add the common goals the team is working toward." : "No common goals yet."}
       >
-        {team.map((g) => <GoalCard key={g.id} g={g} editable={admin} onChange={load} />)}
+        {team.map((g) => <GoalCard key={g.id} g={g} editable={admin} run={run} />)}
       </Section>
 
       <Section
         title="Individual goals"
         count={mine.length + others.length}
         canAdd
-        onAdd={(t) => api.addGoal(projectId, { scope: "individual", member: ensureMe(), title: t }).then(load)}
+        onAdd={addMine}
         empty="Add a goal or two of your own."
       >
-        {mine.map((g) => <GoalCard key={g.id} g={g} editable mine onChange={load} showMember />)}
-        {others.map((g) => <GoalCard key={g.id} g={g} editable={false} onChange={load} showMember />)}
+        {mine.map((g) => <GoalCard key={g.id} g={g} editable mine run={run} showMember />)}
+        {others.map((g) => <GoalCard key={g.id} g={g} editable={false} run={run} showMember />)}
       </Section>
     </div>
   );
@@ -182,11 +199,11 @@ function Section({
 }
 
 function GoalCard({
-  g, editable, onChange, showMember, mine,
+  g, editable, run, showMember, mine,
 }: {
   g: Goal;
   editable: boolean;
-  onChange: () => void;
+  run: Run;
   showMember?: boolean;
   mine?: boolean;
 }) {
@@ -195,7 +212,7 @@ function GoalCard({
   const addItem = () => {
     const t = newItem.trim();
     if (!t) return;
-    api.addGoalItem(g.id, t).then(onChange);
+    run(api.addGoalItem(g.id, t));
     setNewItem("");
   };
   return (
@@ -217,11 +234,11 @@ function GoalCard({
                 type="checkbox"
                 checked={it.done}
                 disabled={!editable}
-                onChange={() => api.patchGoalItem(it.id, { done: !it.done }).then(onChange)}
+                onChange={() => run(api.patchGoalItem(it.id, { done: !it.done }))}
               />
               <span>{it.text}</span>
               {editable && (
-                <button className="goal-x" title="remove" onClick={() => api.deleteGoalItem(it.id).then(onChange)}>×</button>
+                <button className="goal-x" title="remove" onClick={() => run(api.deleteGoalItem(it.id))}>×</button>
               )}
             </label>
           ))}
@@ -239,10 +256,10 @@ function GoalCard({
       )}
       {editable && (
         <div className="goal-acts">
-          <button className="tiny" onClick={() => api.patchGoal(g.id, { blocked: !g.blocked }).then(onChange)}>
+          <button className="tiny" onClick={() => run(api.patchGoal(g.id, { blocked: !g.blocked }))}>
             {g.blocked ? "unblock" : "block"}
           </button>
-          <button className="tiny" onClick={() => { if (confirm("Delete this goal?")) api.deleteGoal(g.id).then(onChange); }}>
+          <button className="tiny" onClick={() => { if (confirm("Delete this goal?")) run(api.deleteGoal(g.id)); }}>
             delete
           </button>
         </div>

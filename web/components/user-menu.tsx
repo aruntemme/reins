@@ -73,10 +73,12 @@ export function UserMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`Account menu for ${email}`}
         style={{ display: "flex", alignItems: "center", gap: 8 }}
       >
         <span className="av" style={{ margin: 0, width: 22, height: 22, fontSize: 10 }}>{initials(email)}</span>
-        <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
+        {/* Hidden on narrow screens (globals.css), leaving the initials. */}
+        <span className="um-email" style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
       </button>
 
       {open && (

@@ -343,6 +343,7 @@ export function LandingHeroBounce() {
               <a href="#why">Why</a>
               <a href="#how">How</a>
               <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+              <Link href="/signup" className="btn">Sign up</Link>
               <Link href="/login" className="btn solid">Log in</Link>
             </nav>
           </header>
@@ -373,6 +374,7 @@ export function LandingHeroBounce() {
 
               <div className="lhero-cta lhero-fade" style={{ animationDelay: "1.82s" }}>
                 <Link href="/login" className="btn solid lg">Log in</Link>
+                <Link href="/signup" className="btn lg">Sign up</Link>
                 <Link href="/signin?demo=1" className="btn lg">Try the demo</Link>
                 <CopyCommand text="npx reins-hook install" />
               </div>

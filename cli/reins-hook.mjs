@@ -4,7 +4,8 @@
  *
  * Wire it up in .claude/settings.json (see hooks/README.md). It reads the hook
  * payload on stdin and ships an intent/progress/summary signal to the Reins
- * server. It NEVER blocks your agent: short timeout, always exits 0.
+ * server. It NEVER blocks your agent: the POST happens in a detached child
+ * process, so the hook itself returns immediately and always exits 0.
  *
  * This is a thin Claude-Code adapter over the shared capture core in
  * ./lib/capture.mjs — other agent harnesses ship their own adapter over the
@@ -20,7 +21,7 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { resolveMember, lastAssistantText, sendEvent } from "./lib/capture.mjs";
+import { resolveMember, lastAssistantText, sendEvent, sendEventDetached } from "./lib/capture.mjs";
 
 function readStdin() {
   try {
@@ -52,7 +53,7 @@ if (isMain) {
 
   if (!text) process.exit(0);
 
-  sendEvent({
+  const event = {
     url: process.env.REINS_URL,
     key: process.env.REINS_KEY,
     project,
@@ -62,5 +63,9 @@ if (isMain) {
     session: hook.session_id,
     source: process.env.REINS_SOURCE || "claude-code",
     meta: { cwd: hook.cwd, event: hook.hook_event_name || "" },
-  }).finally(() => process.exit(0));
+  };
+  // Fire-and-forget from a detached child; only if spawning fails do we send
+  // inline (still bounded by sendEvent's short timeout).
+  if (sendEventDetached(event)) process.exit(0);
+  else sendEvent(event).finally(() => process.exit(0));
 }

@@ -56,3 +56,34 @@ test("a throwing job never wedges the worker — later jobs still run", async ()
   await drain();
   assert.deepEqual(done, [1, 2], "the failed job didn't block the queue");
 });
+
+test("lanes are independent: a slow backend doesn't hold up another backend's jobs", async () => {
+  await drain();
+  const order: string[] = [];
+  enqueueDistill(async () => { await sleep(200); order.push("slow"); }, { lane: "slow-provider" });
+  enqueueDistill(async () => { order.push("fast"); }, { lane: "fast-provider" });
+  await drain();
+  assert.deepEqual(order, ["fast", "slow"], "the fast lane finished while the slow one was still busy");
+});
+
+test("jobs with the same key never overlap and keep their order, even across lanes", async () => {
+  await drain();
+  const log: string[] = [];
+  let running = 0;
+  let overlap = false;
+  const job = (name: string, ms: number) => async () => {
+    running++;
+    if (running > 1) overlap = true;
+    log.push(`start ${name}`);
+    await sleep(ms);
+    log.push(`end ${name}`);
+    running--;
+  };
+  // Same member, but the provider changed between events (different lanes).
+  enqueueDistill(job("1", 60), { lane: "A", key: "proj\u0000asha" });
+  enqueueDistill(job("2", 5), { lane: "B", key: "proj\u0000asha" });
+  enqueueDistill(job("3", 5), { lane: "B", key: "proj\u0000asha" });
+  await drain();
+  assert.equal(overlap, false);
+  assert.deepEqual(log, ["start 1", "end 1", "start 2", "end 2", "start 3", "end 3"]);
+});

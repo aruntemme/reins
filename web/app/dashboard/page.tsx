@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { api, timeAgo, type ProjectSummary } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
-import { handleAuth } from "@/lib/guard";
+import { handleAuth, toLogin } from "@/lib/guard";
 import { TopBar } from "@/components/ui";
 import { ProjectCreate } from "@/components/project-create";
 
@@ -16,7 +16,7 @@ export default function Dashboard() {
   // entry). The token-paste /signin page is reachable via "Try the demo".
   useEffect(() => {
     api.me().then((m) => {
-      if (m.auth && !m.workspace && typeof window !== "undefined") window.location.href = "/login";
+      if (m.auth && !m.workspace) toLogin();
     }).catch(() => {});
   }, []);
 
@@ -63,7 +63,7 @@ export default function Dashboard() {
         {projects.length === 0 ? (
           <div className="card pad empty">
             {loaded
-              ? "No projects yet. Point an agent's hook at the server (npx reins-hook install)."
+              ? "No projects yet. Click + new project to create one and get the install command for your agent."
               : "Loading…"}
           </div>
         ) : (
