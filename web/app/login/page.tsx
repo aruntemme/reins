@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, AuthError } from "@/lib/api";
 import { safeNext } from "@/lib/guard";
+import { useMounted } from "@/lib/useMounted";
 import { AuthShell, Field, FormError } from "../auth-shell";
 
 function LoginForm() {
@@ -42,7 +43,9 @@ function LoginForm() {
     }
   };
 
-  const signupHref = next === "/dashboard" ? "/signup" : `/signup?next=${encodeURIComponent(next)}`;
+  // Carries ?next= only once mounted: the server render has no query to read.
+  const mounted = useMounted();
+  const signupHref = !mounted || next === "/dashboard" ? "/signup" : `/signup?next=${encodeURIComponent(next)}`;
 
   return (
     <AuthShell

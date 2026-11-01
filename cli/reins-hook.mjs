@@ -17,7 +17,9 @@
  * context, 300ms for the pre-edit check). If the server is down or slow it prints
  * nothing and exits 0.
  *
- * Env:
+ * Connection (lib/config.mjs resolveRuntime): explicit env wins; else
+ * ~/.reins/config.json — the repo map by git root of cwd gives url + project and
+ * the server entry gives the token + member; else the fallbacks below.
  *   REINS_URL      default http://localhost:4319
  *   REINS_PROJECT  default = basename of cwd
  *   REINS_MEMBER   default = git user.email | $USER
@@ -26,12 +28,12 @@
  *   REINS_CONTEXT  "off" disables context injection and the pre-edit check
  */
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  resolveMember, lastAssistantText, sendEvent, sendEventDetached, sendTouchDetached, postJson,
+  lastAssistantText, sendEvent, sendEventDetached, sendTouchDetached, postJson,
 } from "./lib/capture.mjs";
 import { repoPath } from "./lib/git.mjs";
+import { resolveRuntime } from "./lib/config.mjs";
 import { readJson, writeJson, sessionFile, pruneSessions } from "./lib/state.mjs";
 
 // Claude Code's file-editing tools (MultiEdit kept for older Claude Code versions).
@@ -88,9 +90,10 @@ if (isMain) {
 async function main() {
   const hook = readStdin();
   const evt = hook.hook_event_name || "";
-  const project = process.env.REINS_PROJECT || basename(hook.cwd || process.cwd()) || "default";
-  const conn = { url: process.env.REINS_URL, key: process.env.REINS_KEY };
-  const member = resolveMember();
+  const rt = resolveRuntime({ cwd: hook.cwd || process.cwd() });
+  const { project, member } = rt;
+  const conn = { url: rt.url, key: rt.key };
+  const source = rt.source;
   const inject = (process.env.REINS_CONTEXT || "").toLowerCase() !== "off";
   const state = readJson(sessionFile(hook.session_id)) || null;
   const save = (s) => writeJson(sessionFile(hook.session_id), s);
@@ -118,7 +121,7 @@ async function main() {
     if (prompt) {
       const event = {
         ...conn, project, member, kind: "intent", text: prompt, session: hook.session_id,
-        source: process.env.REINS_SOURCE || "claude-code", cwd: hook.cwd,
+        source, cwd: hook.cwd,
         meta: { cwd: hook.cwd, event: evt },
       };
       // Fire-and-forget from a detached child, before we wait on anything.
@@ -169,7 +172,7 @@ async function main() {
   if (!text) return process.exit(0);
   const event = {
     ...conn, project, member, kind, text, session: hook.session_id,
-    source: process.env.REINS_SOURCE || "claude-code", cwd: hook.cwd,
+    source, cwd: hook.cwd,
     meta: { cwd: hook.cwd, event: evt },
   };
   // Fire-and-forget from a detached child; only if spawning fails do we send

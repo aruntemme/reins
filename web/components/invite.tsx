@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, errorMessage, installCommand } from "@/lib/api";
+import { api, errorMessage, type Me } from "@/lib/api";
 import { CopyCommand } from "./copy-command";
 
 /** Calls `close` on Escape while `open`, like a native dialog. */
@@ -14,50 +14,41 @@ export function useEscape(open: boolean, close: () => void) {
 }
 
 /**
- * Admin-only "invite a teammate" flow. Hands back an account join link (so the
- * teammate signs in as themselves, as a member) and, optionally, an ingest token
- * plus install command for their agent. It never mints a raw access token: those
- * bypass per-user accounts.
+ * "Invite teammates" for a project. Owners/admins create a single-use workspace
+ * join link that lands the teammate on this project's connect page after they
+ * sign up, where one command sets up their agent. No tokens change hands.
+ * Everyone else is told who can send the link.
  */
 export function Invite({ projectId }: { projectId: string }) {
-  // The admin's workspace (null hides the button) and whether accounts exist at all.
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [auth, setAuth] = useState(true);
+  const [me, setMe] = useState<Me | null>(null);
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [ingest, setIngest] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [result, setResult] = useState<{ url?: string; ingest?: string; name: string } | null>(null);
+  const [link, setLink] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.me().then((m) => {
-      setWorkspaceId(m.admin && m.workspace ? m.workspace.id : null);
-      setAuth(m.auth);
-    }).catch(() => {});
-  }, []);
-  useEscape(open, () => reset());
-  if (!workspaceId) return null;
+  useEffect(() => { api.me().then(setMe).catch(() => {}); }, []);
+  const reset = () => { setOpen(false); setLink(null); setErr(""); };
+  useEscape(open, reset);
+  if (!me) return null;
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const origin = window.location.origin;
+  const connectPath = `/project/${encodeURIComponent(projectId)}/connect`;
+  const workspaceId = me.admin && me.workspace ? me.workspace.id : null;
 
   const create = async () => {
+    if (!workspaceId) return;
     setErr(""); setBusy(true);
     try {
-      const label = name.trim();
-      // The auth-off local instance has no accounts, so no join link there (just
-      // the install command, which always gets a token).
-      const link = auth ? await api.inviteLink(workspaceId, "member", label || undefined) : null;
-      const minted = ingest || !auth ? await api.invite(label, false) : null;
+      const r = await api.inviteLink(workspaceId, "member");
       // The server returns a relative join path when the request had no Origin.
-      setResult({ url: link ? new URL(link.url, origin).href : undefined, ingest: minted?.ingest, name: label });
+      const url = new URL(r.url, origin);
+      url.searchParams.set("next", connectPath);
+      setLink(url.href);
     } catch (e) {
       setErr(`Could not create the invite: ${errorMessage(e)}`);
     }
     setBusy(false);
   };
-
-  const reset = () => { setOpen(false); setResult(null); setName(""); setIngest(true); setErr(""); };
 
   return (
     <>
@@ -65,59 +56,48 @@ export function Invite({ projectId }: { projectId: string }) {
       {open && (
         <div className="invite-backdrop" onClick={reset}>
           <div className="invite-modal card pad" role="dialog" aria-modal="true" aria-labelledby="invite-title" onClick={(e) => e.stopPropagation()}>
-            {!result ? (
+            <div className="label" style={{ marginBottom: 12 }}><span className="sq blue" /> invite to {projectId}</div>
+            <h3 id="invite-title" className="display" style={{ fontSize: 22, marginBottom: 6 }}>Invite teammates</h3>
+            {!me.auth ? (
               <>
-                <div className="label" style={{ marginBottom: 12 }}><span className="sq blue" /> invite to {projectId}</div>
-                <h3 id="invite-title" className="display" style={{ fontSize: 22, marginBottom: 6 }}>Invite a teammate</h3>
-                <p className="sub" style={{ fontSize: 14, marginBottom: 18 }}>
-                  {auth
-                    ? `Creates a join link: they sign up or log in and land in this workspace as a member${ingest ? ", plus an ingest token and install command for their agent" : ""}.`
-                    : "Gives you the install command for their agent."}
+                <p className="sub" style={{ fontSize: 14, marginBottom: 14 }}>
+                  This instance has no accounts. A teammate runs this in their repo and the wizard does the rest:
                 </p>
-                <label className="invite-l">Name (optional)</label>
-                <input className="tokeninput" placeholder="e.g. Sofia" value={name} onChange={(e) => setName(e.target.value)} autoFocus spellCheck={false} />
-                {auth && (
-                  <label className="invite-check">
-                    <input type="checkbox" checked={ingest} onChange={(e) => setIngest(e.target.checked)} />
-                    Also mint an ingest token for their agent
-                  </label>
-                )}
-                {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
+                <CopyCommand block text={`npx reins-hook --url ${origin} --project ${projectId}`} />
+              </>
+            ) : !workspaceId ? (
+              <p className="sub" style={{ fontSize: 14, marginBottom: 6 }}>
+                Only a workspace owner or admin can create join links. Ask one of them to invite your teammate; the link
+                will bring them straight back to this project.
+              </p>
+            ) : !link ? (
+              <>
+                <p className="sub" style={{ fontSize: 14, marginBottom: 6 }}>
+                  Create a single-use join link. Your teammate signs up, lands on this project&rsquo;s connect page and
+                  runs one command in their repo. You don&rsquo;t send any tokens.
+                </p>
+                {err && <div className="mono" style={{ color: "var(--blocked)", marginTop: 10 }} role="alert">{err}</div>}
                 <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-                  <button className="btn solid" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create invite"}</button>
-                  <button className="btn ghost" onClick={reset}>Cancel</button>
+                  <button className="rz-btn primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create join link"}</button>
+                  <button className="rz-btn ghost" onClick={reset}>Cancel</button>
                 </div>
               </>
             ) : (
               <>
-                <div className="label" style={{ marginBottom: 12 }}><span className="sq active" /> invite ready</div>
-                <h3 id="invite-title" className="display" style={{ fontSize: 22, marginBottom: 6 }}>Send this to {result.name || "your teammate"}</h3>
-                {result.url && (
-                  <>
-                    <p className="sub" style={{ fontSize: 13.5, margin: "0 0 8px" }}>
-                      1. Their join link (single use, expires in 7 days):
-                    </p>
-                    <CopyCommand block text={result.url} />
-                  </>
-                )}
-                {result.ingest && (
-                  <>
-                    <p className="sub" style={{ fontSize: 13.5, margin: result.url ? "16px 0 8px" : "0 0 8px" }}>
-                      {result.url ? "2. " : ""}Install the capture hook into Claude Code, then run <code>/hooks</code> to approve it:
-                    </p>
-                    {/* No --me: we don't know how they report; the hook defaults to their git email. */}
-                    <CopyCommand block text={installCommand({ url: origin, project: projectId, token: result.ingest })} />
-                    <p className="mono muted" style={{ marginTop: 14, fontSize: 11.5 }}>
-                      The ingest token is shown once. It&rsquo;s workspace-scoped: revoke it any time from
-                      &ldquo;Manage tokens&rdquo; on the project page.
-                    </p>
-                  </>
-                )}
+                <p className="sub" style={{ fontSize: 13.5, margin: "0 0 8px" }}>
+                  Send this link (single use, expires in 7 days). They join as a member, then see the one command to run:
+                </p>
+                <CopyCommand block text={link} />
                 <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                  <button className="btn" onClick={() => setResult(null)}>Invite another</button>
-                  <button className="btn ghost" onClick={reset}>Done</button>
+                  <button className="rz-btn ghost" onClick={() => setLink(null)}>Create another</button>
+                  <button className="rz-btn primary" onClick={reset}>Done</button>
                 </div>
               </>
+            )}
+            {(!workspaceId || !me.auth) && (
+              <div style={{ display: "flex", marginTop: 16 }}>
+                <button className="rz-btn ghost" onClick={reset}>Close</button>
+              </div>
             )}
           </div>
         </div>

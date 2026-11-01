@@ -1,0 +1,21 @@
+/* Approve-this-terminal page (/cli). Reuses the auth split layout (au-). Prefix: cl-. */
+.cl-h { outline: none; }
+.cl-code { margin: 4px 0 0; padding: 18px 16px; text-align: center; font-family: var(--font-mono), monospace; font-size: clamp(30px, 8vw, 40px); font-weight: 500; letter-spacing: .14em; color: var(--sky-text); background: var(--sky-soft); border-radius: 16px; user-select: all; overflow-wrap: anywhere; }
+.cl-facts { margin: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.cl-facts > div { display: flex; gap: 16px; align-items: baseline; padding: 11px 14px; font-size: 14px; }
+.cl-facts > div + div { border-top: 1px solid var(--line); }
+.cl-facts dt { flex: none; width: 84px; font-size: 12.5px; color: var(--ink-3); }
+.cl-facts dd { margin: 0; min-width: 0; font-family: var(--font-mono), monospace; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.cl-facts > div:last-child dd { font-family: inherit; font-size: 14px; }
+.cl-form { margin-top: 6px; }
+.cl-choices { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.cl-choices legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 500; }
+.cl-opt { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 14px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.cl-opt:hover { border-color: var(--ink-3); }
+.cl-opt.on { border-color: var(--sky); background: var(--sky-soft); }
+.cl-opt:has(input:focus-visible) { outline: 2px solid var(--sky); outline-offset: 2px; }
+.cl-opt input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--sky-text); }
+.cl-opt-t { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.cl-opt-s { margin-left: auto; padding-left: 8px; font-family: var(--font-mono), monospace; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; text-align: right; }
+.cl-new { margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .cl-opt { transition: none; } }

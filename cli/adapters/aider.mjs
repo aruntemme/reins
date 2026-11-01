@@ -4,19 +4,23 @@
  *
  * MOSTLY-CONCRETE integration. Aider does not emit a structured JSON hook the
  * way Claude Code does, but it has two real seams:
- *   1. `--notifications-command "<cmd>"` runs your command when the LLM finishes
- *      a turn (no payload). Point it at this adapter and we read the latest
- *      assistant turn out of aider's chat history file (`.aider.chat.history.md`,
- *      override with --history / AIDER_CHAT_HISTORY) and ship it as a summary.
+ *   1. `notifications: true` + `notifications-command: <cmd>` in ~/.aider.conf.yml
+ *      (`npx reins-hook` writes both) runs the command through the shell when
+ *      the LLM finishes a turn (no payload). We then read the latest assistant
+ *      turn out of aider's chat history file (`.aider.chat.history.md` in cwd or
+ *      the git root; override with --history / AIDER_CHAT_HISTORY) and ship it
+ *      as a summary.
  *   2. A wrapper can pipe a JSON object ({prompt} or {assistant}/{response}) and
  *      we map that directly, which is the path the unit test exercises.
  *
- * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER, AIDER_CHAT_HISTORY.
+ * Connection: env, else ~/.reins/config.json by the git root of cwd (see _shared).
  */
 import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { resolveMember, sendEvent } from "../lib/capture.mjs";
-import { readStdinJson, pick, resolveProject, parseFlags } from "./_shared.mjs";
+import { sendEvent, sendEventDetached } from "../lib/capture.mjs";
+import { gitRoot } from "../lib/git.mjs";
+import { readStdinJson, pick, parseFlags, connection } from "./_shared.mjs";
 
 export const SOURCE = "aider";
 
@@ -70,11 +74,15 @@ if (isMain) {
   let payload = readStdinJson();
 
   // notifications-command path: no stdin payload, read the history file instead.
+  // Aider keeps it at the git root by default, so look there as well as in cwd.
   if (!payload || Object.keys(payload).length === 0) {
-    const histPath = (typeof flags.history === "string" && flags.history) ||
-      process.env.AIDER_CHAT_HISTORY ||
-      ".aider.chat.history.md";
-    if (existsSync(histPath)) {
+    const explicit = (typeof flags.history === "string" && flags.history) || process.env.AIDER_CHAT_HISTORY;
+    const root = gitRoot(process.cwd());
+    const candidates = explicit
+      ? [explicit]
+      : [".aider.chat.history.md", ...(root ? [join(root, ".aider.chat.history.md")] : [])];
+    const histPath = candidates.find((p) => existsSync(p));
+    if (histPath) {
       try {
         const text = lastAiderAssistant(readFileSync(histPath, "utf8"));
         payload = text ? { assistant: text } : {};
@@ -85,16 +93,21 @@ if (isMain) {
   const { kind, text } = mapAider(payload);
   if (!text) process.exit(0);
 
-  sendEvent({
-    url: process.env.REINS_URL,
+  const conn = connection(payload, SOURCE);
+  const event = {
+    url: conn.url,
     // Git state (branch, dirty files) rides along from the repo the agent runs in.
-    cwd: (payload && payload.cwd) || process.cwd(),
-    key: process.env.REINS_KEY,
-    project: resolveProject(payload),
-    member: process.env.REINS_MEMBER || resolveMember(),
+    cwd: conn.cwd,
+    key: conn.key,
+    project: conn.project,
+    member: conn.member,
     kind,
     text,
     source: SOURCE,
     meta: { event: "aider" },
-  }).finally(() => process.exit(0));
+  };
+  // Aider waits for its notifications-command to exit, so hand the POST to a
+  // detached child and return at once (inline only if spawning fails).
+  if (sendEventDetached(event)) process.exit(0);
+  else sendEvent(event).finally(() => process.exit(0));
 }

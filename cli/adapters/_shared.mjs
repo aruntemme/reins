@@ -6,10 +6,13 @@
  * Dependency-free: only Node built-ins, so `npx` has nothing to install.
  */
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { resolveRuntime } from "../lib/config.mjs";
 
 /** Read and JSON-parse stdin. Returns {} on empty/invalid input (never throws). */
 export function readStdinJson() {
+  // A terminal on stdin means no payload is coming (aider runs its
+  // notifications-command with the user's TTY inherited): never block on it.
+  if (process.stdin.isTTY) return {};
   try {
     const raw = readFileSync(0, "utf8");
     if (!raw.trim()) return {};
@@ -41,11 +44,27 @@ export function pick(payload, paths) {
   return "";
 }
 
-/** Project id: explicit env, else basename of payload cwd, else cwd, else "default". */
+/** The directory the agent works in: the payload's cwd when it carries one. */
+export function payloadCwd(payload = {}) {
+  const c = payload && (payload.cwd || payload.workspace);
+  return typeof c === "string" && c ? c : process.cwd();
+}
+
+/**
+ * Where an adapter's events go and as whom (lib/config.mjs resolveRuntime):
+ * explicit env, else ~/.reins/config.json by the git root of the agent's cwd,
+ * else localhost / folder name / git email. Returns {url, key, project, member,
+ * source, cwd}.
+ */
+export function connection(payload = {}, defaultSource = "agent", env = process.env) {
+  const cwd = payloadCwd(payload);
+  const rt = resolveRuntime({ cwd, env, defaultSource });
+  return { url: rt.url, key: rt.key, project: rt.project, member: rt.member, source: rt.source, cwd };
+}
+
+/** Project id for a payload (see `connection`). */
 export function resolveProject(payload = {}, env = process.env) {
-  if (env.REINS_PROJECT) return env.REINS_PROJECT;
-  const cwd = payload.cwd || payload.workspace || process.cwd();
-  return basename(cwd) || "default";
+  return resolveRuntime({ cwd: payloadCwd(payload), env }).project;
 }
 
 /** Minimal --flag parser shared by the adapters' main blocks. */

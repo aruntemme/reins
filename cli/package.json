@@ -1,7 +1,7 @@
 {
   "name": "reins-hook",
-  "version": "0.1.6",
-  "description": "One-command installer for the Reins capture hook (Claude Code) — stream your AI-agent activity to a live shared team-context board.",
+  "version": "0.2.0",
+  "description": "One-command setup for Reins — sign in from the terminal and wire Claude Code, Codex, OpenCode and Aider to a live shared team-context board.",
   "type": "module",
   "homepage": "https://reinshq.vercel.app",
   "repository": {
@@ -32,6 +32,9 @@
     "reins",
     "claude-code",
     "claude",
+    "codex",
+    "opencode",
+    "aider",
     "hook",
     "ai-agents",
     "context",

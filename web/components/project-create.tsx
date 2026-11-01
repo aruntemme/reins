@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, errorMessage, type Me } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import "./project-create.css";
 
 // Project ids are used in URLs and the hook config, so keep them to a safe slug.
@@ -10,34 +10,21 @@ function slug(name: string) {
 }
 
 /**
- * Where the new project's ingest token is handed to the connect page. sessionStorage
- * keeps the secret out of the URL and scoped to this tab.
+ * "New project" flow for the dashboard: creates the project and sends the
+ * creator to its connect page, where one command sets up their agents.
  */
-export const connectKey = (projectId: string) => `reins:connect:${projectId}`;
-export interface ConnectHandoff { ingest: string | null; mintErr?: string }
-
-/**
- * "New project" flow for the dashboard: creates the project, then (for owners/
- * admins, who may mint tokens) mints an ingest token so the first agent can
- * connect, and sends the creator to the project's connect page.
- */
-export function ProjectCreate({ onCreated }: { onCreated?: () => void }) {
+export function ProjectCreate({ onCreated, startOpen }: { onCreated?: () => void; startOpen?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // A brand-new owner arrives from signup with the dialog already open.
+  useEffect(() => { if (startOpen) setOpen(true); }, [startOpen]);
   const [id, setId] = useState("");
   // Tracks whether the user has hand-edited the id so we stop auto-deriving it from the name.
   const [idTouched, setIdTouched] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [me, setMe] = useState<Me | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => { api.me().then(setMe).catch(() => {}); }, []);
-
-  // Minting needs owner/admin (or the auth-off local instance). If me() is
-  // unknown, try anyway: a refused mint is reported on the connect page.
-  const canMint = !me || !me.auth || !!me.admin;
 
   const close = () => {
     setOpen(false);
@@ -72,15 +59,6 @@ export function ProjectCreate({ onCreated }: { onCreated?: () => void }) {
       setBusy(false);
       return;
     }
-    // The project exists now; a failed mint must not read as a failed create.
-    const handoff: ConnectHandoff = { ingest: null };
-    if (canMint) {
-      // Mint an ingest token so the creator can immediately connect an agent.
-      // access:false because the dashboard is reached through the logged-in account, not a token.
-      try { handoff.ingest = (await api.invite(name.trim() || projectId, false)).ingest; }
-      catch (e) { handoff.mintErr = errorMessage(e); }
-    }
-    try { sessionStorage.setItem(connectKey(projectId), JSON.stringify(handoff)); } catch { /* private mode: the page offers a new token */ }
     onCreated?.();
     router.push(`/project/${encodeURIComponent(projectId)}/connect`);
   };
@@ -105,8 +83,7 @@ export function ProjectCreate({ onCreated }: { onCreated?: () => void }) {
             <p className="rz-eyebrow">New project</p>
             <h2 id="pc-title" className="pc-title">Create a project</h2>
             <p className="pc-sub">
-              Pick a display name and an id (used in URLs and the agent hook config).
-              {canMint && " We will mint an ingest token so your first agent can connect."}
+              Pick a display name and an id (used in URLs and the agent hook config). Next you get one command to connect your agents.
             </p>
             <div className="pc-field">
               <label htmlFor="pc-name">Display name</label>

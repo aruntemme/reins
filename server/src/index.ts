@@ -8,6 +8,7 @@ import { api } from "./routes/api.js";
 import { auth } from "./routes/auth.js";
 import { stream } from "./routes/stream.js";
 import { hook } from "./routes/hook.js";
+import { cli } from "./routes/cli.js";
 import { projectsWithOpenCoordination } from "./db.js";
 import { reconcileCollisions } from "./collisions.js";
 import { recoverUndistilled, drainPipeline } from "./pipeline/index.js";
@@ -46,6 +47,7 @@ app.use("/api", auth);
 app.use("/api", api);
 app.use("/api", stream);
 app.use("/api", hook);
+app.use("/api", cli);
 
 // Errors from any route (incl. async ones via asyncHandler): log, answer JSON.
 app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -69,7 +71,7 @@ const server = app.listen(env.port, () => {
 const prune = () => {
   try {
     const r = pruneStale(env.eventRetentionDays);
-    if (r.invites || r.resets || r.events || r.touches) console.log("[prune]", JSON.stringify(r));
+    if (r.invites || r.resets || r.events || r.touches || r.cliLogins) console.log("[prune]", JSON.stringify(r));
   } catch (e: any) {
     console.error("[prune]", e?.message ?? e);
   }
