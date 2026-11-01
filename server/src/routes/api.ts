@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ingest, accepting } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, claimPending, getProject, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
+import { setGoal, setPendingStatus, claimPending, getProject, getMember, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
@@ -22,7 +22,7 @@ import {
   requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin,
   asyncHandler, counterMap, overLimit,
 } from "../middleware.js";
-import { buildScopedContextPack, renderContextPack, handoffConventions } from "../context-pack.js";
+import { buildScopedContextPack, renderContextPack, handoffConventions, buildMemberPack } from "../context-pack.js";
 import { reconcileCollisions } from "../collisions.js";
 import {
   reopenHandoff, createHandoff, createDirective, clearDirective, activeDirectives,
@@ -113,6 +113,16 @@ api.get("/projects/:id/members/:member", requireViewer, (req, res) => {
   const detail = memberDetail(req.params.id!, req.params.member!);
   if (!detail) return res.status(404).json({ error: "not found" });
   res.json(detail);
+});
+
+// The exact text the capture hook injects into this member's agent at session
+// start (same builder as POST /hook/pack, mode "start"), so a human can read
+// what their agent is told. Empty text means the hook would inject nothing.
+api.get("/projects/:id/members/:member/brief", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  if (!getMember(req.params.id!, req.params.member!)) return res.status(404).json({ error: "not found" });
+  const { text, version } = buildMemberPack(req.params.id!, req.params.member!, { mode: "start" });
+  res.json({ text, version });
 });
 
 // Open pending items for a project — the queue an autonomous agent watches.

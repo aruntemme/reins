@@ -2,23 +2,29 @@
 import Link from "next/link";
 import { UserMenu } from "@/components/user-menu";
 
-export function Mark({ size = 26 }: { size?: number }) {
-  // reins mascot: a friendly gradient blob with eyes.
+export function Mark({ size = 26, tone = "tile" }: { size?: number; tone?: "tile" | "plain" }) {
+  // Two halves of a link held together: the rein between agents. "tile" sits on a
+  // sky square (app chrome); "plain" is the bare glyph in currentColor (on the sky field).
+  const glyph = (
+    <g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M5 15a4 4 0 0 1 0-8h3" />
+      <path d="M19 9a4 4 0 0 1 0 8h-3" />
+      <path d="M8 12h8" />
+    </g>
+  );
+  if (tone === "plain") {
+    return (
+      <svg className="mark" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+        {glyph}
+      </svg>
+    );
+  }
   return (
-    <svg className="mark" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="reinsBlob" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffd96b" />
-          <stop offset="100%" stopColor="#e9c245" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M16 5C23 5 27 10 27 17C27 24 22 27 16 27C10 27 5 24 5 17C5 10 9 5 16 5Z"
-        fill="url(#reinsBlob)"
-      />
-      <circle cx="13" cy="16" r="2" fill="#1b1a17" />
-      <circle cx="21" cy="16" r="2" fill="#1b1a17" />
-      <path d="M13 21C15 22.5 17 22.5 19 21" stroke="#1b1a17" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+    <svg className="mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="9" fill="#0593C6" />
+      <g transform="translate(4 4)" color="#FCFFFF">
+        {glyph}
+      </g>
     </svg>
   );
 }
@@ -63,7 +69,8 @@ export function initials(name: string): string {
 }
 
 export function Avatar({ name, i = 0 }: { name: string; i?: number }) {
-  const hues = ["#1b1a17", "#2f6df0", "#3f9d63", "#d98b3a", "#7a5af0", "#c0397a"];
+  // Navy and blues only: pink and amber carry meaning (overlap, blocked) elsewhere.
+  const hues = ["#0B2540", "#0478A8", "#0A2C52", "#3C5468", "#035E84", "#566E81"];
   return (
     <span className="av" style={{ background: hues[i % hues.length] }} title={name}>
       {initials(name)}

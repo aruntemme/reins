@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { api, errorMessage, type Me } from "@/lib/api";
 import { toLogin } from "@/lib/guard";
 import { TopBar } from "@/components/ui";
 import { Members } from "@/components/members";
 import { Providers } from "@/components/providers";
+import "./settings.css";
 
 /** Each account sets the capture identity (the hook's --me) it acts as, tying the
  *  account to its activity and goals. Available to every logged-in user. */
@@ -13,6 +14,7 @@ function IdentityCard({ me, onSaved }: { me: Me; onSaved: () => void }) {
   const [val, setVal] = useState(me.member ?? "");
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState("");
+  const inputId = useId();
   useEffect(() => { setVal(me.member ?? ""); }, [me.member]);
   const save = async () => {
     setErr("");
@@ -27,18 +29,21 @@ function IdentityCard({ me, onSaved }: { me: Me; onSaved: () => void }) {
     setTimeout(() => setSaved(false), 1500);
   };
   return (
-    <div className="card pad" style={{ marginBottom: 16 }}>
-      <div className="label" style={{ marginBottom: 10 }}><span className="sq blue" /> your identity</div>
-      <p className="sub" style={{ fontSize: 14, marginBottom: 12 }}>
+    <div className="rz-card st-card">
+      <h3 className="st-title">Your identity</h3>
+      <p className="st-desc">
         How your coding agent reports you — the hook&rsquo;s <code>--me</code>. This ties your account to your
         activity and goals on the board. Defaults to your email.
       </p>
-      <div style={{ display: "flex", gap: 8, maxWidth: 440, alignItems: "center" }}>
-        <input className="tokeninput" style={{ flex: 1 }} value={val} placeholder={me.user?.email || "your-name"} onChange={(e) => setVal(e.target.value)} />
-        <button className="btn solid" onClick={save}>Save</button>
-        {saved && <span className="mono" style={{ color: "var(--active)", fontSize: 12 }}>saved</span>}
+      <div className="st-field">
+        <label className="st-label" htmlFor={inputId}>Capture name</label>
+        <div className="st-inline">
+          <input id={inputId} className="st-input mono" value={val} placeholder={me.user?.email || "your-name"} onChange={(e) => setVal(e.target.value)} />
+          <button className="rz-btn primary" onClick={save}>Save</button>
+          <span className="st-saved" role="status">{saved ? "saved" : ""}</span>
+        </div>
       </div>
-      {err && <div className="mono" style={{ color: "var(--blocked)", marginTop: 10 }}>{err}</div>}
+      {err && <p className="st-err" role="alert">{err}</p>}
     </div>
   );
 }
@@ -46,9 +51,9 @@ function IdentityCard({ me, onSaved }: { me: Me; onSaved: () => void }) {
 /** A labelled on/off switch row used by the opt-in and privacy cards. */
 function Toggle({ on, onChange, label, busy }: { on: boolean; onChange: (v: boolean) => void; label: string; busy?: boolean }) {
   return (
-    <label className="toggle">
-      <input type="checkbox" checked={on} disabled={busy} onChange={(e) => onChange(e.target.checked)} />
-      <span className="toggle-track" aria-hidden><span className="toggle-knob" /></span>
+    <label className="st-toggle">
+      <input type="checkbox" role="switch" checked={on} disabled={busy} onChange={(e) => onChange(e.target.checked)} />
+      <span className="st-track" aria-hidden><span className="st-knob" /></span>
       <span>{label}</span>
     </label>
   );
@@ -74,15 +79,15 @@ function TraitsSharingCard({ me, onSaved }: { me: Me; onSaved: () => void }) {
     }
   };
   return (
-    <div className="card pad" style={{ marginBottom: 16 }}>
-      <div className="label" style={{ marginBottom: 10 }}><span className="sq blue" /> your grain, put to work</div>
-      <p className="sub" style={{ fontSize: 14, marginBottom: 12 }}>
+    <div className="rz-card st-card">
+      <h3 className="st-title">Your grain, put to work</h3>
+      <p className="st-desc">
         Reins learns your working style from activity (never raw prompts). With this on, your agent gets your
         strongest traits at session start, and handoffs routed to you carry the ones relevant to the task.
         Teammates can already read your profile on the board; this only controls what agents receive.
       </p>
       <Toggle on={on} busy={busy} onChange={save} label={on ? "Sharing my traits with agents" : "Not shared with agents"} />
-      {err && <div className="mono" style={{ color: "var(--blocked)", marginTop: 10 }}>{err}</div>}
+      {err && <p className="st-err" role="alert">{err}</p>}
     </div>
   );
 }
@@ -105,19 +110,19 @@ function PrivacyCard() {
     }
   };
   return (
-    <div className="card pad">
-      <div className="label" style={{ marginBottom: 10 }}><span className="sq" /> privacy</div>
-      <p className="sub" style={{ fontSize: 14, marginBottom: 12 }}>
+    <div className="rz-card st-card">
+      <h3 className="st-title">Privacy</h3>
+      <p className="st-desc">
         Each hook reports its git branch, so the board can show it and spot two people on the same branch.
         Hide branch names to keep them off member cards, agent context, and model prompts; same-branch
         collisions are still detected, just unnamed.
       </p>
       {hide === null ? (
-        <div className="empty">Loading…</div>
+        <p className="st-empty">Loading…</p>
       ) : (
         <Toggle on={hide} busy={busy} onChange={save} label={hide ? "Branch names hidden" : "Branch names visible to the team"} />
       )}
-      {err && <div className="mono" style={{ color: "var(--blocked)", marginTop: 10 }}>{err}</div>}
+      {err && <p className="st-err" role="alert">{err}</p>}
     </div>
   );
 }
@@ -145,47 +150,80 @@ export default function Settings() {
 
   const workspace = me?.workspace;
   const isAdmin = !!me?.admin;
+  const refresh = () => api.me().then(setMe).catch(() => {});
+
+  const sections: { id: string; label: string }[] = [];
+  if (workspace) {
+    if (isAdmin) sections.push({ id: "workspace", label: "Workspace" });
+    sections.push({ id: "members", label: "Members" });
+    if (isAdmin) sections.push({ id: "providers", label: "Model providers" });
+    if (me?.user) sections.push({ id: "account", label: "Account" });
+  }
+
+  const [current, setCurrent] = useState("");
+  useEffect(() => {
+    const sync = () => setCurrent(window.location.hash.slice(1));
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+  const active = sections.some((x) => x.id === current) ? current : sections[0]?.id;
 
   return (
     <>
       <TopBar brandHref="/dashboard" hideLive />
-      <main className="wrap">
-        <div className="dash">
-          <div className="dashhead">
-            <div className="crumbs">
-              <Link href="/dashboard" className="mono" style={{ color: "var(--ink-3)" }}>dashboard</Link>
-              <span className="mono" style={{ color: "var(--ink-3)" }}>/</span>
-              <span className="mono">settings</span>
-            </div>
-            <h1 className="display" style={{ fontSize: "clamp(30px, 4vw, 44px)" }}>
-              {workspace?.name ?? "Workspace"}
-            </h1>
+      <main className="st-page">
+        <div className="wrap">
+          <div className="st-head">
+            <nav className="st-crumbs" aria-label="Breadcrumb">
+              <Link href="/dashboard">Dashboard</Link>
+              <span aria-hidden="true">/</span>
+              <b>Settings</b>
+            </nav>
+            <h1 className="st-title-h">{workspace?.name ?? "Workspace"}</h1>
           </div>
 
           {!loaded ? (
-            <div className="empty">Loading…</div>
+            <p className="st-empty">Loading…</p>
           ) : !workspace ? (
-            <div className="card pad empty">No workspace in this session.</div>
+            <div className="rz-card st-card"><p className="st-empty">No workspace in this session.</p></div>
           ) : (
-            <>
-              {me?.user && <IdentityCard me={me} onSaved={() => api.me().then(setMe).catch(() => {})} />}
-              {me?.user && <TraitsSharingCard me={me} onSaved={() => api.me().then(setMe).catch(() => {})} />}
-              {!isAdmin ? (
-                <div className="card pad">
-                  <div className="label" style={{ marginBottom: 12 }}><span className="sq" /> members</div>
-                  <p className="sub" style={{ fontSize: 15 }}>
-                    Only owners and admins can manage members and invites. Ask an owner or admin of
-                    {" "}<strong>{workspace.name}</strong> if you need to add a teammate or change a role.
-                  </p>
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: 28 }}>
-                  <Providers />
-                  <PrivacyCard />
+            <div className="st-layout">
+              <nav className="st-nav" aria-label="Settings sections">
+                {sections.map((x) => (
+                  <a key={x.id} href={`#${x.id}`} aria-current={x.id === active ? "true" : undefined}>{x.label}</a>
+                ))}
+              </nav>
+              <div className="st-main">
+                {isAdmin && (
+                  <section id="workspace" className="st-section" aria-labelledby="st-h-workspace">
+                    <h2 id="st-h-workspace" className="rz-section-h">Workspace</h2>
+                    <PrivacyCard />
+                  </section>
+                )}
+                {isAdmin ? (
                   <Members workspaceId={workspace.id} currentEmail={me?.user?.email} />
-                </div>
-              )}
-            </>
+                ) : (
+                  <section id="members" className="st-section" aria-labelledby="st-h-members">
+                    <h2 id="st-h-members" className="rz-section-h">Members</h2>
+                    <div className="rz-card st-card">
+                      <p className="st-desc">
+                        Only owners and admins can manage members and invites. Ask an owner or admin of
+                        {" "}<strong>{workspace.name}</strong> if you need to add a teammate or change a role.
+                      </p>
+                    </div>
+                  </section>
+                )}
+                {isAdmin && <Providers />}
+                {me?.user && (
+                  <section id="account" className="st-section" aria-labelledby="st-h-account">
+                    <h2 id="st-h-account" className="rz-section-h">Account</h2>
+                    <IdentityCard me={me} onSaved={refresh} />
+                    <TraitsSharingCard me={me} onSaved={refresh} />
+                  </section>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </main>

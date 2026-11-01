@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { useEscape } from "./invite";
 import { api, timeAgo, type Token } from "@/lib/api";
 
 /**
@@ -34,6 +35,7 @@ export function ManageTokens() {
   }, []);
 
   useEffect(() => { if (open) load(); }, [open, load]);
+  useEscape(open, () => { setOpen(false); setConfirming(null); setErr(""); });
 
   if (!admin) return null;
 
@@ -54,12 +56,12 @@ export function ManageTokens() {
 
   return (
     <>
-      <button className="btn" onClick={() => setOpen(true)}>manage tokens</button>
+      <button type="button" className="rz-btn ghost small" onClick={() => setOpen(true)}>Manage tokens</button>
       {open && (
         <div className="invite-backdrop" onClick={reset}>
-          <div className="invite-modal card pad" onClick={(e) => e.stopPropagation()}>
+          <div className="invite-modal card pad" role="dialog" aria-modal="true" aria-labelledby="tokens-title" onClick={(e) => e.stopPropagation()}>
             <div className="label" style={{ marginBottom: 12 }}><span className="sq blue" /> workspace tokens</div>
-            <h3 className="display" style={{ fontSize: 22, marginBottom: 6 }}>Manage tokens</h3>
+            <h3 id="tokens-title" className="display" style={{ fontSize: 22, marginBottom: 6 }}>Manage tokens</h3>
             <p className="sub" style={{ fontSize: 14, marginBottom: 18 }}>
               Revoke any token to cut off the agent or dashboard session using it. Revoked tokens stop
               working immediately and cannot be restored.

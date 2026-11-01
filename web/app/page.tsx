@@ -1,23 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Instrument_Serif, Geist, Geist_Mono } from "next/font/google";
 import { CopyCommand } from "@/components/copy-command";
-import { LandingDemo } from "@/components/landing-demo";
+import { HeroStory } from "@/components/hero-story";
 import "./landing.css";
 
-// Landing-only faces, loaded here (not in the root layout) so the dashboard
-// never downloads them.
-const display = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
-  variable: "--rl-font-display",
-  display: "swap",
-});
-const sans = Geist({ subsets: ["latin"], variable: "--rl-font-sans", display: "swap" });
-const mono = Geist_Mono({ subsets: ["latin"], variable: "--rl-font-mono", display: "swap" });
-
-const TITLE = "Reins: your agents know what your teammates' agents are doing";
+const TITLE = "Reins: two agents, one picture of the work";
 const DESCRIPTION =
   "Reins reads what every teammate's coding agent is doing, in any tool, turns it into live team intent, and feeds it back into every agent, so overlaps surface before the edit, not at the merge.";
 
@@ -37,347 +24,286 @@ export const metadata: Metadata = {
 
 const GITHUB = "https://github.com/aruntemme/reins";
 const SELFHOST = `${GITHUB}/blob/main/SELFHOST.md`;
-const NPM = "https://www.npmjs.com/package/reins-hook";
 const INSTALL = "npx reins-hook install";
+const DEMO = "/signin?demo=1";
 
-const AGENTS = [
-  { name: "Claude Code", icon: "claudecode.svg" },
-  { name: "Codex", icon: "codex.svg" },
-  { name: "OpenCode", icon: "opencode.svg" },
-  { name: "Aider", icon: "aider.png" },
-];
-
-/** The Reins mascot mark (same glyph as app/icon.svg), inlined so the landing
- * page doesn't pull the dashboard's client UI bundle just for a logo. */
-function Mark({ size }: { size: number }) {
+/** The link glyph from Mark (components/ui.tsx), inlined so this server page
+ * doesn't pull the dashboard's client UI module just for a logo. */
+function Glyph({ size }: { size: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true" className="rl-mark">
-      <path d="M16 5C23 5 27 10 27 17C27 24 22 27 16 27C10 27 5 24 5 17C5 10 9 5 16 5Z" fill="#F0CD58" />
-      <circle cx="13" cy="16" r="2" fill="#1b1a17" />
-      <circle cx="21" cy="16" r="2" fill="#1b1a17" />
-      <path d="M13 21C15 22.5 17 22.5 19 21" stroke="#1b1a17" strokeWidth="1.6" strokeLinecap="round" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+      <path d="M5 15a4 4 0 0 1 0-8h3" />
+      <path d="M19 9a4 4 0 0 1 0 8h-3" />
+      <path d="M8 12h8" />
     </svg>
   );
 }
 
-function Arrow() {
-  return <span aria-hidden="true" className="rl-arrow">→</span>;
-}
-
-function GetStarted({ id }: { id?: string }) {
+function Out() {
   return (
-    <div className="rl-cta" id={id}>
-      <Link href="/signup" className="rl-btn rl-btn-solid">
-        Sign up <Arrow />
-      </Link>
-      <CopyCommand text={INSTALL} />
-      <Link href="/signin?demo=1" className="rl-textlink">
-        Try the live demo <Arrow />
-      </Link>
-    </div>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+      <path d="M7 17 17 7M9 7h8v8" />
+    </svg>
   );
 }
 
+const FEATURES = [
+  {
+    title: "Written from live activity.",
+    rest: "Edits, branches and merges, not a wiki.",
+    icon: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  },
+  {
+    title: "Refreshed on every prompt.",
+    rest: "Not once a day, not at standup.",
+    icon: <><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></>,
+  },
+  {
+    title: "Through the agent’s own hooks.",
+    rest: "No new tool for anyone to learn.",
+    icon: <><rect x="4" y="5" width="16" height="14" rx="3" /><path d="M8 10l3 2-3 2M13 14h3" /></>,
+  },
+];
+
 export default function Landing() {
   return (
-    <div className={`rl ${display.variable} ${sans.variable} ${mono.variable}`}>
-      <a href="#main" className="rl-skip">Skip to content</a>
+    <div className="lp">
+      <a href="#main" className="lp-skip">Skip to content</a>
 
-      <header className="rl-header">
-        <div className="rl-wrap rl-header-in">
-          <Link href="/" className="rl-brand" aria-label="Reins home">
-            <Mark size={26} /> <span>reins</span>
+      <header className="lp-top">
+        <div className="lp-wrap lp-top-in">
+          <Link href="/" className="lp-brand" aria-label="Reins home">
+            <Glyph size={22} /> reins
           </Link>
-          <nav className="rl-nav" aria-label="Primary">
-            <a href="#how">How it works</a>
-            <a href="#why">Why Reins</a>
-            <a href="#self-host">Self-host</a>
-            <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+          <nav className="lp-nav" aria-label="Primary">
+            <Link href="/" aria-current="page">Home</Link>
+            <a href="#brief">How it works</a>
+            <a href="#lead">For leads</a>
+            <a href="#install">Self-host</a>
           </nav>
-          <div className="rl-header-cta">
-            <Link href="/login" className="rl-textlink rl-login">Log in</Link>
-            <Link href="/signup" className="rl-btn rl-btn-solid rl-btn-sm">Sign up</Link>
+          <div className="lp-top-cta">
+            <Link href="/login" className="lp-signin">Sign in</Link>
+            <Link href="/signup" className="rz-btn light">Get started</Link>
+            <details className="lp-menu">
+              <summary aria-label="Menu"><i /><i /></summary>
+              <nav className="lp-menu-panel" aria-label="Menu">
+                <a href="#brief">How it works</a>
+                <a href="#lead">For leads</a>
+                <a href="#install">Self-host</a>
+                <Link href={DEMO}>Live demo</Link>
+                <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+                <Link href="/login">Sign in</Link>
+              </nav>
+            </details>
           </div>
         </div>
       </header>
 
       <main id="main">
-        {/* Hero */}
-        <section className="rl-hero" aria-labelledby="rl-hero-title">
-          <div className="rl-wrap">
-            <p className="rl-eyebrow">
-              <span className="rl-live" aria-hidden="true" /> Live intent for teams of humans and agents
-            </p>
-            <h1 id="rl-hero-title" className="rl-h1">
-              Your agent knows what your <em>teammate&rsquo;s</em> agent is doing.
-            </h1>
-            <p className="rl-lede">
-              Reins reads what every teammate&rsquo;s coding agent is doing, in any tool, turns it into live
-              team intent, and feeds it back into every agent. Overlaps surface before the edit, not at the merge.
-            </p>
-            <GetStarted />
+        <section className="rz-field lp-hero" aria-labelledby="lp-hero-title">
+          <div className="lp-hero-fx" aria-hidden="true">
+            <div className="lp-hero-drift"><i /><i /><i /></div>
+            <i className="lp-streak" />
           </div>
-          <div className="rl-wrap rl-hero-demo">
-            <LandingDemo />
+          <i className="lp-hero-shade" aria-hidden="true" />
+
+          <div className="lp-wrap lp-hero-head">
+            <h1 id="lp-hero-title" className="lp-h1">Two agents.<br />One picture of the work.</h1>
+            <div className="lp-hero-side">
+              <p>Asha and Ravi never spoke. Their agents did, through Reins, a second before Ravi’s would have overwritten her work.</p>
+              <div className="lp-hero-cta">
+                <Link href="/signup" className="rz-btn light">Add it to your agents <Out /></Link>
+                <a href="#install" className="lp-hero-cmd">{INSTALL}</a>
+                <Link href={DEMO} className="lp-hero-demo">Live demo</Link>
+              </div>
+            </div>
           </div>
+
+          <HeroStory />
         </section>
 
-        {/* Works with */}
-        <section className="rl-agents" aria-labelledby="rl-agents-title">
-          <div className="rl-wrap rl-agents-in">
-            <h2 id="rl-agents-title" className="rl-agents-title">
-              One context across every agent your team runs
-            </h2>
-            <ul className="rl-agents-list">
-              {AGENTS.map((a) => (
-                <li key={a.name}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/assets/agents/${a.icon}`} alt="" width={22} height={22} />
-                  {a.name}
-                </li>
-              ))}
-              <li className="rl-agents-any">and anything that runs a shell hook</li>
+        <section className="lp-works" aria-label="Works with">
+          <div className="lp-wrap lp-works-in">
+            <span>Hooks into the agents your team already runs</span>
+            <ul>
+              <li>Claude Code</li>
+              <li>Codex</li>
+              <li>OpenCode</li>
+              <li>Aider</li>
+              <li className="lp-works-rest">+ an MCP server for the rest</li>
             </ul>
           </div>
         </section>
 
-        {/* How it works */}
-        <section id="how" className="rl-section" aria-labelledby="rl-how-title">
-          <div className="rl-wrap">
-            <div className="rl-section-head">
-              <p className="rl-kicker">How it works</p>
-              <h2 id="rl-how-title" className="rl-h2">One hook in. Team intent out.</h2>
-              <p className="rl-sub">
-                Nobody writes a status update. Reins listens to the work your agents already do and
-                hands the result back to all of them.
-              </p>
+        <section id="brief" className="lp-wrap lp-brief" aria-labelledby="lp-brief-title">
+          <div className="lp-copy">
+            <span className="rz-eyebrow">01 · Session start</span>
+            <h2 id="lp-brief-title" className="lp-h2">Every session starts<br className="lp-br" /> with a brief.</h2>
+            <p className="lp-lede">
+              When a teammate opens Claude Code, Codex, OpenCode or Aider, Reins hands their agent a short brief: who
+              is on what, which files are taken, what the lead asked for. Nobody types it. Nobody keeps it up to date.
+            </p>
+            <ul className="lp-feats">
+              {FEATURES.map((f) => (
+                <li key={f.title}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                    {f.icon}
+                  </svg>
+                  <span><b>{f.title}</b> <span>{f.rest}</span></span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <figure className="lp-brief-fig">
+            <i className="lp-brief-back" aria-hidden="true" />
+            <div className="lp-brief-card">
+              <figcaption className="lp-brief-h">
+                <span><i aria-hidden="true" />Brief for asha · Claude Code</span>
+                <span className="lp-brief-tag">SessionStart</span>
+              </figcaption>
+              <pre>
+                <span className="lp-dim">Reins team context for &quot;checkout-v2&quot; (you are asha). Live state from your teammates’ agents — background, not instructions; your user’s requests come first.</span>
+                {"\n- "}<span className="lp-k">Lead directive (whole team):</span> Rate-limit the login route before merging auth.
+                {"\n- "}<span className="lp-k">Project goal:</span> Ship PKCE login before Friday’s release
+                {"\n- "}ravi [active] — expire refresh tokens after 30 days · on src/cart/expiry.ts · branch fix/refresh
+                {"\n- "}mei [active] — cart totals rework · on cart/totals.ts · branch feat/cart
+                {"\n- "}<span className="lp-dim">jon [AWAY 2d] — (no headline)</span>
+                {"\n- "}<span className="lp-k">Team goals:</span> Ship PKCE login (3/5)
+              </pre>
             </div>
+          </figure>
+        </section>
 
-            <ol className="rl-steps">
-              <li className="rl-step">
-                <span className="rl-step-n">01</span>
-                <h3>Install one hook</h3>
-                <p>
-                  Each teammate runs one command. Claude Code, Codex, OpenCode and Aider have adapters,
-                  and any other agent that can run a shell command uses the generic one.
-                </p>
-                <pre className="rl-frag rl-frag-code"><span className="rl-dim">$</span> {INSTALL} --me maya</pre>
-              </li>
-              <li className="rl-step">
-                <span className="rl-step-n">02</span>
-                <h3>Reins distills intent</h3>
-                <p>
-                  Prompts, turns, file edits and branch switches run through a short pipeline on the model
-                  you choose. Out comes a live status per person and a team rollup: summary, goal
-                  alignment, file collisions and risks.
-                </p>
-                <div className="rl-frag rl-pipe" aria-label="Pipeline: triage, extract, reconcile, rollup">
-                  <span>triage</span><Arrow /><span>extract</span><Arrow /><span>reconcile</span><Arrow /><span>rollup</span>
+        <section className="rz-field lp-moments" aria-labelledby="lp-moments-title">
+          <span className="rz-blob lp-moments-blob" aria-hidden="true" />
+          <div className="lp-wrap lp-moments-in">
+            <div className="lp-moments-head">
+              <div className="lp-copy">
+                <span className="rz-eyebrow">02 · Three moments</span>
+                <h2 id="lp-moments-title" className="lp-h2">Where agents usually collide,<br className="lp-br" /> Reins steps in first.</h2>
+              </div>
+              <p>No dashboards to watch. Each moment reaches the agent at the exact point it would have gone wrong.</p>
+            </div>
+            <ol className="lp-cards" aria-label="Three moments" tabIndex={0}>
+              <li className="lp-card">
+                <span className="lp-card-k">Session start</span>
+                <div className="lp-card-fx lp-card-bars" aria-hidden="true">
+                  <i style={{ width: "70%" }} />
+                  <i style={{ width: "92%", animationDelay: ".15s" }} />
+                  <i style={{ width: "84%", animationDelay: ".3s" }} />
+                  <i className="hot" style={{ width: "60%", animationDelay: ".45s" }} />
+                  <i style={{ width: "76%", animationDelay: ".6s" }} />
                 </div>
+                <h3>The brief goes in</h3>
+                <p>The agent knows the team, the goal and the taken files before it reads a line of code.</p>
               </li>
-              <li className="rl-step">
-                <span className="rl-step-n">03</span>
-                <h3>Every agent gets it back</h3>
-                <p>
-                  Agents get a short team briefing when a session starts and an update when something
-                  changes. Any agent can ask for more over MCP, and your team watches the same state on a
-                  live board.
-                </p>
-                <pre className="rl-frag rl-frag-code"><span className="rl-dim">mcp</span> reins_context --member maya</pre>
+              <li className="lp-card">
+                <span className="lp-card-k">Before an edit</span>
+                <div className="lp-card-fx lp-card-edit" aria-hidden="true">
+                  <span className="lp-tool">Edit src/auth/session.ts</span>
+                  <span className="lp-pop lp-hpill">heads-up · asha has it</span>
+                  <span className="lp-pop lp-tool" style={{ animationDelay: ".9s" }}>Edit src/cart/expiry.ts ✓</span>
+                </div>
+                <h3>A heads-up, not a block</h3>
+                <p>Right before an agent touches a file a teammate holds, it hears who has it. It decides; nothing is locked.</p>
+              </li>
+              <li className="lp-card">
+                <span className="lp-card-k">After the merge</span>
+                <div className="lp-card-fx lp-card-merge" aria-hidden="true">
+                  <span><i className="lp-ok">✓</i>mei merged #42</span>
+                  <i className="lp-link" />
+                  <span className="lp-pop" style={{ animationDelay: ".6s" }}><i className="lp-to">→</i><s>handoff: summary to mei</s> closed</span>
+                </div>
+                <h3>Handoffs close themselves</h3>
+                <p>When the work lands, the handoff settles and every agent stops waiting on it.</p>
               </li>
             </ol>
           </div>
         </section>
 
-        {/* What agents hear */}
-        <section id="features" className="rl-section rl-section-alt" aria-labelledby="rl-feat-title">
-          <div className="rl-wrap">
-            <div className="rl-section-head">
-              <p className="rl-kicker">Inside every agent</p>
-              <h2 id="rl-feat-title" className="rl-h2">What your agent hears, without you asking.</h2>
-            </div>
-
-            <div className="rl-bento">
-              <article className="rl-tile rl-tile-wide">
-                <h3>A briefing at the start of every session</h3>
-                <p>Before your agent writes a line, it knows who is working on what, where, and on which branch.</p>
-                <div className="rl-frag rl-brief">
-                  <div className="rl-brief-h"><span className="rl-rail-mark">reins</span> team briefing, checkout-v2</div>
-                  <ul>
-                    <li><b>maya</b> refactoring token refresh in <code>src/auth/session.ts</code> <span className="rl-dim">maya/token-refresh</span></li>
-                    <li><b>sam</b> moving payments to the new webhook flow <span className="rl-dim">sam/webhooks</span></li>
-                    <li><b>lead</b> keep the v1 checkout API stable until Friday</li>
-                  </ul>
+        <section id="lead" className="lp-lead" aria-labelledby="lp-lead-title">
+          <div className="lp-wrap lp-lead-in">
+            <figure className="lp-lead-mock" aria-label="Example: a lead directive going out to every agent on the team">
+              <div className="lp-compose">
+                <span className="lp-compose-l">Tell every agent on <b>checkout-v2</b></span>
+                <div className="lp-compose-row">
+                  <span className="lp-fake-input">Rate-limit the login route before merging auth.</span>
+                  <span className="lp-fake-send">Send</span>
                 </div>
-              </article>
-
-              <article className="rl-tile">
-                <h3>A heads-up before a collision</h3>
-                <p>Real file-edit tracking warns your agent before it edits a file a teammate is in. It never blocks.</p>
-                <div className="rl-frag rl-warn">
-                  <span aria-hidden="true">▲</span> maya is editing <code>session.ts</code> right now
-                </div>
-              </article>
-
-              <article className="rl-tile">
-                <h3>Handoffs that close themselves</h3>
-                <p>Reins opens a handoff when one agent needs another&rsquo;s work, and closes it when the work lands.</p>
-                <div className="rl-frag rl-handoff">
-                  <span>dev <Arrow /> maya</span>
-                  <span className="rl-chip rl-chip-ok">closed</span>
-                </div>
-              </article>
-
-              <article className="rl-tile">
-                <h3>Lead directives that land</h3>
-                <p>A lead&rsquo;s directive or assignment reaches the targeted agents on their very next turn.</p>
-                <div className="rl-frag rl-directive">
-                  <span className="rl-dim">to dev, sam</span> hold the payments migration until Friday
-                </div>
-              </article>
-
-              <article className="rl-tile">
-                <h3>Branch awareness</h3>
-                <p>Status carries the branch, so &ldquo;same file&rdquo; means same file on a branch that will meet.</p>
-                <div className="rl-frag rl-branch">
-                  <code>maya/token-refresh</code> <span className="rl-dim">and</span> <code>dev/remember-me</code>
-                </div>
-              </article>
-
-              <article className="rl-tile">
-                <h3>Working-style profiles, opt-in</h3>
-                <p>Each member can share how they like to work, so agents pick up the team&rsquo;s habits.</p>
-                <div className="rl-frag rl-tags">
-                  <span className="rl-chip">small PRs</span>
-                  <span className="rl-chip">tests first</span>
-                  <span className="rl-chip">no new deps</span>
-                </div>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        {/* Differentiation */}
-        <section id="why" className="rl-section" aria-labelledby="rl-why-title">
-          <div className="rl-wrap">
-            <div className="rl-section-head">
-              <p className="rl-kicker">Why Reins</p>
-              <h2 id="rl-why-title" className="rl-h2">Not a memory. Not a dashboard. Live intent.</h2>
-              <p className="rl-sub">
-                Memory tools keep what someone chose to save. Agent dashboards show runs to a person watching
-                a screen. Reins watches the work as it happens, across every tool, and puts it back where
-                the work happens: inside each agent.
+              </div>
+              <ul className="lp-recips">
+                <li><span>asha · Claude Code</span><span className="lp-tick">in the brief ✓</span></li>
+                <li><span>ravi · Codex</span><span className="lp-tick" style={{ animationDelay: ".5s" }}>in the brief ✓</span></li>
+                <li><span>mei · OpenCode</span><span className="lp-tick" style={{ animationDelay: "1s" }}>in the brief ✓</span></li>
+                <li className="away"><span>jon · Aider</span><span>away · when he’s back</span></li>
+              </ul>
+            </figure>
+            <div className="lp-copy">
+              <span className="rz-eyebrow">03 · For the lead</span>
+              <h2 id="lp-lead-title" className="lp-h2">Say it once.<br className="lp-br" /> Every agent hears it.</h2>
+              <p className="lp-lede">
+                Directives, goals and assignments reach every teammate’s agent on its next prompt. Reins proposes goals
+                from what the team is actually doing; you accept or dismiss them.
               </p>
-            </div>
-
-            <div className="rl-compare" role="table" aria-label="How Reins compares with team memory and agent dashboards">
-              <div className="rl-compare-row rl-compare-headrow" role="row">
-                <span role="columnheader" className="rl-compare-corner"><span className="rl-sr">Question</span></span>
-                <span role="columnheader">Team memory</span>
-                <span role="columnheader">Agent dashboards</span>
-                <span role="columnheader" className="rl-compare-us">Reins</span>
-              </div>
-              {[
-                ["Where it comes from", "Notes someone decides to save", "One vendor's agent runs", "Observed from every person and agent, any vendor"],
-                ["How fresh it is", "As old as the last save", "Per run", "Every turn, live"],
-                ["What it captures", "Facts and documents", "Tasks and logs", "Intent: who is doing what, why, in which files"],
-                ["Who reads it", "Whoever goes looking", "A person at a screen", "Every agent, automatically, and your team"],
-                ["When overlaps show up", "At merge", "Inside one vendor's agents", "Before the edit, across tools"],
-              ].map(([q, mem, dash, us]) => (
-                <div className="rl-compare-row" role="row" key={q}>
-                  <span role="rowheader" className="rl-compare-q">{q}</span>
-                  <span role="cell" data-label="Team memory">{mem}</span>
-                  <span role="cell" data-label="Agent dashboards">{dash}</span>
-                  <span role="cell" data-label="Reins" className="rl-compare-us">{us}</span>
-                </div>
-              ))}
+              <ul className="lp-tags">
+                <li>Goals with checklists</li>
+                <li>Assignments</li>
+                <li>Up for grabs</li>
+                <li>Proposed goals</li>
+              </ul>
             </div>
           </div>
         </section>
 
-        {/* Trust */}
-        <section id="self-host" className="rl-section rl-section-dark" aria-labelledby="rl-trust-title">
-          <div className="rl-wrap">
-            <div className="rl-section-head">
-              <p className="rl-kicker">Your stack</p>
-              <h2 id="rl-trust-title" className="rl-h2">Your server. Your model. Your team&rsquo;s data.</h2>
+        <section id="install" className="lp-wrap lp-setup" aria-labelledby="lp-setup-title">
+          <div className="lp-setup-head">
+            <span className="rz-eyebrow">04 · Setup</span>
+            <h2 id="lp-setup-title" className="lp-h2">One command per teammate.</h2>
+            <div className="lp-install">
+              <CopyCommand text={INSTALL} />
             </div>
-            <div className="rl-trust">
-              <div className="rl-trust-item">
-                <h3>Self-host it</h3>
-                <p>
-                  A Node server with SQLite and a Next.js dashboard. The self-host guide walks through the
-                  backend, dashboard, hook and both MCP servers.
-                </p>
-                <a href={SELFHOST} target="_blank" rel="noreferrer" className="rl-textlink">Self-host guide <Arrow /></a>
-              </div>
-              <div className="rl-trust-item">
-                <h3>Bring your own model</h3>
-                <p>
-                  The pipeline runs on any OpenAI-compatible provider. Switch whenever you like. Keys are
-                  encrypted at rest with AES-256-GCM and never sent back to the browser.
-                </p>
-              </div>
-              <div className="rl-trust-item">
-                <h3>Built for teams</h3>
-                <p>
-                  Multi-tenant workspaces, invite links, owner, admin and member roles, and revocable tokens
-                  for every hook and agent.
-                </p>
-              </div>
-              <div className="rl-trust-item">
-                <h3>Open source, MIT</h3>
-                <p>Read exactly what the hook sends and what the server does with it before you install anything. Fork it, run it, change it.</p>
-                <a href={GITHUB} target="_blank" rel="noreferrer" className="rl-textlink">aruntemme/reins <Arrow /></a>
+            <p>Hooks into Claude Code, Codex, OpenCode and Aider. Nothing changes in how anyone works.</p>
+          </div>
+          <div className="lp-plans">
+            <div className="lp-plan">
+              <span className="lp-plan-k">Hosted</span>
+              <h3>Sign up and invite the team.</h3>
+              <p>A workspace, an invite link and tokens per teammate. Up and running before your next standup.</p>
+              <Link href="/signup" className="rz-btn primary">Create a workspace</Link>
+            </div>
+            <div className="lp-plan">
+              <span className="lp-plan-k">Self-host · MIT</span>
+              <h3>Your server. Your model key.</h3>
+              <p>One container and a SQLite file. Point it at any OpenAI-compatible model, including one you run yourself.</p>
+              <div className="lp-plan-row">
+                <code>docker compose up -d</code>
+                <a href={SELFHOST} target="_blank" rel="noreferrer" className="lp-textlink">Self-host guide <Out /></a>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Final CTA */}
-        <section className="rl-final" aria-labelledby="rl-final-title">
-          <div className="rl-wrap">
-            <h2 id="rl-final-title" className="rl-h2 rl-final-title">
-              Give every agent the <em>rest of the team.</em>
-            </h2>
-            <p className="rl-sub">Create a workspace, install the hook, and keep working the way you already do.</p>
-            <GetStarted />
+        <section className="rz-field lp-close" aria-labelledby="lp-close-title">
+          <span className="rz-blob lp-close-blob" aria-hidden="true" />
+          <div className="lp-wrap lp-close-in">
+            <h2 id="lp-close-title">Give every agent<br className="lp-br" /> the whole picture.</h2>
+            <div className="lp-close-cta">
+              <Link href="/signup" className="rz-btn light">Sign up free <Out /></Link>
+              <Link href={DEMO} className="lp-close-demo">Open the live demo <Out /></Link>
+            </div>
           </div>
         </section>
       </main>
 
-      <footer className="rl-footer">
-        <div className="rl-wrap rl-footer-in">
-          <div className="rl-footer-brand">
-            <Link href="/" className="rl-brand" aria-label="Reins home"><Mark size={24} /> <span>reins</span></Link>
-            <p>Live intent for teams of humans and agents.</p>
-          </div>
-          <nav className="rl-footer-cols" aria-label="Footer">
-            <div>
-              <h2>Product</h2>
-              <a href="#how">How it works</a>
-              <a href="#why">Why Reins</a>
-              <Link href="/signin?demo=1">Live demo</Link>
-            </div>
-            <div>
-              <h2>Account</h2>
-              <Link href="/signup">Sign up</Link>
-              <Link href="/login">Log in</Link>
-              <Link href="/dashboard">Dashboard</Link>
-            </div>
-            <div>
-              <h2>Build</h2>
-              <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
-              <a href={NPM} target="_blank" rel="noreferrer">npm</a>
-              <a href={SELFHOST} target="_blank" rel="noreferrer">Self-host guide</a>
-              <Link href="/privacy">Privacy</Link>
-            </div>
-          </nav>
-        </div>
-        <div className="rl-wrap rl-footer-base">
-          <span>&copy; 2026 Reins</span>
-          <span className="rl-dim">Made for teams that ship with agents.</span>
-        </div>
+      <footer className="lp-wrap lp-foot">
+        <Link href="/" className="lp-foot-brand" aria-label="Reins home"><Glyph size={20} /> reins</Link>
+        <nav aria-label="Footer">
+          <a href="#brief">How it works</a>
+          <a href="#install">Self-host</a>
+          <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+          <Link href="/privacy">Privacy</Link>
+        </nav>
+        <span>Open source · MIT</span>
       </footer>
     </div>
   );

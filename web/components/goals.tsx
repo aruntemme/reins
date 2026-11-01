@@ -1,269 +1,282 @@
 "use client";
-import { useEffect, useState } from "react";
-import { api, errorMessage, type Goal, type GoalProposal } from "@/lib/api";
+import { useState } from "react";
+import Link from "next/link";
+import { api, type Goal, type GoalProgress, type GoalProposal, type GoalScope } from "@/lib/api";
+import { useRun } from "@/components/lead";
 
 // Who is looking: me is the account's capture identity ("" if unknown); auth is
 // false only on the auth-off local instance, the one place we ask for a name.
-type Viewer = { admin: boolean; me: string; auth: boolean };
-// Runs a goal mutation, then reloads or surfaces the server's error.
-type Run = (p: Promise<unknown>) => void;
+export type Viewer = { admin: boolean; me: string; auth: boolean };
 
-/**
- * Short-term goals pane: common TEAM goals (admin-managed) and per-person goals,
- * each a checklist with derived progress. Lives in the project's side rail as a
- * vertical pane. Controlled: the page owns the goals fetch (so a small header
- * reference can share it) and passes `onChange` to re-load after a mutation.
- */
-/** Small inline reference in the page header that opens the goals panel. */
-export function GoalsRef({ goals, proposals, onOpen }: { goals: Goal[]; proposals: GoalProposal[]; onOpen: () => void }) {
+const STATUS_LABEL: Record<Goal["status"], string> = { todo: "to do", in_progress: "in progress", blocked: "blocked", done: "done" };
+
+/** Compact goals summary for the lanes header; links to (or opens) the full goals view. */
+export function GoalsRef({ goals, proposals, onOpen, href }: { goals: Goal[]; proposals: GoalProposal[]; onOpen?: () => void; href?: string }) {
   const n = (s: string) => goals.filter((g) => g.status === s).length;
   const done = n("done"), prog = n("in_progress"), blocked = n("blocked"), todo = n("todo");
-  return (
-    <button className="goals-ref" onClick={onOpen}>
-      <span className="mono">short-term goals</span>
+  const body = (
+    <>
+      <span>Goals</span>
       {goals.length === 0 ? (
-        <span className="goals-ref-none">none yet</span>
+        <span>none yet</span>
       ) : (
-        <>
-          <span><b>{done}</b> done</span>
-          <span><b>{prog}</b> in progress</span>
-          {blocked > 0 && <span className="warn"><b>{blocked}</b> blocked</span>}
-          <span><b>{todo}</b> to do</span>
-        </>
+        <span>
+          <b>{done}</b> done · <b>{prog}</b> in progress{blocked > 0 && <> · <b>{blocked}</b> blocked</>} · <b>{todo}</b> to do
+        </span>
       )}
-      {proposals.length > 0 && <span className="goals-ref-sugg">{proposals.length} suggested</span>}
-      <span className="goals-ref-go">open ›</span>
-    </button>
+      {proposals.length > 0 && <span>· {proposals.length} suggested</span>}
+      <span aria-hidden="true">›</span>
+    </>
+  );
+  const style = { minHeight: 44, fontFamily: "inherit", cursor: "pointer" };
+  return href ? (
+    <Link href={href} className="rz-chip goals-ref" style={style}>{body}</Link>
+  ) : (
+    <button type="button" className="rz-chip goals-ref" style={style} onClick={onOpen}>{body}</button>
   );
 }
 
-/** The 'suggested by activity' strip: pipeline proposals the owner confirms/dismisses. */
-function ProposalStrip({ proposals, run }: { proposals: GoalProposal[]; run: Run }) {
-  if (!proposals.length) return null;
+function Ring({ p }: { p: GoalProgress }) {
+  const C = 2 * Math.PI * 15;
   return (
-    <div className="goal-props">
-      <div className="goal-props-h"><span className="sq active" /> suggested by activity <span className="mono">{proposals.length}</span></div>
-      {proposals.map((p) => (
-        <div className="goal-prop" key={p.id}>
-          <div className="goal-prop-what">
-            {p.kind === "check_item" && <><b>mark done?</b> {p.itemText} <span className="goal-owner mono">· {p.goalTitle}</span></>}
-            {p.kind === "add_item" && <><b>add step?</b> {p.text} <span className="goal-owner mono">· {p.goalTitle}</span></>}
-            {p.kind === "block_goal" && <><b>blocked?</b> <span className="goal-owner mono">{p.goalTitle}</span></>}
-          </div>
-          <div className="goal-prop-why">{p.reason}{p.member ? ` · ${p.member}` : ""}</div>
-          <div className="goal-prop-acts">
-            <button className="tiny solid" onClick={() => run(api.acceptProposal(p.id))}>confirm</button>
-            <button className="tiny" onClick={() => run(api.dismissProposal(p.id))}>dismiss</button>
-          </div>
-        </div>
-      ))}
-    </div>
+    <svg className="ld-ring" viewBox="0 0 36 36" role="img" aria-label={`${p.done} of ${p.total} steps done`}>
+      <circle className="trk" cx="18" cy="18" r="15" fill="none" strokeWidth="4" />
+      {p.done > 0 && (
+        <circle
+          className="val" cx="18" cy="18" r="15" fill="none" strokeWidth="4" strokeLinecap="round"
+          strokeDasharray={`${((p.pct / 100) * C).toFixed(1)} ${C.toFixed(1)}`} transform="rotate(-90 18 18)"
+        />
+      )}
+      <text x="18" y="21" textAnchor="middle">{p.done}/{p.total}</text>
+    </svg>
   );
 }
 
-/** A slide-in side panel that holds the full goals pane, separate from the board. */
-export function GoalsDrawer({
-  open, onClose, projectId, goals, proposals, viewer, onChange,
-}: {
-  open: boolean;
-  onClose: () => void;
-  projectId: string;
-  goals: Goal[];
-  proposals: GoalProposal[];
-  viewer: Viewer;
-  onChange: () => void;
-}) {
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [open, onClose]);
-
-  return (
-    // inert when closed: off-screen controls must not take focus.
-    <div className={`goals-drawer ${open ? "open" : ""}`} aria-hidden={!open} inert={!open}>
-      <div className="goals-drawer-scrim" onClick={onClose} />
-      <aside className="goals-drawer-panel" role="dialog" aria-label="Short-term goals">
-        <div className="goals-drawer-head">
-          <span className="label"><span className="sq blue" /> short-term goals</span>
-          <button className="tiny" onClick={onClose}>close ✕</button>
-        </div>
-        <div className="goals-drawer-body">
-          <GoalsPane projectId={projectId} goals={goals} proposals={proposals} viewer={viewer} onChange={onChange} embedded />
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-export function GoalsPane({ projectId, goals, proposals, viewer, onChange, embedded }: { projectId: string; goals: Goal[]; proposals: GoalProposal[]; viewer: Viewer; onChange: () => void; embedded?: boolean }) {
-  const admin = viewer.admin;
-  const [me, setMe] = useState(viewer.me);
-  const [err, setErr] = useState("");
-  useEffect(() => { if (viewer.me) setMe(viewer.me); }, [viewer.me]);
-  const run: Run = (p) => { setErr(""); p.then(onChange, (e) => setErr(errorMessage(e))); };
+/**
+ * Short-term goals: common TEAM goals (owner/admin-managed, progress ring) and
+ * per-person goals (only their owner edits them). Each is a checklist.
+ */
+export function Goals({
+  projectId, goals, viewer, nameOf, onChange,
+}: { projectId: string; goals: Goal[]; viewer: Viewer; nameOf: (id: string) => string; onChange: () => void }) {
+  const { err, busy, run } = useRun(onChange);
+  const [local, setLocal] = useState("");
+  const me = viewer.me || local;
+  // Your goals belong to your account's identity; only the auth-off local
+  // instance (no accounts) asks for a name.
+  const canMine = !!me || !viewer.auth;
+  const [adding, setAdding] = useState(false);
+  const [title, setTitle] = useState("");
+  const [scope, setScope] = useState<GoalScope>(viewer.admin ? "team" : "individual");
+  const sc: GoalScope = viewer.admin && (scope === "team" || !canMine) ? "team" : "individual";
 
   const team = goals.filter((g) => g.scope === "team");
-  const mine = goals.filter((g) => g.scope === "individual" && me && g.member === me);
+  const mine = goals.filter((g) => g.scope === "individual" && !!me && g.member === me);
   const others = goals.filter((g) => g.scope === "individual" && (!me || g.member !== me));
+  const titleOf = (id: string | null) => (id ? goals.find((g) => g.id === id)?.title : undefined);
 
-  // Your goals belong to your account's identity. Only the auth-off local
-  // instance (no accounts) asks for a name, remembered in localStorage.
-  const ensureMe = (): string | null => {
-    if (me) return me;
-    if (viewer.auth) return null;
-    const v = (prompt("Your name (the identity your agent reports as):") || "").trim();
-    if (v) { localStorage.setItem("reins-me", v); setMe(v); }
-    return v || "me";
-  };
-  const addMine = (title: string) => {
-    const member = ensureMe();
-    if (!member) { setErr("Log in with your account to add your own goals."); return; }
-    run(api.addGoal(projectId, { scope: "individual", member, title }));
+  const add = () => {
+    const t = title.trim();
+    if (!t || busy) return;
+    const done = () => { setTitle(""); setAdding(false); };
+    if (sc === "team") return run(api.addGoal(projectId, { scope: "team", title: t }), done);
+    let member = me;
+    if (!member) {
+      member = (prompt("Your name (the identity your agent reports as):") || "").trim();
+      if (!member) return;
+      localStorage.setItem("reins-me", member);
+      setLocal(member);
+    }
+    run(api.addGoal(projectId, { scope: "individual", member, title: t }), done);
   };
 
   return (
-    <div className={embedded ? "goals goals-embedded" : "goals card pad"} id={embedded ? undefined : "goals"}>
-      {!embedded && <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> short-term goals</div>}
-
-      {err && <div className="mono" style={{ color: "var(--blocked)", marginBottom: 12 }}>{err}</div>}
-      <ProposalStrip proposals={proposals} run={run} />
-
-      <Section
-        title="Team goals"
-        count={team.length}
-        canAdd={admin}
-        onAdd={(t) => run(api.addGoal(projectId, { scope: "team", title: t }))}
-        empty={admin ? "Add the common goals the team is working toward." : "No common goals yet."}
-      >
-        {team.map((g) => <GoalCard key={g.id} g={g} editable={admin} run={run} />)}
-      </Section>
-
-      <Section
-        title="Individual goals"
-        count={mine.length + others.length}
-        canAdd
-        onAdd={addMine}
-        empty="Add a goal or two of your own."
-      >
-        {mine.map((g) => <GoalCard key={g.id} g={g} editable mine run={run} showMember />)}
-        {others.map((g) => <GoalCard key={g.id} g={g} editable={false} run={run} showMember />)}
-      </Section>
-    </div>
-  );
-}
-
-function Section({
-  title, count, canAdd, onAdd, empty, children,
-}: {
-  title: string;
-  count: number;
-  canAdd: boolean;
-  onAdd?: (title: string) => void;
-  empty: string;
-  children?: React.ReactNode;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-  const submit = () => {
-    const t = draft.trim();
-    if (!t || !onAdd) return;
-    onAdd(t);
-    setDraft("");
-    setAdding(false);
-  };
-  return (
-    <div className="goal-sec">
-      <div className="goal-sec-h">
-        <span className="mono">{title}</span>
-        {canAdd && (
-          <button className="tiny" onClick={() => setAdding((a) => !a)}>{adding ? "cancel" : "+ goal"}</button>
+    <section className="ld-card" aria-labelledby="ld-goals-h">
+      <div className="ld-card-h">
+        <h2 id="ld-goals-h">Goals</h2>
+        {(viewer.admin || canMine) && (
+          <button type="button" className="ld-ghost" aria-expanded={adding} aria-controls="ld-goal-form" onClick={() => setAdding((a) => !a)}>
+            {adding ? "Cancel" : "New goal"}
+          </button>
         )}
       </div>
+
       {adding && (
-        <div className="goal-add">
-          <input
-            value={draft}
-            autoFocus
-            placeholder="A short-term goal…"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          />
-          <button className="tiny solid" onClick={submit}>add</button>
-        </div>
+        <form id="ld-goal-form" className="ld-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
+          <label className="ld-field grow">
+            <span>Goal</span>
+            <input className="ld-input" value={title} maxLength={200} autoFocus placeholder="Ship PKCE login before Friday’s release" onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          {viewer.admin && canMine && (
+            <label className="ld-field">
+              <span>For</span>
+              <select className="ld-input" value={sc} onChange={(e) => setScope(e.target.value as GoalScope)}>
+                <option value="team">The whole team</option>
+                <option value="individual">Just me</option>
+              </select>
+            </label>
+          )}
+          <div className="ld-form-foot">
+            <span className="ld-hint">{sc === "team" ? "A team goal everyone’s agent works toward." : "Your own goal. Only you can edit it."}</span>
+            <button type="submit" className="ld-primary" disabled={busy || !title.trim()}>Add goal</button>
+          </div>
+        </form>
       )}
-      {count === 0 ? (empty ? <div className="empty small">{empty}</div> : null) : children}
-    </div>
+      {err && <p className="ld-err" role="alert">{err}</p>}
+
+      {team.length === 0 ? (
+        <p className="ld-empty">
+          {viewer.admin ? "No team goal yet. Add the one thing the whole team is pushing toward." : "No team goal yet. Owners and admins set it."}
+        </p>
+      ) : (
+        team.map((g) => <GoalBlock key={g.id} g={g} team editable={viewer.admin} busy={busy} run={run} owner="Team goal" />)
+      )}
+
+      <div className="ld-indiv">
+        <h3 className="ld-sub-h">Individual goals</h3>
+        {mine.length + others.length === 0 ? (
+          <p className="ld-hint">
+            No individual goals yet.
+            {canMine ? " Add one of your own with New goal." : <> <Link href="/settings">Set your agent identity</Link> to add your own.</>}
+          </p>
+        ) : (
+          <>
+            {mine.map((g) => <GoalBlock key={g.id} g={g} editable busy={busy} run={run} owner="Yours" parent={titleOf(g.parentId)} />)}
+            {others.map((g) => <GoalBlock key={g.id} g={g} editable={false} busy={busy} run={run} owner={g.member ? nameOf(g.member) : "Someone"} parent={titleOf(g.parentId)} />)}
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
-function GoalCard({
-  g, editable, run, showMember, mine,
+function GoalBlock({
+  g, team, editable, busy, run, owner, parent,
 }: {
   g: Goal;
+  team?: boolean;
   editable: boolean;
-  run: Run;
-  showMember?: boolean;
-  mine?: boolean;
+  busy: boolean;
+  run: (p: Promise<unknown>, after?: () => void) => void;
+  owner: string;
+  parent?: string;
 }) {
-  const [newItem, setNewItem] = useState("");
-  const p = g.scope === "team" ? g.rollup : g.progress;
-  const addItem = () => {
-    const t = newItem.trim();
-    if (!t) return;
-    run(api.addGoalItem(g.id, t));
-    setNewItem("");
+  const [step, setStep] = useState("");
+  const p = team ? g.rollup : g.progress;
+  const linked = team ? g.rollup.total - g.progress.total : 0;
+  const addStep = () => {
+    const t = step.trim();
+    if (!t || busy) return;
+    run(api.addGoalItem(g.id, t), () => setStep(""));
   };
   return (
-    <div className={`goal-card ${g.status}`}>
-      <div className="goal-top">
-        <span className={`goal-dot ${g.status}`} title={g.status} />
-        <div className="goal-title">
-          {g.title}
-          {showMember && g.member ? <span className="goal-owner mono"> · {mine ? "you" : g.member}</span> : null}
+    <article className={`ld-goal ${g.status}${team ? " team" : ""}`} aria-label={`${owner}: ${g.title}`}>
+      <div className="ld-goal-top">
+        {team && <Ring p={p} />}
+        <div className="ld-goal-head">
+          <span className="ld-goal-kind">
+            {owner} · {g.status === "blocked" ? <span className="rz-chip blocked ld-blocked">blocked</span> : STATUS_LABEL[g.status]}
+            {!team && p.total > 0 && ` · ${p.done}/${p.total}`}
+          </span>
+          <h3 className="ld-goal-title">{g.title}</h3>
+          {parent && <span className="ld-hint">toward “{parent}”</span>}
+          {linked > 0 && <span className="ld-hint">includes {linked} step{linked > 1 ? "s" : ""} from linked individual goals</span>}
         </div>
-        <span className="goal-pct mono">{p.done}/{p.total}</span>
       </div>
-      <div className="goal-bar"><i style={{ width: `${p.pct}%` }} /></div>
+      {!team && p.total > 0 && <div className="ld-bar" aria-hidden="true"><i style={{ width: `${p.pct}%` }} /></div>}
+
       {g.items.length > 0 && (
-        <div className="goal-items">
+        <ul className="ld-items">
           {g.items.map((it) => (
-            <label className={`goal-item ${it.done ? "done" : ""}`} key={it.id}>
-              <input
-                type="checkbox"
-                checked={it.done}
-                disabled={!editable}
-                onChange={() => run(api.patchGoalItem(it.id, { done: !it.done }))}
-              />
-              <span>{it.text}</span>
+            <li className={`ld-item${it.done ? " done" : ""}`} key={it.id}>
+              <label className="ld-check">
+                <input
+                  type="checkbox"
+                  checked={it.done}
+                  disabled={!editable || busy}
+                  onChange={() => run(api.patchGoalItem(it.id, { done: !it.done }))}
+                />
+                <span className="ld-box" aria-hidden="true">✓</span>
+                <span className="ld-item-text">{it.text}</span>
+              </label>
+              {it.origin === "auto" && <span className="ld-item-meta" title={it.evidence || undefined}>from activity</span>}
               {editable && (
-                <button className="goal-x" title="remove" onClick={() => run(api.deleteGoalItem(it.id))}>×</button>
+                <button type="button" className="ld-x" disabled={busy} onClick={() => run(api.deleteGoalItem(it.id))}>
+                  <span aria-hidden="true">×</span><span className="ld-sr">Remove step “{it.text}”</span>
+                </button>
               )}
-            </label>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
+      {g.items.length === 0 && !editable && <p className="ld-hint">No steps yet.</p>}
+
       {editable && (
-        <div className="goal-additem">
-          <input
-            value={newItem}
-            placeholder="add a step…"
-            onChange={(e) => setNewItem(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addItem(); }}
-          />
+        <div className="ld-goal-foot">
+          <form className="ld-addstep" onSubmit={(e) => { e.preventDefault(); addStep(); }}>
+            <label className="ld-sr" htmlFor={`ld-step-${g.id}`}>Add a step to {g.title}</label>
+            <input id={`ld-step-${g.id}`} className="ld-input" value={step} maxLength={300} placeholder="Add a step…" onChange={(e) => setStep(e.target.value)} />
+            <button type="submit" className="ld-ghost" disabled={busy || !step.trim()}>Add</button>
+          </form>
+          <div className="ld-goal-acts">
+            <button type="button" className="ld-link" disabled={busy} onClick={() => run(api.patchGoal(g.id, { blocked: !g.blocked }))}>
+              {g.blocked ? "Unblock" : "Mark blocked"}
+            </button>
+            <button type="button" className="ld-link" disabled={busy} onClick={() => { if (confirm(`Delete “${g.title}” and its steps?`)) run(api.deleteGoal(g.id)); }}>
+              Delete goal
+            </button>
+          </div>
         </div>
       )}
-      {editable && (
-        <div className="goal-acts">
-          <button className="tiny" onClick={() => run(api.patchGoal(g.id, { blocked: !g.blocked }))}>
-            {g.blocked ? "unblock" : "block"}
-          </button>
-          <button className="tiny" onClick={() => { if (confirm("Delete this goal?")) run(api.deleteGoal(g.id)); }}>
-            delete
-          </button>
-        </div>
+    </article>
+  );
+}
+
+function proposalCopy(p: GoalProposal): { title: string; accept: string } {
+  if (p.kind === "check_item") return { title: `Mark done: ${p.itemText ?? "a step"}`, accept: "Mark done" };
+  if (p.kind === "add_item") return { title: `Add step: ${p.text ?? ""}`, accept: "Add to goal" };
+  return { title: `Mark “${p.goalTitle}” blocked`, accept: "Mark blocked" };
+}
+
+/**
+ * What the pipeline noticed in activity, for the goal's owner to confirm or
+ * dismiss. The server only returns proposals this viewer can act on.
+ */
+export function Proposals({ proposals, admin, nameOf, onChange }: { proposals: GoalProposal[]; admin: boolean; nameOf: (id: string) => string; onChange: () => void }) {
+  const { err, busy, run } = useRun(onChange);
+  const [last, setLast] = useState("");
+  const act = (p: GoalProposal, accept: boolean) => {
+    const { title } = proposalCopy(p);
+    setLast("");
+    run(accept ? api.acceptProposal(p.id) : api.dismissProposal(p.id), () => setLast(`${accept ? "Confirmed" : "Dismissed"}: ${title}`));
+  };
+  return (
+    <section className="ld-card" aria-labelledby="ld-props-h">
+      <div className="ld-card-h">
+        <h2 id="ld-props-h">Proposed from activity</h2>
+        <span className="ld-card-sub">{admin ? "Reins noticed these; you decide" : "For your own goals; you decide"}</span>
+      </div>
+      {err && <p className="ld-err" role="alert">{err}</p>}
+      {proposals.length === 0 ? (
+        <p className="ld-empty">Nothing new to propose. Reins checks again as the team works.</p>
+      ) : (
+        proposals.map((p) => {
+          const c = proposalCopy(p);
+          return (
+            <article className="ld-prop" key={p.id}>
+              <span className="ld-prop-title">{c.title}</span>
+              <span className="ld-prop-why">
+                {p.reason}{p.member ? ` · ${nameOf(p.member)}` : ""}{p.kind !== "block_goal" ? ` · in “${p.goalTitle}”` : ""}
+              </span>
+              <div className="ld-prop-acts">
+                <button type="button" className="ld-primary" disabled={busy} onClick={() => act(p, true)}>{c.accept}</button>
+                <button type="button" className="ld-ghost" disabled={busy} onClick={() => act(p, false)}>Dismiss</button>
+              </div>
+            </article>
+          );
+        })
       )}
-    </div>
+      <p role="status" className="ld-last">{last}</p>
+    </section>
   );
 }

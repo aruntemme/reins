@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { TopBar } from "@/components/ui";
 import { CopyCommand } from "@/components/copy-command";
+import { AuthShell, Field, FormError } from "../auth-shell";
 
 const GITHUB = "https://github.com/aruntemme/reins";
 // Access token for the public *demo* workspace (id 880523e5) — its own isolated
@@ -46,111 +46,77 @@ export default function SignIn() {
   const submit = (e: React.FormEvent) => { e.preventDefault(); enter(token); };
 
   return (
-    <>
-      <TopBar />
-      <main className="wrap">
-        <div className="signin">
-          <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> token sign in</div>
-          <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Enter your workspace.</h1>
-          <p className="sub" style={{ maxWidth: 480, marginBottom: 16 }}>
-            Reins is multi-tenant: each team runs in its own isolated workspace. Already have an
-            <b> access token</b> (an <code>rk_access_…</code>) for one? Paste it below. It’s exchanged
-            for a secure session; nothing is stored in the browser.
-          </p>
+    <AuthShell
+      eyebrow="Token sign in"
+      title="Enter your workspace."
+      lede={<>Reins is multi-tenant: each team runs in its own isolated workspace. Already have an <b>access token</b> (an <code>rk_access_…</code>)? Paste it below. It&rsquo;s exchanged for a secure session; nothing is stored in the browser.</>}
+      panel={{ title: "One workspace per team.", text: "Tokens keep each team's board isolated. Accounts with a password are the easier way in." }}
+    >
+      <p className="au-note">
+        <b>Have an account?</b> This page is for pasting an access or agent token. To log in with your email and password, use{" "}
+        <Link href="/login" className="au-link">Log in</Link> or <Link href="/signup" className="au-link">Sign up</Link>.
+      </p>
 
-          <div className="signin-note" style={{ marginBottom: 24 }}>
-            <b>Have an account?</b> This page is for pasting an access or agent token. To log in with
-            your email and password, use{" "}
-            <Link href="/login" className="hl" style={{ color: "var(--ink)" }}>Log in</Link>{" "}
-            or{" "}
-            <Link href="/signup" className="hl" style={{ color: "var(--ink)" }}>Sign up</Link>.
-          </div>
+      <form onSubmit={submit} className="au-form" noValidate>
+        <Field id="token" mono label="Access token" placeholder="rk_access_…" value={token} onChange={(e) => setToken(e.target.value)} spellCheck={false} autoComplete="off" />
+        {err && <FormError>{err}</FormError>}
+        <button className="rz-btn primary" disabled={busy || !token.trim()}>{busy ? "Checking…" : "Enter workspace"}</button>
+      </form>
 
-          <div className="signin-note">
-            <b>This is a public demo instance.</b> Take a look around with the demo workspace below.
-            To use Reins with your own team, self-host it (steps below) — your workspace, tokens, and
-            data stay yours.
-          </div>
+      <div className="au-sep">or</div>
+      <button type="button" className="rz-btn ghost" disabled={busy} onClick={() => enter(DEMO_TOKEN)}>
+        {busy ? "Opening…" : "Try the demo workspace"}
+      </button>
+      <p className="au-sub" style={{ marginTop: 0 }}>
+        This is a public demo instance. The demo opens a sample board (Atlas &amp; Nimbus): no sign-up, nothing stored.
+        To use Reins with your own team, self-host it.
+      </p>
 
-          <button
-            type="button"
-            className="btn solid lg"
-            disabled={busy}
-            onClick={() => enter(DEMO_TOKEN)}
-            style={{ marginTop: 20, justifyContent: "center", width: "100%", maxWidth: 520 }}
-          >
-            {busy ? "Opening…" : "Try the demo workspace"}
-          </button>
-          <div className="mono muted" style={{ marginTop: 8, fontSize: 11.5 }}>
-            Opens a sample board (Atlas &amp; Nimbus). No sign-up, nothing stored.
-          </div>
-
-          <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520, marginTop: 22 }}>
-            <div className="mono muted" style={{ fontSize: 11.5 }}>or paste your own access token</div>
-            <input
-              className="tokeninput"
-              placeholder="rk_access_…"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              spellCheck={false}
-            />
-            {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
-            <button className="btn solid" disabled={busy || !token.trim()} style={{ justifyContent: "center" }}>
-              {busy ? "Checking…" : "Enter workspace"}
-            </button>
-          </form>
-        </div>
-
-        {/* Onboarding: how to actually run Reins and get a token. */}
-        <section className="setup-wrap">
-          <div className="label" style={{ marginBottom: 14 }}><span className="sq" /> run it for your team — 4 steps</div>
-          <h2 className="display" style={{ fontSize: 28, marginBottom: 8 }}>Self-host Reins.</h2>
-          <p className="sub" style={{ maxWidth: 560, marginBottom: 26 }}>
-            Reins is open source and multi-tenant. Clone the repo, run the server, create your own
-            workspace (which mints your tokens), point your agent at it, then sign in above with the
-            access token.
-          </p>
-
-          <ol className="setup">
-            <li className="setupstep">
-              <span className="setup-n">1</span>
-              <div className="setup-body">
-                <div className="setup-t">Run the server + dashboard</div>
-                <p className="muted">Clone, install, and start it locally (server on :4319, dashboard on :4320).</p>
-                <CopyCommand block text="git clone https://github.com/aruntemme/reins && cd reins && npm run install:all && npm run dev" />
-              </div>
-            </li>
-            <li className="setupstep">
-              <span className="setup-n">2</span>
-              <div className="setup-body">
-                <div className="setup-t">Create a workspace</div>
-                <p className="muted">This mints your <b>ingest</b>, <b>access</b>, and <b>admin</b> tokens — shown once, so copy them.</p>
-                <CopyCommand block text={'npm run admin -- create-workspace "My Team"'} />
-              </div>
-            </li>
-            <li className="setupstep">
-              <span className="setup-n">3</span>
-              <div className="setup-body">
-                <div className="setup-t">Connect your agent</div>
-                <p className="muted">Install the capture hook into Claude Code with your <b>ingest</b> token, then run <code>/hooks</code> to approve it.</p>
-                <CopyCommand block text="npx reins-hook install --url http://localhost:4319 --me you --token rk_ingest_…" />
-              </div>
-            </li>
-            <li className="setupstep">
-              <span className="setup-n">4</span>
-              <div className="setup-body">
-                <div className="setup-t">Open the board</div>
-                <p className="muted">Just work as usual. Paste your <b>access</b> token in the box above to watch the team’s status, pending work, and handoffs update live.</p>
-              </div>
-            </li>
-          </ol>
-
-          <p className="mono" style={{ marginTop: 22, color: "var(--ink-3)" }}>
-            Deploying for a team? See the full guide in the{" "}
-            <a href={`${GITHUB}#readme`} target="_blank" rel="noreferrer" className="hl" style={{ color: "var(--ink)" }}>README</a>.
-          </p>
-        </section>
-      </main>
-    </>
+      <section className="au-selfhost" aria-labelledby="selfhost-h">
+        <p className="rz-eyebrow">Run it for your team · 4 steps</p>
+        <h2 id="selfhost-h">Self-host Reins.</h2>
+        <p className="au-lede">
+          Reins is open source and multi-tenant. Clone the repo, run the server, create your own workspace (which mints your tokens),
+          point your agent at it, then sign in above with the access token.
+        </p>
+        <ol className="au-steps">
+          <li className="au-step">
+            <span className="au-step-n">1</span>
+            <div className="au-step-b">
+              <h3 className="au-step-t">Run the server + dashboard</h3>
+              <p>Clone, install, and start it locally (server on :4319, dashboard on :4320).</p>
+              <CopyCommand block text="git clone https://github.com/aruntemme/reins && cd reins && npm run install:all && npm run dev" />
+            </div>
+          </li>
+          <li className="au-step">
+            <span className="au-step-n">2</span>
+            <div className="au-step-b">
+              <h3 className="au-step-t">Create a workspace</h3>
+              <p>This mints your <b>ingest</b>, <b>access</b>, and <b>admin</b> tokens, shown once, so copy them.</p>
+              <CopyCommand block text={'npm run admin -- create-workspace "My Team"'} />
+            </div>
+          </li>
+          <li className="au-step">
+            <span className="au-step-n">3</span>
+            <div className="au-step-b">
+              <h3 className="au-step-t">Connect your agent</h3>
+              <p>Install the capture hook with your <b>ingest</b> token, then run <code>/hooks</code> in Claude Code to approve it.</p>
+              <CopyCommand block text="npx reins-hook install --url http://localhost:4319 --me you --token rk_ingest_…" />
+            </div>
+          </li>
+          <li className="au-step">
+            <span className="au-step-n">4</span>
+            <div className="au-step-b">
+              <h3 className="au-step-t">Open the board</h3>
+              <p>Just work as usual. Paste your <b>access</b> token above to watch the team&rsquo;s status, pending work, and handoffs update live.</p>
+            </div>
+          </li>
+        </ol>
+        <p className="au-sub">
+          Deploying for a team? See the full guide in the{" "}
+          <a href={`${GITHUB}#readme`} target="_blank" rel="noreferrer" className="au-link">README</a>.
+        </p>
+      </section>
+    </AuthShell>
   );
 }

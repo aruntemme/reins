@@ -1,22 +1,11 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight, JetBrains_Mono, EB_Garamond } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const body = Inter({ subsets: ["latin"], variable: "--font-body", display: "swap" });
-const display = Inter_Tight({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["500", "600", "700"],
-  display: "swap",
-});
-const serif = EB_Garamond({
-  subsets: ["latin"],
-  variable: "--font-serif",
-  weight: ["400", "500", "600"],
-  style: ["normal", "italic"],
-  display: "swap",
-});
-const mono = JetBrains_Mono({
+// One family carries body and display: weight does the hierarchy (300 for big
+// headlines, 400/500 for UI), Geist Mono for everything an agent reads or types.
+const geist = Geist({ subsets: ["latin"], variable: "--font-body", display: "swap" });
+const mono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
   weight: ["400", "500"],
@@ -33,7 +22,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${body.variable} ${display.variable} ${serif.variable} ${mono.variable}`}>
+    <html lang="en" className={`${geist.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );
