@@ -5,6 +5,8 @@ import type { TraitOp } from "../db.js";
 import { bus } from "../bus.js";
 import { DistillSchema, fenceUntrusted, UNTRUSTED_NOTE } from "./schemas.js";
 import { applyOps } from "./reconcile.js";
+import { reconcileCollisions } from "../collisions.js";
+import { handoffConventions } from "../context-pack.js";
 
 const SYSTEM = `You are the distiller of Reins — you maintain a teammate's LIVING CONTEXT on a
 shared team board, from a stream of signals emitted by their AI coding agent. In ONE pass you:
@@ -103,6 +105,8 @@ ${fenceUntrusted(text)}`,
 
   if (ops.significance === "noise") return "noise";
   applyOps(project, member, ops);
+  // A resolved pending item may settle a blocker waiting on it — link this event.
+  if (ops.pending_resolve?.length) reconcileCollisions(project, { eventId });
 
   // Goal auto-tracking: file the proposed goal_ops for the owner to confirm.
   if (ops.goal_ops?.length) {
@@ -135,6 +139,7 @@ ${fenceUntrusted(text)}`,
       fromMember: member,
       kind: "mention",
       text: mention.note,
+      conventions: handoffConventions(project, toId, mention.note),
     });
     if (created) handed = true;
   }

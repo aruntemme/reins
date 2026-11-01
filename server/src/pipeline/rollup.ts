@@ -7,8 +7,11 @@ import {
   createHandoff,
   projectWorkspace,
   PROMPT_LIST_CAP,
+  projectHidesBranches,
 } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
+import { fileOverlaps, computeOverlaps, presentWork, reconcileCollisions } from "../collisions.js";
+import { handoffConventions } from "../context-pack.js";
 import { bus } from "../bus.js";
 import { env } from "../env.js";
 import { liveness, livenessLabel, handoffAllowed } from "../liveness.js";
@@ -26,8 +29,11 @@ Do NOT emit "fyi"/nudge handoffs for status updates, and do NOT nag anyone about
 empty, or vague headline/goal — that is noise, not a handoff. If nothing needs coordination,
 return an empty handoffs array. Prefer fewer, higher-signal handoffs.
 
-FILE OVERLAPS (when listed) are computed from each present teammate's working_on — treat them as
-facts: report each as a collision. Their collision handoffs are already sent, so don't repeat them.
+FILE OVERLAPS (when listed) are computed from each present teammate's real edits, uncommitted git
+changes, working_on, and shared branches — treat them as facts: report each as a collision. Their
+collision handoffs are already sent, so don't repeat them.
+
+For a "blocker" that waits on a listed PENDING item, set "pending_id" to that item's exact [id].
 
 AWAY teammates (flagged below) have been silent a long time and are NOT participating now: never
 invent collisions, fyi, or nudges involving them. The ONLY handoff you may direct to an away
@@ -35,7 +41,7 @@ teammate is a genuine "blocker" — when a present teammate truly needs somethin
 person owns — so they see it on return.
 
 Use exact roster names. Respond ONLY as JSON:
-{summary, alignment, collisions[{area,members[],note}], risks[], handoffs[{to,from,kind,reason}]}.
+{summary, alignment, collisions[{area,members[],note}], risks[], handoffs[{to,from,kind,reason,pending_id?}]}.
 "kind" is one of collision|blocker|fyi. "from" may be "" for a team-level note.`;
 
 // Debounce per project so a burst of events produces one rollup — and run each
@@ -63,47 +69,9 @@ export function scheduleRollup(project: string, delayMs = 4000) {
   });
 }
 
-/** Normalize a working_on entry to a comparable file path, or null if it isn't
- *  path-like (free-text areas such as "auth refactor" are left to the LLM). */
-function normPath(s: unknown): string | null {
-  const p = String(s ?? "").trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "").toLowerCase();
-  if (!p || /\s/.test(p) || !/[./]/.test(p)) return null;
-  return p;
-}
-
-const samePath = (a: string, b: string) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
-
-/**
- * Deterministic file collisions: path-like working_on entries shared by two or
- * more teammates. Equal paths overlap, and so does a path that is a
- * segment-suffix of another ("src/db.ts" vs "server/src/db.ts"), since agents
- * report paths relative to different roots. Returns one entry per area with the
- * member ids involved (≥2), the longer spelling as the area.
- */
-export function fileOverlaps(members: { member: string; working_on?: string }[]): { area: string; members: string[] }[] {
-  const entries: { member: string; path: string }[] = [];
-  for (const m of members) {
-    let list: unknown = [];
-    try { list = JSON.parse(m.working_on || "[]"); } catch { /* bad json → none */ }
-    if (!Array.isArray(list)) continue;
-    for (const raw of list) {
-      const path = normPath(raw);
-      if (path) entries.push({ member: m.member, path });
-    }
-  }
-  const areas: { area: string; members: Set<string> }[] = [];
-  for (const e of entries) {
-    const hit = areas.find((x) => samePath(x.area, e.path));
-    if (hit) {
-      hit.members.add(e.member);
-      if (e.path.length > hit.area.length) hit.area = e.path;
-    } else {
-      areas.push({ area: e.path, members: new Set([e.member]) });
-    }
-  }
-  // Sorted so the prompt and handoff direction don't depend on member row order.
-  return areas.filter((a) => a.members.size > 1).map((a) => ({ area: a.area, members: [...a.members].sort() }));
-}
+// fileOverlaps moved to collisions.ts (shared with the live board and the hook's
+// pre-edit check); re-exported here for existing callers.
+export { fileOverlaps };
 
 export async function runRollup(project: string): Promise<void> {
   const proj = getProject(project);
@@ -111,12 +79,16 @@ export async function runRollup(project: string): Promise<void> {
   if (members.length === 0) return;
   lastRun.set(project, Date.now());
   const pendingItems = listPending(project).slice(0, PROMPT_LIST_CAP);
+  const hideBranches = projectHidesBranches(project);
 
   // Liveness derived from last activity, so the synthesizer doesn't coordinate
   // live teammates with members who have gone quiet for days.
   const live = (m: any) => liveness(m.last_seen);
   const present = members.filter((m) => live(m) !== "away");
   const away = members.filter((m) => live(m) === "away");
+  // Files each present member really touched recently (from the hook, not inferred).
+  const touched = new Map<string, string[]>();
+  for (const w of presentWork(project)) touched.set(w.member, w.touched.slice(0, 8).map((t) => t.path));
 
   const memberBlock =
     present
@@ -124,7 +96,9 @@ export async function runRollup(project: string): Promise<void> {
         (m) =>
           `- ${m.display_name || m.member} [${livenessLabel(m.last_seen)}]: ${m.headline || "(no headline)"}` +
           (m.goal ? `\n    goal: ${m.goal}` : "") +
-          (m.working_on && m.working_on !== "[]" ? `\n    working_on: ${m.working_on}` : "")
+          (m.working_on && m.working_on !== "[]" ? `\n    working_on: ${m.working_on}` : "") +
+          (touched.get(m.member)?.length ? `\n    edited (last 30m): ${touched.get(m.member)!.join(", ")}` : "") +
+          (m.branch && !hideBranches ? `\n    branch: ${m.branch}` : "")
       )
       .join("\n") || "(nobody active right now)";
 
@@ -136,14 +110,15 @@ export async function runRollup(project: string): Promise<void> {
     : "";
 
   const pendingBlock =
-    pendingItems.map((p) => `- (${p.member}) ${p.text} [${p.status}]`).join("\n") || "(none)";
+    pendingItems.map((p) => `- [${p.id}] (${p.member}) ${p.text} [${p.status}]`).join("\n") || "(none)";
 
-  // File collisions are computed, not guessed: overlapping working_on paths among
-  // PRESENT teammates (an away member's stale list never collides).
+  // Collisions are computed, not guessed: shared files (real edits, uncommitted
+  // changes, working_on) and shared non-default branches among PRESENT teammates
+  // (an away member's stale state never collides).
   const nameOf = new Map(members.map((m: any) => [m.member, m.display_name || m.member]));
-  const overlaps = fileOverlaps(present);
+  const overlaps = computeOverlaps(project);
   const overlapBlock = overlaps.length
-    ? "\n\nFILE OVERLAPS (computed from working_on — facts):\n" +
+    ? "\n\nFILE OVERLAPS (computed from edits, git, and working_on — facts):\n" +
       overlaps.map((o) => `- ${o.area}: ${o.members.map((id) => nameOf.get(id)).join(", ")}`).join("\n")
     : "";
 
@@ -162,18 +137,40 @@ ${pendingBlock}`,
     workspaceId: projectWorkspace(project) ?? "default",
   });
 
-  // The computed overlaps are facts: make sure each shows on the board even if
-  // the model left it out.
+  // The computed overlaps are facts: make sure each shows on the board even if the
+  // model left it out, and tag the model's own copy of one as computed, so the
+  // live board (and the auto-close check) treats it as the live overlap it is.
+  const idsOf = (names: string[]) => names.map((n) => resolveMember(project, n)).filter(Boolean) as string[];
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+  const collisions: { area: string; members: string[]; note: string; computed?: boolean }[] = r.collisions.map((c) =>
+    overlaps.some((o) => sameSet(idsOf(c.members), o.members)) ? { ...c, computed: true } : c
+  );
   for (const o of overlaps) {
-    const names = o.members.map((id) => nameOf.get(id)!);
-    const known = r.collisions.some((c) => {
-      const p = normPath(c.area);
-      return !!p && samePath(p, o.area);
-    });
-    if (!known) r.collisions.push({ area: o.area, members: names, note: "both are working on this file" });
+    const known = collisions.some((c) => c.computed && sameSet(idsOf(c.members), o.members));
+    if (!known) {
+      collisions.push({
+        area: o.area,
+        members: o.members.map((id) => nameOf.get(id)!),
+        note: o.kind === "file" ? "both are working on this file" : "both are on this branch",
+        computed: true,
+      });
+    }
+  }
+  // A collision handoff the model emitted implies a collision it saw (in an area the
+  // computation can't): record it, so the auto-close check keeps that pair open.
+  const extraPairs: [string, string][] = [];
+  for (const h of r.handoffs ?? []) {
+    if (h.kind !== "collision") continue;
+    const to = resolveMember(project, h.to);
+    const from = h.from ? resolveMember(project, h.from) : null;
+    if (!to || !from || to === from) continue;
+    extraPairs.push([to, from]);
+    if (!collisions.some((c) => sameSet(idsOf(c.members), [to, from].sort()))) {
+      collisions.push({ area: "shared work", members: [nameOf.get(from)!, nameOf.get(to)!], note: h.reason.slice(0, 200) });
+    }
   }
 
-  saveRollup(project, r);
+  saveRollup(project, { ...r, collisions });
   bus.emitChange({ type: "rollup.updated", project });
 
   // Workstream F: fan the fresh rollup out to chat. Fire-and-forget so a slow or
@@ -184,7 +181,7 @@ ${pendingBlock}`,
   const ws = projectWorkspace(project) ?? "default";
   const operatorsOwn = !env.authEnabled || ws === "default";
   if (operatorsOwn && (env.integrations.slackWebhook || env.integrations.discordWebhook)) {
-    void postDigest(project, proj?.name || project, r).catch((e) =>
+    void postDigest(project, proj?.name || project, { ...r, collisions }).catch((e) =>
       console.error("[digest]", e.message)
     );
   }
@@ -194,24 +191,8 @@ ${pendingBlock}`,
   // a manufactured fyi/collision to an away teammate is dropped — only a real
   // blocker reaches them (they'll see it on return).
   const liveById = new Map(members.map((m: any) => [m.member, liveness(m.last_seen)]));
+  const pendingIds = new Set(pendingItems.map((p) => p.id));
   let handed = false;
-  // Deterministic collision handoffs, one to each teammate per overlapping peer.
-  // createHandoff keeps one open collision per (to, from) and refreshes its text.
-  for (const o of overlaps) {
-    for (const to of o.members) {
-      for (const from of o.members) {
-        if (from === to) continue;
-        const created = createHandoff({
-          project,
-          toMember: to,
-          fromMember: from,
-          kind: "collision",
-          text: `You and ${nameOf.get(from)} are both working on ${o.area} — coordinate before editing it.`,
-        });
-        if (created) handed = true;
-      }
-    }
-  }
   for (const h of r.handoffs ?? []) {
     const toId = resolveMember(project, h.to);
     if (!toId) continue;
@@ -219,14 +200,21 @@ ${pendingBlock}`,
     if (!handoffAllowed(recip, h.kind)) continue;
     const fromId = h.from ? resolveMember(project, h.from) ?? undefined : undefined;
     if (fromId === toId) continue;
+    // A blocker tied to a listed pending item auto-closes once that item is done.
+    const ref = h.kind === "blocker" && h.pending_id && pendingIds.has(h.pending_id) ? h.pending_id : null;
     const created = createHandoff({
       project,
       toMember: toId,
       fromMember: fromId,
       kind: h.kind,
       text: h.reason,
+      ref,
+      conventions: h.kind === "blocker" ? handoffConventions(project, toId, h.reason) : null,
     });
     if (created) handed = true;
   }
   if (handed) bus.emitChange({ type: "handoff.changed", project });
+  // Deterministic collision handoffs (one to each teammate per overlapping peer)
+  // and auto-closing whatever no longer applies.
+  reconcileCollisions(project, { extraPairs });
 }

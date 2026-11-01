@@ -13,6 +13,7 @@ import { openSync, readSync, fstatSync, closeSync, realpathSync } from "node:fs"
 import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 import { redactSecrets } from "./redact.mjs";
+import { gitSnapshot, repoPath } from "./git.mjs";
 
 const DEFAULT_URL = "http://localhost:4319";
 const MAX_TEXT = 6000;
@@ -92,41 +93,72 @@ export function lastAssistantText(transcriptPath) {
  * @param {string} [o.key]     ingest key (x-reins-key)
  * @param {string} [o.session] session id
  * @param {object} [o.meta]    extra metadata (merged with {source})
+ * @param {string} [o.cwd]     working directory; when set, git state (branch,
+ *                             HEAD, dirty files, a detected merge) rides in meta.git
  * @param {number} [o.timeoutMs=1500]
  */
 export async function sendEvent(o) {
-  const url = (o.url || process.env.REINS_URL || DEFAULT_URL).replace(/\/$/, "");
   const source = o.source || "claude-code";
   // Mask credentials before anything leaves the machine (the server masks again
   // at ingest as a backstop).
   const text = prepareText(o.text);
   if (!text) return { ok: false, skipped: true };
 
-  const body = JSON.stringify({
+  const git = o.cwd && o.git !== false ? gitSnapshot(o.cwd) : null;
+  const r = await postJson(o, "/api/ingest", {
     project: o.project,
     member: o.member || resolveMember(),
     kind: o.kind || "progress",
     text,
     session: o.session,
     source,
-    meta: { ...(o.meta || {}), source },
-  });
+    meta: { ...(o.meta || {}), source, ...(git ? { git } : {}) },
+  }, o.timeoutMs ?? 1500);
+  return r.unreachable ? { ok: false, unreachable: true } : { ok: r.ok, status: r.status };
+}
 
+/**
+ * POST JSON to the Reins server with a hard timeout. Never throws: resolves to
+ * {ok, status, json} or {ok:false, unreachable:true} (down, slow, or refused).
+ * Used by every hook path, so a dead server costs at most `timeoutMs`.
+ */
+export async function postJson(o, path, payload, timeoutMs) {
+  const url = (o.url || process.env.REINS_URL || DEFAULT_URL).replace(/\/$/, "");
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), o.timeoutMs ?? 1500);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${url}/api/ingest`, {
+    const res = await fetch(`${url}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(o.key ? { "x-reins-key": o.key } : {}) },
-      body,
+      body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
-    return { ok: res.ok, status: res.status };
+    let json = null;
+    try { json = await res.json(); } catch { /* not json */ }
+    return { ok: res.ok, status: res.status, json };
   } catch {
     return { ok: false, unreachable: true };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Record a real file touch (an edit tool just ran). The path is made relative to
+ * the git repo root so teammates on different machines match; a file outside the
+ * repo isn't shared. Git state rides along in meta.git.
+ */
+export async function sendTouch(o) {
+  const path = repoPath(o.file, o.cwd);
+  if (!path) return { ok: false, skipped: true };
+  const git = o.git !== false ? gitSnapshot(o.cwd) : null;
+  return postJson(o, "/api/hook/touch", {
+    project: o.project,
+    member: o.member || resolveMember(),
+    path,
+    tool: o.tool,
+    meta: git ? { git } : undefined,
+  }, o.timeoutMs ?? 1500);
 }
 
 /**
@@ -140,12 +172,21 @@ export async function sendEvent(o) {
 export function sendEventDetached(o) {
   const text = prepareText(o.text);
   if (!text) return true; // nothing to send
+  return spawnDetached({ ...o, text });
+}
+
+/** sendTouch from a detached child (git + the POST never hold up the agent). */
+export function sendTouchDetached(o) {
+  return spawnDetached({ ...o, op: "touch" });
+}
+
+function spawnDetached(payload) {
   try {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
-      env: { ...process.env, REINS_EVENT: JSON.stringify({ ...o, text }) },
+      env: { ...process.env, REINS_EVENT: JSON.stringify(payload) },
     });
     child.on("error", () => {});
     child.unref();
@@ -164,5 +205,6 @@ if (isMain && process.env.REINS_EVENT) {
   let o = null;
   try { o = JSON.parse(process.env.REINS_EVENT); } catch { /* malformed → nothing to do */ }
   if (!o) process.exit(0);
-  sendEvent({ ...o, timeoutMs: o.timeoutMs ?? 10000 }).finally(() => process.exit(0));
+  const send = o.op === "touch" ? sendTouch : sendEvent;
+  send({ ...o, timeoutMs: o.timeoutMs ?? 10000 }).finally(() => process.exit(0));
 }

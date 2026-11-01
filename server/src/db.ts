@@ -256,7 +256,88 @@ CREATE TABLE IF NOT EXISTS member_traits (
   last_seen    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_member_traits ON member_traits(project, member, status);
+
+-- Real file touches, recorded by the hook after an edit tool runs (no LLM). One
+-- row per (project, member, path) holding the latest touch, so the table stays
+-- bounded by distinct paths; rows past the retention window are pruned hourly.
+-- path is relative to the git repo root, so teammates on different machines match.
+CREATE TABLE IF NOT EXISTS file_touches (
+  project     TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  tool        TEXT,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (project, member, path)
+);
+CREATE INDEX IF NOT EXISTS idx_touches_recent ON file_touches(project, created_at);
+
+-- Lead directives: an owner/admin's instruction to one or more members (targets
+-- is a json array of member ids) or the whole team (empty array). Always visible
+-- to the people it targets; cleared by hand or when it expires.
+CREATE TABLE IF NOT EXISTS directives (
+  id          TEXT PRIMARY KEY,
+  project     TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  targets     TEXT NOT NULL DEFAULT '[]',
+  created_by  TEXT,
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  cleared_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_directives ON directives(project, cleared_at, expires_at);
+
+-- Lead assignments: an area (a file/dir path or free text) assigned to one member.
+-- Advisory, never enforced: the pre-edit check warns anyone else who edits it.
+CREATE TABLE IF NOT EXISTS assignments (
+  id          TEXT PRIMARY KEY,
+  project     TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  area        TEXT NOT NULL,
+  note        TEXT,
+  created_by  TEXT,
+  handoff_id  TEXT,
+  created_at  INTEGER NOT NULL,
+  cleared_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_assignments ON assignments(project, cleared_at);
+
+-- Per-workspace settings an admin controls (absent row = defaults).
+CREATE TABLE IF NOT EXISTS workspace_settings (
+  workspace_id   TEXT PRIMARY KEY,
+  hide_branches  INTEGER NOT NULL DEFAULT 0,
+  updated_at     INTEGER NOT NULL
+);
 `);
+
+/** Add a column if an older database doesn't have it yet (additive migration). */
+function addColumn(table: string, column: string, ddl: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+
+// Git awareness: the member's current branch, short HEAD, default branch, and
+// dirty files (json, capped) as last reported by their hook.
+addColumn("members", "branch", "TEXT");
+addColumn("members", "head", "TEXT");
+addColumn("members", "default_branch", "TEXT");
+addColumn("members", "dirty_files", "TEXT NOT NULL DEFAULT '[]'");
+addColumn("members", "dirty_count", "INTEGER NOT NULL DEFAULT 0");
+addColumn("members", "git_at", "INTEGER");
+
+// Handoff auto-closing. area/ref tie a collision to its file and a blocker to its
+// pending item; auto_* record why and on which event it was closed; auto_suppress
+// holds a reason code the owner overrode by reopening, so it isn't re-closed for
+// it. conventions: the recipient's relevant traits (only if they opted in).
+addColumn("handoffs", "area", "TEXT");
+addColumn("handoffs", "ref", "TEXT");
+addColumn("handoffs", "auto_code", "TEXT");
+addColumn("handoffs", "auto_reason", "TEXT");
+addColumn("handoffs", "auto_event", "TEXT");
+addColumn("handoffs", "auto_suppress", "TEXT");
+addColumn("handoffs", "conventions", "TEXT");
+
+// Taste-profile opt-in, per account per workspace. Off by default.
+addColumn("memberships", "share_traits", "INTEGER NOT NULL DEFAULT 0");
 
 // Migrate pre-auth databases: add projects.workspace_id if missing.
 const projCols = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
@@ -575,19 +656,28 @@ export function createHandoff(h: {
   fromMember?: string;
   kind: string;
   text: string;
+  area?: string | null; // collision: the shared file/branch
+  ref?: string | null; // blocker: the pending item id it waits on
+  conventions?: string[] | null; // the recipient's relevant traits (opt-in only)
 }): string | null {
+  const conventions = h.conventions?.length ? JSON.stringify(h.conventions.slice(0, 3)) : null;
   // Collisions and blockers are about a relationship, not a phrasing: the LLM
   // rewords them every rollup. Keep ONE open per (to, from, kind) and refresh its
   // text in place instead of stacking near-duplicates.
   if (h.kind === "collision" || h.kind === "blocker") {
     const open = db
       .prepare(
-        `SELECT id FROM handoffs WHERE project = ? AND to_member = ? AND COALESCE(from_member, '') = ?
+        `SELECT id, text FROM handoffs WHERE project = ? AND to_member = ? AND COALESCE(from_member, '') = ?
            AND kind = ? AND status != 'resolved' ORDER BY created_at DESC LIMIT 1`
       )
-      .get(h.project, h.toMember, h.fromMember ?? "", h.kind) as { id: string } | undefined;
+      .get(h.project, h.toMember, h.fromMember ?? "", h.kind) as { id: string; text: string } | undefined;
     if (open) {
-      db.prepare("UPDATE handoffs SET text = ?, updated_at = ? WHERE id = ?").run(h.text.slice(0, 300), now(), open.id);
+      // A deterministic collision refresh keeps the richer LLM wording when there is one.
+      const text = h.area && open.text && !open.text.startsWith("You and ") ? open.text : h.text.slice(0, 300);
+      db.prepare(
+        `UPDATE handoffs SET text = ?, area = COALESCE(?, area), ref = COALESCE(?, ref),
+           conventions = COALESCE(?, conventions), updated_at = ? WHERE id = ?`
+      ).run(text, h.area ?? null, h.ref ?? null, conventions, now(), open.id);
       return null;
     }
   }
@@ -599,10 +689,208 @@ export function createHandoff(h: {
   if (dupe) return null;
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO handoffs (id, project, to_member, from_member, kind, text, status, sig, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`
-  ).run(id, h.project, h.toMember, h.fromMember ?? null, h.kind, h.text.slice(0, 300), sig, now(), now());
+    `INSERT INTO handoffs (id, project, to_member, from_member, kind, text, status, sig, area, ref, conventions, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)`
+  ).run(id, h.project, h.toMember, h.fromMember ?? null, h.kind, h.text.slice(0, 300), sig,
+    h.area ?? null, h.ref ?? null, conventions, now(), now());
   return id;
+}
+
+/** Auto-close one open handoff, recording why and on which event. Skipped when the
+ *  owner reopened it after an auto-close for this same reason. Returns true if closed. */
+export function autoCloseHandoff(project: string, id: string, code: string, reason: string, eventId?: string | null): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE handoffs SET status = 'resolved', auto_code = ?, auto_reason = ?, auto_event = ?, updated_at = ?
+          WHERE id = ? AND project = ? AND status != 'resolved' AND COALESCE(auto_suppress, '') != ?`
+      )
+      .run(code, reason.slice(0, 200), eventId ?? null, now(), id, project, code).changes > 0
+  );
+}
+
+/** Reopen an auto-closed handoff. Its reason code becomes suppressed, so the same
+ *  check won't close it again; the owner resolves it by hand from here on. */
+export function reopenHandoff(project: string, id: string): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE handoffs SET status = 'open', auto_suppress = auto_code, auto_code = NULL, auto_reason = NULL,
+           auto_event = NULL, updated_at = ? WHERE id = ? AND project = ? AND status = 'resolved' AND auto_code IS NOT NULL`
+      )
+      .run(now(), id, project).changes > 0
+  );
+}
+
+/** Open handoffs of the given kinds in a project (for the auto-close checks). */
+export function openHandoffsOfKind(project: string, kinds: string[]): any[] {
+  return db
+    .prepare(`SELECT * FROM handoffs WHERE project = ? AND status != 'resolved' AND kind IN (${kinds.map(() => "?").join(",")})`)
+    .all(project, ...kinds);
+}
+
+/** Handoffs auto-closed for a member recently (shown with a one-click reopen). */
+export function recentAutoClosed(project: string, member: string, sinceMs: number, limit = 3): any[] {
+  return db
+    .prepare(
+      `SELECT * FROM handoffs WHERE project = ? AND to_member = ? AND status = 'resolved' AND auto_code IS NOT NULL
+         AND updated_at >= ? ORDER BY updated_at DESC LIMIT ?`
+    )
+    .all(project, member, sinceMs, limit);
+}
+
+/** Projects that have open collision/blocker handoffs (the periodic auto-close sweep). */
+export function projectsWithOpenCoordination(): string[] {
+  return (
+    db.prepare("SELECT DISTINCT project FROM handoffs WHERE status != 'resolved' AND kind IN ('collision','blocker')").all() as {
+      project: string;
+    }[]
+  ).map((r) => r.project);
+}
+
+export function getPendingItem(project: string, id: string): any {
+  return db.prepare("SELECT * FROM pending WHERE id = ? AND project = ?").get(id, project);
+}
+
+// ── File touches (real edits, from the hook) ──────────────────
+export function recordTouch(project: string, member: string, path: string, tool?: string | null) {
+  db.prepare(
+    `INSERT INTO file_touches (project, member, path, tool, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(project, member, path) DO UPDATE SET tool = excluded.tool, created_at = excluded.created_at`
+  ).run(project, member, path, tool ?? null, now());
+}
+
+/** Touches in a project since `sinceMs`, newest first. */
+export function recentTouches(project: string, sinceMs: number): { member: string; path: string; tool: string | null; created_at: number }[] {
+  return db
+    .prepare("SELECT member, path, tool, created_at FROM file_touches WHERE project = ? AND created_at >= ? ORDER BY created_at DESC")
+    .all(project, sinceMs) as any;
+}
+
+/** Forget a member's touches (their work landed, so it no longer overlaps anyone). */
+export function clearTouches(project: string, member: string): number {
+  return db.prepare("DELETE FROM file_touches WHERE project = ? AND member = ?").run(project, member).changes;
+}
+
+// ── Git state (from the hook's event meta) ────────────────────
+export interface GitState {
+  branch?: string;
+  head?: string;
+  defaultBranch?: string;
+  dirty?: number;
+  dirtyFiles?: string[];
+}
+
+export function setMemberGit(project: string, member: string, g: GitState) {
+  db.prepare(
+    `UPDATE members SET branch = ?, head = ?, default_branch = COALESCE(?, default_branch),
+       dirty_files = ?, dirty_count = ?, git_at = ? WHERE project = ? AND member = ?`
+  ).run(
+    g.branch ?? null,
+    g.head ?? null,
+    g.defaultBranch ?? null,
+    JSON.stringify((g.dirtyFiles ?? []).slice(0, 50)),
+    g.dirty ?? (g.dirtyFiles?.length ?? 0),
+    now(),
+    project,
+    member
+  );
+}
+
+// ── Workspace settings ────────────────────────────────────────
+export function workspaceHidesBranches(workspaceId: string | null | undefined): boolean {
+  if (!workspaceId) return false;
+  const r = db.prepare("SELECT hide_branches FROM workspace_settings WHERE workspace_id = ?").get(workspaceId) as
+    | { hide_branches: number }
+    | undefined;
+  return !!r?.hide_branches;
+}
+
+export function setWorkspaceHidesBranches(workspaceId: string, hide: boolean) {
+  db.prepare(
+    `INSERT INTO workspace_settings (workspace_id, hide_branches, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(workspace_id) DO UPDATE SET hide_branches = excluded.hide_branches, updated_at = excluded.updated_at`
+  ).run(workspaceId, hide ? 1 : 0, now());
+}
+
+/** Branch privacy for a project's workspace. */
+export const projectHidesBranches = (project: string) => workspaceHidesBranches(projectWorkspace(project));
+
+// ── Taste-profile opt-in ──────────────────────────────────────
+/** Whether the account behind capture identity `member` in this project's workspace
+ *  opted in to sharing its traits with agents. No account (auth off) = off. */
+export function traitsShared(project: string, member: string): boolean {
+  const ws = projectWorkspace(project);
+  if (!ws) return false;
+  const r = db
+    .prepare(
+      `SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id
+        WHERE m.workspace_id = ? AND m.share_traits = 1 AND lower(COALESCE(m.member, u.email)) = lower(?) LIMIT 1`
+    )
+    .get(ws, member);
+  return !!r;
+}
+
+// ── Lead directives + assignments ─────────────────────────────
+export interface DirectiveRow {
+  id: string;
+  project: string;
+  text: string;
+  targets: string;
+  created_by: string | null;
+  created_at: number;
+  expires_at: number;
+  cleared_at: number | null;
+}
+
+export function createDirective(d: { project: string; text: string; targets: string[]; createdBy?: string | null; ttlMs: number }): string {
+  const id = randomUUID();
+  const t = now();
+  db.prepare(
+    `INSERT INTO directives (id, project, text, targets, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, d.project, d.text, JSON.stringify(d.targets), d.createdBy ?? null, t, t + d.ttlMs);
+  return id;
+}
+
+/** Active (not cleared, not expired) directives, newest first. */
+export function activeDirectives(project: string, at = now()): DirectiveRow[] {
+  return db
+    .prepare("SELECT * FROM directives WHERE project = ? AND cleared_at IS NULL AND expires_at > ? ORDER BY created_at DESC")
+    .all(project, at) as DirectiveRow[];
+}
+
+export function clearDirective(project: string, id: string): boolean {
+  return db.prepare("UPDATE directives SET cleared_at = ? WHERE id = ? AND project = ? AND cleared_at IS NULL").run(now(), id, project).changes > 0;
+}
+
+export interface AssignmentRow {
+  id: string;
+  project: string;
+  member: string;
+  area: string;
+  note: string | null;
+  created_by: string | null;
+  handoff_id: string | null;
+  created_at: number;
+  cleared_at: number | null;
+}
+
+export function createAssignment(a: { project: string; member: string; area: string; note?: string | null; createdBy?: string | null; handoffId?: string | null }): string {
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO assignments (id, project, member, area, note, created_by, handoff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, a.project, a.member, a.area, a.note ?? null, a.createdBy ?? null, a.handoffId ?? null, now());
+  return id;
+}
+
+export function activeAssignments(project: string): AssignmentRow[] {
+  return db
+    .prepare("SELECT * FROM assignments WHERE project = ? AND cleared_at IS NULL ORDER BY created_at DESC")
+    .all(project) as AssignmentRow[];
+}
+
+export function clearAssignment(project: string, id: string): boolean {
+  return db.prepare("UPDATE assignments SET cleared_at = ? WHERE id = ? AND project = ? AND cleared_at IS NULL").run(now(), id, project).changes > 0;
 }
 
 export function listHandoffs(project: string): any[] {
@@ -1480,13 +1768,15 @@ export function deleteWorkspace(id: string): boolean {
 
 // ── Housekeeping ──────────────────────────────────────────────
 /**
- * Periodic cleanup: drop expired unaccepted invites and spent/expired password
- * resets, and blank the raw text of events older than `retentionDays` (0 = keep
+ * Periodic cleanup: drop expired unaccepted invites, spent/expired password
+ * resets, and file touches older than a week, and blank the raw text of events older than `retentionDays` (0 = keep
  * forever). Distilled state (members, timeline, pending, handoffs, goals) is
  * untouched; the event rows stay so counts and evidence ids remain valid.
  */
-export function pruneStale(retentionDays: number, at = now()): { invites: number; resets: number; events: number } {
+export function pruneStale(retentionDays: number, at = now()): { invites: number; resets: number; events: number; touches: number } {
   const invites = db.prepare("DELETE FROM invites WHERE accepted_at IS NULL AND expires_at < ?").run(at).changes;
+  // File touches only matter within a short window; keep a week for the board.
+  const touches = db.prepare("DELETE FROM file_touches WHERE created_at < ?").run(at - 7 * 24 * 60 * 60 * 1000).changes;
   const resets = db.prepare("DELETE FROM password_resets WHERE used_at IS NOT NULL OR expires_at < ?").run(at).changes;
   let events = 0;
   if (retentionDays > 0) {
@@ -1495,5 +1785,5 @@ export function pruneStale(retentionDays: number, at = now()): { invites: number
       .prepare("UPDATE events SET text = '', meta = NULL WHERE created_at < ? AND (text != '' OR meta IS NOT NULL)")
       .run(cutoff).changes;
   }
-  return { invites, resets, events };
+  return { invites, resets, events, touches };
 }

@@ -269,6 +269,21 @@ export function addMembership(userId: string, workspaceId: string, role: Role): 
   ).run(userId, workspaceId, role, now());
 }
 
+/** Opt in/out of sharing this account's learned traits with agents (its own
+ *  session pack, and handoffs routed to it). Per workspace; off by default. */
+export function setShareTraits(userId: string, workspaceId: string, on: boolean): boolean {
+  return db
+    .prepare("UPDATE memberships SET share_traits = ? WHERE user_id = ? AND workspace_id = ?")
+    .run(on ? 1 : 0, userId, workspaceId).changes > 0;
+}
+
+export function getShareTraits(userId: string, workspaceId: string): boolean {
+  const r = db.prepare("SELECT share_traits FROM memberships WHERE user_id = ? AND workspace_id = ?").get(userId, workspaceId) as
+    | { share_traits: number }
+    | undefined;
+  return !!r?.share_traits;
+}
+
 export function getMembership(userId: string, workspaceId: string): { role: Role; member: string | null } | undefined {
   return db
     .prepare("SELECT role, member FROM memberships WHERE user_id = ? AND workspace_id = ?")

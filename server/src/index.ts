@@ -7,6 +7,9 @@ import { llmConfigured, activeModel } from "./llm/client.js";
 import { api } from "./routes/api.js";
 import { auth } from "./routes/auth.js";
 import { stream } from "./routes/stream.js";
+import { hook } from "./routes/hook.js";
+import { projectsWithOpenCoordination } from "./db.js";
+import { reconcileCollisions } from "./collisions.js";
 import { recoverUndistilled, drainPipeline } from "./pipeline/index.js";
 
 // Backstop: a stray rejected promise is logged, never allowed to kill the
@@ -42,6 +45,7 @@ app.get("/health", (_req, res) => {
 app.use("/api", auth);
 app.use("/api", api);
 app.use("/api", stream);
+app.use("/api", hook);
 
 // Errors from any route (incl. async ones via asyncHandler): log, answer JSON.
 app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -65,13 +69,22 @@ const server = app.listen(env.port, () => {
 const prune = () => {
   try {
     const r = pruneStale(env.eventRetentionDays);
-    if (r.invites || r.resets || r.events) console.log("[prune]", JSON.stringify(r));
+    if (r.invites || r.resets || r.events || r.touches) console.log("[prune]", JSON.stringify(r));
   } catch (e: any) {
     console.error("[prune]", e?.message ?? e);
   }
 };
 prune();
 setInterval(prune, 60 * 60_000).unref();
+
+// Overlaps also end by time (a touch ages out of its window, someone goes away)
+// with no event to notice it, so sweep projects with open coordination handoffs.
+const SWEEP_MS = Math.max(5_000, Number(process.env.REINS_COLLISION_SWEEP_MS ?? 120_000) || 120_000);
+setInterval(() => {
+  for (const p of projectsWithOpenCoordination()) {
+    try { reconcileCollisions(p); } catch (e: any) { console.error("[sweep]", p, e?.message ?? e); }
+  }
+}, SWEEP_MS).unref();
 
 // Graceful shutdown: stop accepting connections and new work, let running
 // distills finish (bounded), then exit. Queued events are recovered on boot.

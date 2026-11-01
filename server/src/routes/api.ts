@@ -22,7 +22,13 @@ import {
   requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin,
   asyncHandler, counterMap, overLimit,
 } from "../middleware.js";
-import { buildScopedContextPack, renderContextPack } from "../context-pack.js";
+import { buildScopedContextPack, renderContextPack, handoffConventions } from "../context-pack.js";
+import { reconcileCollisions } from "../collisions.js";
+import {
+  reopenHandoff, createHandoff, createDirective, clearDirective, activeDirectives,
+  createAssignment, clearAssignment, activeAssignments, resolveMember, listMembers,
+  workspaceHidesBranches, setWorkspaceHidesBranches,
+} from "../db.js";
 
 export const api = Router();
 
@@ -182,18 +188,23 @@ api.post("/pending/:id/done", requireViewer, (req, res) => {
   if (!authorizeProject(req, res, body.data.project)) return;
   if (!setPendingStatus(body.data.project, req.params.id!, "done")) return res.status(404).json({ error: "not found" });
   bus.emitChange({ type: "pending.changed", project: body.data.project });
+  reconcileCollisions(body.data.project); // a blocker waiting on this item can settle now
   res.json({ ok: true });
 });
 
 api.post("/handoffs/:id/:action", requireViewer, (req, res) => {
   const { action } = req.params;
-  if (action !== "ack" && action !== "resolve") return res.status(400).json({ error: "bad action" });
+  if (action !== "ack" && action !== "resolve" && action !== "reopen") return res.status(400).json({ error: "bad action" });
   const body = z.object({ project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  if (!setHandoffStatus(body.data.project, req.params.id!, action === "ack" ? "ack" : "resolved")) {
-    return res.status(404).json({ error: "not found" });
-  }
+  // Reopen applies only to an auto-closed handoff, and stops the same check from
+  // closing it again for the same reason.
+  const ok =
+    action === "reopen"
+      ? reopenHandoff(body.data.project, req.params.id!)
+      : setHandoffStatus(body.data.project, req.params.id!, action === "ack" ? "ack" : "resolved") > 0;
+  if (!ok) return res.status(404).json({ error: action === "reopen" ? "not an auto-closed handoff in this project" : "not found" });
   bus.emitChange({ type: "handoff.changed", project: body.data.project });
   res.json({ ok: true });
 });
@@ -204,7 +215,7 @@ api.post("/handoffs/:id/:action", requireViewer, (req, res) => {
 api.post("/projects/:id/handoffs/resolve", requireViewer, (req, res) => {
   if (!authorizeProject(req, res, req.params.id!)) return;
   const body = z
-    .object({ member: z.string().min(1), kind: z.enum(["mention", "collision", "blocker", "fyi"]).optional() })
+    .object({ member: z.string().min(1), kind: z.enum(["mention", "collision", "blocker", "fyi", "assignment"]).optional() })
     .safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   const resolved = resolveHandoffs(req.params.id!, body.data);
@@ -495,4 +506,110 @@ api.delete("/providers/:id", requireAdmin, (req, res) => {
   if (!deleteProvider(req.params.id!, wsOf(req))) return res.status(404).json({ error: "no such provider" });
   bus.emitChange({ type: "providers.changed" } as any);
   res.json({ ok: true });
+});
+
+// ── Lead actions (owners/admins) ──────────────────────────────
+// Assign an area to one person, and post directives to members or the whole
+// team. Reading them is open to every teammate (they're never hidden from the
+// people they target); writing them needs owner/admin, like a team goal.
+
+/** The lead's display name for directives/assignments: their capture identity,
+ *  or "the lead" for a machine credential. */
+const leadName = (req: Request) => req.member || "the lead";
+
+function requireLead(req: Request, res: Response, project: string): boolean {
+  if (!authorizeProject(req, res, project)) return false;
+  if (!getProject(project)) { res.status(404).json({ error: "not found" }); return false; }
+  if (!isWorkspaceAdmin(req)) { res.status(403).json({ error: "owner or admin role required" }); return false; }
+  return true;
+}
+
+api.get("/projects/:id/lead", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  res.json({
+    directives: activeDirectives(req.params.id!).map((d) => ({
+      id: d.id, text: d.text, targets: JSON.parse(d.targets || "[]"), by: d.created_by, createdAt: d.created_at, expiresAt: d.expires_at,
+    })),
+    assignments: activeAssignments(req.params.id!).map((a) => ({ id: a.id, member: a.member, area: a.area, note: a.note, by: a.created_by, createdAt: a.created_at })),
+  });
+});
+
+const HOUR = 60 * 60 * 1000;
+api.post("/projects/:id/directives", requireViewer, (req, res) => {
+  const project = req.params.id!;
+  if (!requireLead(req, res, project)) return;
+  const body = z
+    .object({
+      text: z.string().trim().min(1).max(500),
+      targets: z.array(z.string().trim().min(1).max(200)).max(50).default([]), // [] = whole team
+      ttlHours: z.number().positive().max(24 * 30).default(24),
+    })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const targets: string[] = [];
+  for (const t of body.data.targets) {
+    const id = resolveMember(project, t);
+    if (!id) return res.status(400).json({ error: `no teammate "${t}" in this project` });
+    if (!targets.includes(id)) targets.push(id);
+  }
+  const id = createDirective({ project, text: body.data.text, targets, createdBy: leadName(req), ttlMs: body.data.ttlHours * HOUR });
+  bus.emitChange({ type: "lead.changed", project });
+  res.json({ ok: true, id });
+});
+
+api.post("/directives/:id/clear", requireViewer, (req, res) => {
+  const body = z.object({ project: z.string() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  if (!requireLead(req, res, body.data.project)) return;
+  if (!clearDirective(body.data.project, req.params.id!)) return res.status(404).json({ error: "not found" });
+  bus.emitChange({ type: "lead.changed", project: body.data.project });
+  res.json({ ok: true });
+});
+
+// Assign an area (a file/dir path or free text) to one teammate: a directed
+// handoff to them plus an advisory claim the pre-edit check warns others about.
+api.post("/projects/:id/assignments", requireViewer, (req, res) => {
+  const project = req.params.id!;
+  if (!requireLead(req, res, project)) return;
+  const body = z
+    .object({ area: z.string().trim().min(1).max(200), member: z.string().trim().min(1).max(200), note: z.string().trim().max(300).optional() })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const member = resolveMember(project, body.data.member);
+  if (!member) return res.status(400).json({ error: `no teammate "${body.data.member}" in this project` });
+  const { area, note } = body.data;
+  const by = leadName(req);
+  const text = `${area} is assigned to you by the lead${by !== "the lead" ? ` (${by})` : ""}${note ? ` — ${note}` : ""}.`;
+  const handoffId = createHandoff({
+    project, toMember: member, fromMember: req.member && listMembers(project).some((m) => m.member === req.member) ? req.member : undefined,
+    kind: "assignment", text, area, conventions: handoffConventions(project, member, `${area} ${note ?? ""}`),
+  });
+  const id = createAssignment({ project, member, area, note: note ?? null, createdBy: by, handoffId });
+  bus.emitChange({ type: "lead.changed", project });
+  bus.emitChange({ type: "handoff.changed", project });
+  res.json({ ok: true, id });
+});
+
+api.post("/assignments/:id/clear", requireViewer, (req, res) => {
+  const body = z.object({ project: z.string() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  if (!requireLead(req, res, body.data.project)) return;
+  const a = activeAssignments(body.data.project).find((x) => x.id === req.params.id);
+  if (!a || !clearAssignment(body.data.project, a.id)) return res.status(404).json({ error: "not found" });
+  if (a.handoff_id) setHandoffStatus(body.data.project, a.handoff_id, "resolved");
+  bus.emitChange({ type: "lead.changed", project: body.data.project });
+  bus.emitChange({ type: "handoff.changed", project: body.data.project });
+  res.json({ ok: true });
+});
+
+// ── Workspace settings (admin) ────────────────────────────────
+api.get("/workspace/settings", requireViewer, (req, res) => {
+  res.json({ hideBranches: workspaceHidesBranches(wsOf(req)) });
+});
+
+api.put("/workspace/settings", requireAdmin, (req, res) => {
+  const body = z.object({ hideBranches: z.boolean() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  setWorkspaceHidesBranches(wsOf(req), body.data.hideBranches);
+  res.json({ ok: true, hideBranches: body.data.hideBranches });
 });

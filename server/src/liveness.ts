@@ -24,7 +24,10 @@ export const STALE_MS = num("REINS_STALE_MS", 20 * MIN);
 // overnight gap doesn't flag someone away, but a multi-day absence does.
 export const AWAY_MS = num("REINS_AWAY_MS", 24 * 60 * MIN);
 
-export type Liveness = "active" | "idle" | "away";
+// A real file touch counts toward a collision (and the pre-edit warning) for this long.
+export const TOUCH_WINDOW_MS = num("REINS_TOUCH_WINDOW_MS", 30 * MIN);
+
+export type Liveness ="active" | "idle" | "away";
 
 export function liveness(lastSeen: number | null | undefined, at: number = Date.now()): Liveness {
   const age = at - (lastSeen ?? 0);

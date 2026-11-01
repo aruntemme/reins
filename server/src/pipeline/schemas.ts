@@ -119,6 +119,7 @@ export const RollupSchema = z.object({
         from: z.string().describe("Teammate name the signal came from, or '' for the team."),
         kind: z.enum(["collision", "blocker", "fyi"]),
         reason: z.string().describe("What they should do / coordinate, one line."),
+        pending_id: z.string().optional().describe("For a blocker that waits on a listed PENDING item: its exact id."),
       })
     )
     .default([])

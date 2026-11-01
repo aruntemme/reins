@@ -6,11 +6,21 @@ export interface Handoff {
   id: string;
   to: string;
   from?: string;
-  kind: "mention" | "collision" | "blocker" | "fyi";
+  kind: "mention" | "collision" | "blocker" | "fyi" | "assignment";
   text: string;
   status: "open" | "ack" | "resolved";
   createdAt: number;
+  updatedAt?: number;
+  area?: string | null;
+  // The recipient's relevant conventions (only when they opted in to sharing).
+  conventions?: string[];
+  // Set when Reins closed it on its own (overlap ended, blocker resolved, work merged).
+  autoClosed?: { code: string; reason: string; event: string | null } | null;
 }
+
+export interface Directive { id: string; text: string; targets: string[]; by: string | null; createdAt: number; expiresAt: number }
+export interface Assignment { id: string; member: string; area: string; note: string | null; by: string | null; createdAt: number }
+export interface Collision { area: string; members: string[]; note: string; computed?: boolean }
 
 export interface Member {
   member: string;
@@ -21,9 +31,15 @@ export interface Member {
   displayStatus: "active" | "blocked" | "idle";
   live: boolean;
   workingOn: string[];
+  // Files they really edited recently (from the hook), newest first.
+  touches: { path: string; at: number }[];
+  // Last reported git state; branch/head are null when the workspace hides them.
+  git: { branch: string | null; head: string | null; dirty: number; at: number } | null;
   lastSeen: number;
   updatedAt: number;
   handoffs: Handoff[];
+  // Recently auto-closed handoffs, shown with a one-click reopen.
+  autoClosed: Handoff[];
   timeline: TimelineEntry[];
 }
 
@@ -48,6 +64,10 @@ export interface MemberDetail extends Member {
   profile: Trait[];
   // Cleared handoffs directed at this member — the resolved history.
   resolvedHandoffs: Handoff[];
+  // Lead directives aimed at them (or the whole team), and areas assigned to them.
+  directives: Directive[];
+  assignments: Assignment[];
+  sharesTraits: boolean;
 }
 export interface PendingItem {
   id: string;
@@ -60,7 +80,7 @@ export interface PendingItem {
 export interface Rollup {
   summary: string;
   alignment: string;
-  collisions: { area: string; members: string[]; note: string }[];
+  collisions: Collision[];
   risks: string[];
   updatedAt: number;
 }
@@ -74,6 +94,11 @@ export interface Project {
   handoffs: Handoff[];
   pending: PendingItem[];
   rollup: Rollup | null;
+  // Live computed overlaps (shared files/branches), also before the first rollup.
+  collisions: Collision[];
+  directives: Directive[];
+  assignments: Assignment[];
+  hideBranches: boolean;
 }
 export interface ProjectSummary {
   id: string;
@@ -169,6 +194,8 @@ export interface Me {
   // The capture identity this account acts as in the active workspace (the hook's
   // --me). Drives which goals/proposals are "yours". Null falls back to email.
   member?: string | null;
+  // Whether this account shares its learned traits with agents (opt-in).
+  shareTraits?: boolean;
 }
 
 export interface Token {
@@ -221,13 +248,27 @@ export const api = {
     j(`/api/pending/${id}/claim`, { method: "POST", body: JSON.stringify({ by, project }) }),
   done: (id: string, project: string) =>
     j(`/api/pending/${id}/done`, { method: "POST", body: JSON.stringify({ project }) }),
-  handoff: (id: string, project: string, action: "ack" | "resolve") =>
+  handoff: (id: string, project: string, action: "ack" | "resolve" | "reopen") =>
     j(`/api/handoffs/${id}/${action}`, { method: "POST", body: JSON.stringify({ project }) }),
   resolveHandoffs: (project: string, member: string, kind?: Handoff["kind"]) =>
     j<{ ok: boolean; resolved: number }>(`/api/projects/${encodeURIComponent(project)}/handoffs/resolve`, {
       method: "POST",
       body: JSON.stringify({ member, ...(kind ? { kind } : {}) }),
     }),
+  // ── Lead actions (owners/admins) ──
+  postDirective: (project: string, d: { text: string; targets: string[]; ttlHours: number }) =>
+    j<{ ok: boolean; id: string }>(`/api/projects/${encodeURIComponent(project)}/directives`, { method: "POST", body: JSON.stringify(d) }),
+  clearDirective: (id: string, project: string) =>
+    j<{ ok: boolean }>(`/api/directives/${encodeURIComponent(id)}/clear`, { method: "POST", body: JSON.stringify({ project }) }),
+  assign: (project: string, a: { area: string; member: string; note?: string }) =>
+    j<{ ok: boolean; id: string }>(`/api/projects/${encodeURIComponent(project)}/assignments`, { method: "POST", body: JSON.stringify(a) }),
+  clearAssignment: (id: string, project: string) =>
+    j<{ ok: boolean }>(`/api/assignments/${encodeURIComponent(id)}/clear`, { method: "POST", body: JSON.stringify({ project }) }),
+  workspaceSettings: () => j<{ hideBranches: boolean }>("/api/workspace/settings"),
+  setWorkspaceSettings: (s: { hideBranches: boolean }) =>
+    j<{ ok: boolean; hideBranches: boolean }>("/api/workspace/settings", { method: "PUT", body: JSON.stringify(s) }),
+  setTraitsSharing: (on: boolean) =>
+    j<{ ok: boolean; shareTraits: boolean }>("/api/auth/traits-sharing", { method: "POST", body: JSON.stringify({ on }) }),
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
   // ── LLM providers (admin-managed; keys encrypted server-side) ──

@@ -25,7 +25,24 @@ const INSTALL_DIR = join(os.homedir(), ".reins");
 const INSTALLED_HOOK = join(INSTALL_DIR, "reins-hook.mjs");
 const INSTALLED_LIB = join(INSTALL_DIR, "lib");
 const INSTALLED_ADAPTERS = join(INSTALL_DIR, "adapters");
-const EVENTS = ["UserPromptSubmit", "Stop"];
+// Which Claude Code hook events we register, per harness. The Claude hook also
+// injects team context (SessionStart, UserPromptSubmit), warns before edits
+// (PreToolUse) and records real file touches (PostToolUse) — both limited to the
+// file-editing tools by matcher. Adapters only capture prompts and turns.
+const EDIT_MATCHER = "Edit|Write|MultiEdit|NotebookEdit";
+const CLAUDE_EVENTS = [
+  { event: "SessionStart" },
+  { event: "UserPromptSubmit" },
+  { event: "PreToolUse", matcher: EDIT_MATCHER },
+  { event: "PostToolUse", matcher: EDIT_MATCHER },
+  { event: "Stop" },
+];
+const ADAPTER_EVENTS = [{ event: "UserPromptSubmit" }, { event: "Stop" }];
+// Every event we have ever registered, so upgrades and uninstall find all of ours.
+const EVENTS = CLAUDE_EVENTS.map((e) => e.event);
+// Backstop only (seconds): the hook itself gives up after ≤ 2s.
+const HOOK_TIMEOUT_S = 10;
+const eventsFor = (agent) => (agent === "claude-code" ? CLAUDE_EVENTS : ADAPTER_EVENTS);
 // Our hook commands all run a file under ~/.reins, so the install path is the
 // reliable marker for "this is ours" when merging (covers both the Claude hook
 // and every adapter, without clobbering foreign hooks).
@@ -150,29 +167,44 @@ function scrubOurHooks(path) {
   if (!settings.hooks) return 0;
   let removed = 0;
   for (const evt of EVENTS) {
-    const list = settings.hooks[evt];
-    if (!Array.isArray(list)) continue;
-    const before = list.length;
-    settings.hooks[evt] = list.filter(
-      (g) => !(g?.hooks || []).some((h) => typeof h.command === "string" && h.command.includes(MARKER))
-    );
-    removed += before - settings.hooks[evt].length;
-    if (settings.hooks[evt].length === 0) delete settings.hooks[evt];
+    const r = withoutOurs(settings.hooks[evt]);
+    removed += r.removed;
+    if (r.list) settings.hooks[evt] = r.list;
+    else delete settings.hooks[evt];
   }
   if (removed) writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
   return removed;
 }
 
+const isOurs = (h) => typeof h?.command === "string" && h.command.includes(MARKER);
+
+/** An event's hook groups with our hook taken out. A group that also holds
+ *  foreign hooks keeps them; a group left empty is dropped. `list` is undefined
+ *  when nothing remains (so the event key can be deleted). */
+function withoutOurs(list) {
+  if (!Array.isArray(list)) return { list, removed: 0 };
+  let removed = 0;
+  const out = [];
+  for (const group of list) {
+    const hooks = Array.isArray(group?.hooks) ? group.hooks : [];
+    const foreign = hooks.filter((h) => !isOurs(h));
+    removed += hooks.length - foreign.length;
+    if (foreign.length === hooks.length) out.push(group);
+    else if (foreign.length) out.push({ ...group, hooks: foreign });
+  }
+  return { list: out.length ? out : undefined, removed };
+}
+
 /** Insert/replace our hook entry in one event array, leaving foreign hooks intact. */
-function mergeEvent(list, command) {
-  const kept = (list || []).filter((group) => {
-    const hooks = group?.hooks || [];
-    return !hooks.some((h) => typeof h.command === "string" && h.command.includes(MARKER));
-  });
+function mergeEvent(list, command, matcher) {
+  const kept = withoutOurs(list).list || [];
   // shell: "bash" pins the interpreter so the POSIX `VAR=val node "…"` form runs
   // identically on Windows (whose default hook shell would otherwise be cmd or
   // PowerShell, which don't understand the env-prefix syntax).
-  kept.push({ hooks: [{ type: "command", command, shell: "bash" }] });
+  kept.push({
+    ...(matcher ? { matcher } : {}),
+    hooks: [{ type: "command", command, shell: "bash", timeout: HOOK_TIMEOUT_S }],
+  });
   return kept;
 }
 
@@ -225,7 +257,19 @@ async function install(args) {
   const settings = readJson(path);
   settings.hooks = settings.hooks || {};
   const command = buildCommand(opts);
-  for (const evt of EVENTS) settings.hooks[evt] = mergeEvent(settings.hooks[evt], command);
+  // Re-running install upgrades in place: ours is replaced (never duplicated) on
+  // every event this harness uses, removed from events it doesn't (e.g. switching
+  // to an adapter), and foreign hooks are left exactly as they were.
+  const wanted = eventsFor(agent);
+  for (const evt of EVENTS) {
+    const spec = wanted.find((w) => w.event === evt);
+    if (spec) settings.hooks[evt] = mergeEvent(settings.hooks[evt], command, spec.matcher);
+    else {
+      const r = withoutOurs(settings.hooks[evt]);
+      if (r.list) settings.hooks[evt] = r.list;
+      else delete settings.hooks[evt];
+    }
+  }
   writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
 
   // For a project install, sweep our hook out of the SHARED ./.claude/settings
@@ -241,7 +285,7 @@ async function install(args) {
   console.log(`  ${c.dim("command")}   ${AGENTS[agent].file}`);
   console.log(`  ${c.dim("settings")}  ${path} ${c.dim(global ? "(global — all repos)" : "(this repo, personal — not committed)")}`);
   if (sweptShared) console.log(`  ${c.yellow("!")} removed a stale Reins hook from the shared settings.json ${c.dim("(commit that change so teammates stop seeing a missing-path error)")}`);
-  console.log(`  ${c.dim("events")}    ${EVENTS.join(", ")}`);
+  console.log(`  ${c.dim("events")}    ${eventsFor(agent).map((e) => e.event).join(", ")}`);
   console.log(`  ${c.dim("as")}        ${opts.me || c.yellow("(auto: git email → $USER)")}`);
   console.log(`  ${c.dim("project")}   ${opts.project || c.yellow("(auto: folder name)")}`);
   console.log(`  ${c.dim("server")}    ${opts.url}`);
@@ -259,7 +303,9 @@ async function install(args) {
     // truth about where to point it.
     console.log(`\n  ${c.b("Last step:")} point ${agent}'s notify/plugin at the command above. See ${c.cyan("hooks/README.md")} for the exact line.`);
   }
-  console.log(`  ${c.dim("Then just work — your prompts and turns flow to the Reins board.")}\n`);
+  console.log(`  ${c.dim(agent === "claude-code"
+    ? "Then just work — your prompts, turns and edits flow to the board, and team context flows back into your agent."
+    : "Then just work — your prompts and turns flow to the Reins board.")}\n`);
 }
 
 function uninstall(args) {

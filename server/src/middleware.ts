@@ -51,6 +51,26 @@ export function requireIngest(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+/**
+ * The capture hook's own endpoints (record a file touch, the pre-edit check, the
+ * injected team pack). The hook holds only the ingest token it was installed
+ * with, so ingest tokens are accepted here — as are access/admin tokens — always
+ * scoped to the token's workspace. Every teammate holding an ingest token is in
+ * that workspace, so this reads nothing across tenants.
+ */
+export function requireHook(req: Request, res: Response, next: NextFunction) {
+  if (!env.authEnabled) {
+    // Back-compat single-key mode, mirroring /ingest.
+    if (env.ingestKey && req.header("x-reins-key") !== env.ingestKey) return res.status(401).json({ error: "bad key" });
+    req.workspaceId = "default";
+    return next();
+  }
+  const info = verifyToken(bearer(req));
+  if (!info) return res.status(401).json({ error: "invalid or missing token" });
+  req.workspaceId = info.workspaceId;
+  next();
+}
+
 /** Dashboard reads/actions. Requires a session cookie or an access/admin token. */
 export function requireViewer(req: Request, res: Response, next: NextFunction) {
   if (!env.authEnabled) {

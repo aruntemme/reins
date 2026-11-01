@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import "./db.js";
 import { env } from "./env.js";
-import { projectSnapshot, projectsList } from "./state.js";
+import { projectSnapshot, projectsList, memberDetail } from "./state.js";
 import { getProject, buildGoalsView, countPendingProposals, buildProfileView, resolveMember } from "./db.js";
 import {
   buildScopedContextPack,
@@ -116,20 +116,27 @@ server.tool(
 
 server.tool(
   "reins_handoffs",
-  "List handoffs / @mentions directed AT a teammate in a project — collisions, blockers, or direct asks they should act on. Check this for yourself before and during work.",
+  "List what is directed AT a teammate in a project: lead directives, areas the lead assigned them, and handoffs / @mentions — collisions, blockers, or direct asks they should act on. Check this for yourself before and during work.",
   { project: z.string(), member: z.string().describe("Whose incoming handoffs to list (you)") },
   async ({ project, member }) => {
-    const s = projectSnapshot(project);
-    const m = s?.members.find((x) => x.member === member || x.displayName === member);
-    if (!m) return text(`No member "${member}" in "${project}".`);
-    const hs = (m as any).handoffs ?? [];
-    return text(
-      hs.length
-        ? hs.map((h: any) => `- [${h.id}] (${h.kind}${h.from ? ` from ${h.from}` : ""}) ${h.text} {${h.status}}`).join("\n")
-        : "No open handoffs for you. Clear."
-    );
+    const id = resolveMember(project, member) || member;
+    const d = memberDetail(project, id);
+    if (!d) return text(`No member "${member}" in "${project}".`);
+    return text(renderForMember(d));
   }
 );
+
+/** Directives, assignments, and open handoffs for one member, as the agent reads them. */
+function renderForMember(d: NonNullable<ReturnType<typeof memberDetail>>): string {
+  const out: string[] = [];
+  for (const x of d.directives) out.push(`- (directive from ${x.by || "the lead"}${x.targets.length ? "" : ", whole team"}) ${x.text}`);
+  for (const a of d.assignments) out.push(`- (assigned to you${a.by ? ` by ${a.by}` : ""}) ${a.area}${a.note ? ` — ${a.note}` : ""}`);
+  for (const h of d.handoffs) {
+    const conv = h.conventions?.length ? ` [their conventions: ${h.conventions.join("; ")}]` : "";
+    out.push(`- [${h.id}] (${h.kind}${h.from ? ` from ${h.from}` : ""}) ${h.text} {${h.status}}${conv}`);
+  }
+  return out.length ? out.join("\n") : "No open handoffs for you. Clear.";
+}
 
 // ── Write tools (close the loop: agents can act, not just read) ──
 server.tool(

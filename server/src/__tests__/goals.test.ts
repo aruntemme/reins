@@ -101,7 +101,7 @@ test("goal lists fed to the distiller skip completed goals and are capped", () =
   assert.equal(db.openGoalItemsForMatch("cap", "asha").length, db.PROMPT_LIST_CAP);
 });
 
-test("pruneStale drops dead invites/resets and blanks old raw event text only", () => {
+test("pruneStale drops dead invites/resets, week-old touches, and blanks old raw event text only", () => {
   db.ensureProject("prune", "Prune", "w1");
   const t = Date.now();
   db.db.prepare("INSERT INTO invites (id, workspace_id, role, code_hash, expires_at, created_at) VALUES ('i-old','w1','member','h-old',?,?)").run(t - 1000, t - 9000);
@@ -112,9 +112,13 @@ test("pruneStale drops dead invites/resets and blanks old raw event text only", 
   const newEv = db.insertEvent({ project: "prune", member: "asha", kind: "progress", text: "fresh raw prompt" });
   db.db.prepare("UPDATE events SET created_at = ? WHERE id = ?").run(t - 40 * 24 * 60 * 60 * 1000, oldEv);
   db.addTimeline("prune", "asha", "did", "distilled summary stays");
+  db.recordTouch("prune", "asha", "src/old.ts");
+  db.recordTouch("prune", "asha", "src/fresh.ts");
+  db.db.prepare("UPDATE file_touches SET created_at = ? WHERE path = 'src/old.ts'").run(t - 8 * 24 * 60 * 60 * 1000);
 
   const r = db.pruneStale(30, t);
-  assert.deepEqual(r, { invites: 1, resets: 1, events: 1 });
+  assert.deepEqual(r, { invites: 1, resets: 1, events: 1, touches: 1 });
+  assert.deepEqual(db.recentTouches("prune", 0).map((x) => x.path), ["src/fresh.ts"], "a week-old touch is pruned, a fresh one kept");
   const text = (id: string) => (db.db.prepare("SELECT text FROM events WHERE id = ?").get(id) as any).text;
   assert.equal(text(oldEv), "", "old raw text blanked");
   assert.equal(text(newEv), "fresh raw prompt");

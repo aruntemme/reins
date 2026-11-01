@@ -5,6 +5,7 @@ import { api, ApiError, errorMessage, timeAgo, type MemberDetail, type Trait, ty
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
 import { TopBar, Avatar, STATUS } from "@/components/ui";
+import { gitLabel } from "@/components/lead";
 
 const TRAIT_GROUPS: { type: TraitType; label: string }[] = [
   { type: "tooling", label: "Tools & tech" },
@@ -81,10 +82,32 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
             <div>
               <h1 className="display mname">{m.displayName}</h1>
               <div className="mono">{m.live ? `active · last signal ${timeAgo(m.lastSeen)}` : `last seen ${timeAgo(m.lastSeen)}`}</div>
+              {gitLabel(m) && <div className="mono gitline">{gitLabel(m)}</div>}
             </div>
           </div>
 
           <div className="doc">
+            {(m.directives.length > 0 || m.assignments.length > 0) && (
+              <Section label="from the lead" sq="blue">
+                <div className="leadlist">
+                  {m.directives.map((d) => (
+                    <div className="litem" key={d.id}>
+                      <div className="ltext">{d.text}</div>
+                      <div className="mono">
+                        {d.targets.length ? (isMe ? "to you" : `to ${m.displayName}`) : "to the whole team"}
+                        {d.by ? ` · from ${d.by}` : ""} · until {new Date(d.expiresAt).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                  {m.assignments.map((a) => (
+                    <div className="litem" key={a.id}>
+                      <div className="ltext"><span className="mono lkind">assigned</span> {a.area}{a.note ? ` — ${a.note}` : ""}</div>
+                      <div className="mono">{a.by ? `by ${a.by} · ` : ""}{timeAgo(a.createdAt)}</div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            )}
             {m.handoffs.length > 0 && (
               <Section label="for you" sq="blocked">
                 <ForYou items={m.handoffs} projectId={id} member={memberId} act={act} />
@@ -100,13 +123,23 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
               </Section>
             )}
 
-            {m.workingOn.length > 0 && (
+            {(m.touches.length > 0 || m.workingOn.length > 0) && (
               <Section label="working on">
-                <div className="chiprow">{m.workingOn.map((w, k) => <span key={k} className="chip">{w}</span>)}</div>
+                <div className="chiprow">
+                  {m.touches.map((t) => <span key={`t${t.path}`} className="chip edited" title={`edited ${timeAgo(t.at)}`}>✎ {t.path}</span>)}
+                  {m.workingOn.map((w, k) => <span key={k} className="chip">{w}</span>)}
+                </div>
               </Section>
             )}
 
             <Section label={isMe ? "your grain" : "grain"} sq="blue">
+              {isMe && (
+                <div className="mono" style={{ marginBottom: 10 }}>
+                  {m.sharesTraits
+                    ? "Shared with your agent at session start and in handoffs routed to you."
+                    : "Private to the board — turn on sharing with your agent in Settings."}
+                </div>
+              )}
               {m.profile.length === 0 ? (
                 <div className="empty">No profile yet — {isMe ? "yours" : "theirs"} builds up from how {isMe ? "you" : "they"} work.</div>
               ) : (
@@ -133,7 +166,7 @@ export default function MemberPage({ params }: { params: Promise<{ id: string; m
 
             {m.resolvedHandoffs.length > 0 && (
               <Section label="handoff history">
-                <HandoffHistory items={m.resolvedHandoffs} />
+                <HandoffHistory items={m.resolvedHandoffs} projectId={id} act={act} />
               </Section>
             )}
 
@@ -172,7 +205,7 @@ function Timeline({ items }: { items: MemberDetail["timeline"] }) {
   );
 }
 
-const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi" };
+const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi", assignment: "assignment" };
 
 // Incoming handoffs ("for you"). Filter by kind, bulk-clear (with confirmation),
 // and shows the top 3 by default — as each is resolved it drops out (the list
@@ -185,7 +218,7 @@ function ForYou({ items, projectId, member, act }: { items: MemberDetail["handof
   const [filter, setFilter] = useState<"all" | HKind>("all");
 
   // Kinds actually present, in a stable order, for the filter chips.
-  const order: HKind[] = ["mention", "blocker", "collision", "fyi"];
+  const order: HKind[] = ["assignment", "mention", "blocker", "collision", "fyi"];
   const present = order.filter((k) => items.some((h) => h.kind === k));
   const active = filter !== "all" && !present.includes(filter) ? "all" : filter; // filter may no longer apply after a clear
   const filtered = active === "all" ? items : items.filter((h) => h.kind === active);
@@ -230,6 +263,7 @@ function ForYou({ items, projectId, member, act }: { items: MemberDetail["handof
               {h.status === "ack" && <span className="mono">ack’d</span>}
             </div>
             <div className="htext">{h.text}</div>
+            {!!h.conventions?.length && <div className="hconv">your conventions: {h.conventions.join("; ")}</div>}
             <div className="hacts">
               {h.status === "open" && (
                 <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "ack"))}>ack</button>
@@ -248,8 +282,9 @@ function ForYou({ items, projectId, member, act }: { items: MemberDetail["handof
   );
 }
 
-// Resolved handoffs — read-only history, collapsed by default behind a count.
-function HandoffHistory({ items }: { items: MemberDetail["resolvedHandoffs"] }) {
+// Resolved handoffs — history, collapsed by default behind a count. One that
+// Reins closed on its own says why and can be reopened in one click.
+function HandoffHistory({ items, projectId, act }: { items: MemberDetail["resolvedHandoffs"]; projectId: string; act: (p: Promise<unknown>) => void }) {
   const [open, setOpen] = useState(false);
   if (!open) {
     return (
@@ -262,10 +297,15 @@ function HandoffHistory({ items }: { items: MemberDetail["resolvedHandoffs"] }) 
     <>
       <div className="hist">
         {items.map((h) => (
-          <div className="histrow" key={h.id}>
+          <div className={`histrow${h.autoClosed ? " auto" : ""}`} key={h.id}>
             <span className="histkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
-            <span className="histtext">{h.text}</span>
-            <span className="mono" style={{ whiteSpace: "nowrap" }}>{timeAgo(h.createdAt)}</span>
+            <span className="histbody">
+              <span className="histtext">{h.text}</span>
+              {h.autoClosed && <span className="histauto" title={h.autoClosed.event ? `event ${h.autoClosed.event}` : undefined}>auto-closed: {h.autoClosed.reason}</span>}
+            </span>
+            {h.autoClosed
+              ? <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "reopen"))}>reopen</button>
+              : <span className="mono" style={{ whiteSpace: "nowrap" }}>{timeAgo(h.createdAt)}</span>}
           </div>
         ))}
       </div>

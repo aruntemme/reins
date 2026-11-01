@@ -10,10 +10,18 @@ import {
   resolvedHandoffs,
   listHandoffs,
   buildProfileView,
+  recentAutoClosed,
+  recentTouches,
+  activeDirectives,
+  activeAssignments,
+  projectHidesBranches,
+  traitsShared,
+  resolveMember,
 } from "./db.js";
-import { STALE_MS } from "./liveness.js";
+import { STALE_MS, TOUCH_WINDOW_MS } from "./liveness.js";
+import { computeOverlaps } from "./collisions.js";
 
-function handoffView(h: any) {
+function handoffView(h: any, hideBranches = false) {
   return {
     id: h.id,
     to: h.to_member,
@@ -22,10 +30,25 @@ function handoffView(h: any) {
     text: h.text,
     status: h.status,
     createdAt: h.created_at,
+    updatedAt: h.updated_at,
+    area: hideBranches && /^branch /.test(h.area ?? "") ? "the same branch" : h.area ?? null,
+    conventions: parseArr(h.conventions),
+    // Set when Reins closed it on its own: why, and the event that triggered it.
+    autoClosed: h.auto_code ? { code: h.auto_code, reason: h.auto_reason || "", event: h.auto_event ?? null } : null,
   };
 }
 
-function parseArr(s: unknown): string[] {
+const directiveView = (d: any) => ({
+  id: d.id, text: d.text, targets: parseArr(d.targets), by: d.created_by, createdAt: d.created_at, expiresAt: d.expires_at,
+});
+const assignmentView = (a: any) => ({
+  id: a.id, member: a.member, area: a.area, note: a.note, by: a.created_by, createdAt: a.created_at,
+});
+
+// Auto-closed handoffs stay visible (with reopen) on the card for this long.
+const AUTO_CLOSED_VISIBLE_MS = 24 * 60 * 60 * 1000;
+
+function parseArr(s: unknown): any[] {
   try {
     const v = JSON.parse(String(s ?? "[]"));
     return Array.isArray(v) ? v : [];
@@ -34,8 +57,14 @@ function parseArr(s: unknown): string[] {
   }
 }
 
-export function memberView(project: string, m: any) {
+export function memberView(project: string, m: any, ctx?: { hideBranches: boolean; touches: { member: string; path: string; created_at: number }[] }) {
   const live = Date.now() - (m.last_seen ?? 0) < STALE_MS;
+  const hide = ctx ? ctx.hideBranches : projectHidesBranches(project);
+  const touches = (ctx?.touches ?? recentTouches(project, Date.now() - TOUCH_WINDOW_MS))
+    .filter((t) => t.member === m.member)
+    .slice(0, 8)
+    .map((t) => ({ path: t.path, at: t.created_at }));
+  const open = incomingHandoffs(project, m.member);
   return {
     member: m.member,
     displayName: m.display_name || m.member,
@@ -48,7 +77,17 @@ export function memberView(project: string, m: any) {
     workingOn: parseArr(m.working_on),
     lastSeen: m.last_seen,
     updatedAt: m.updated_at,
-    handoffs: incomingHandoffs(project, m.member).map(handoffView),
+    // Files they really edited recently (the hook), next to the inferred workingOn.
+    touches,
+    // Branch names are withheld entirely when the workspace hides them.
+    git: m.git_at
+      ? { branch: hide ? null : m.branch ?? null, head: hide ? null : m.head ?? null, dirty: m.dirty_count ?? 0, at: m.git_at }
+      : null,
+    handoffs: open.map((h) => handoffView(h, hide)),
+    // Skip one superseded by a newer open handoff for the same pair and kind.
+    autoClosed: recentAutoClosed(project, m.member, Date.now() - AUTO_CLOSED_VISIBLE_MS)
+      .filter((h) => !open.some((o) => o.kind === h.kind && o.from_member === h.from_member))
+      .map((h) => handoffView(h, hide)),
     timeline: recentTimeline(project, m.member, 8).map((t) => ({
       kind: t.kind,
       summary: t.summary,
@@ -80,15 +119,49 @@ export function memberDetail(project: string, member: string) {
     .filter((p) => p.member === member && p.status !== "done")
     .map((p) => ({ id: p.id, text: p.text, status: p.status, claimedBy: p.claimed_by, createdAt: p.created_at }));
   const profile = buildProfileView(project, member);
-  const resolvedHandoffsList = resolvedHandoffs(project, member).map(handoffView);
-  return { ...base, projectId: project, timeline, pending, profile, resolvedHandoffs: resolvedHandoffsList };
+  const hide = projectHidesBranches(project);
+  const resolvedHandoffsList = resolvedHandoffs(project, member).map((h) => handoffView(h, hide));
+  // Directives aimed at them (or the whole team) and what the lead assigned them.
+  const directives = activeDirectives(project)
+    .map(directiveView)
+    .filter((d) => d.targets.length === 0 || d.targets.includes(member));
+  const assignments = activeAssignments(project).filter((a) => a.member === member).map(assignmentView);
+  return {
+    ...base, projectId: project, timeline, pending, profile, resolvedHandoffs: resolvedHandoffsList,
+    directives, assignments, sharesTraits: traitsShared(project, member),
+  };
 }
 
 export function projectSnapshot(projectId: string) {
   const proj = getProject(projectId);
   if (!proj) return null;
-  const members = listMembers(projectId).map((m) => memberView(projectId, m));
+  const ctx = { hideBranches: projectHidesBranches(projectId), touches: recentTouches(projectId, Date.now() - TOUCH_WINDOW_MS) };
+  const rows = listMembers(projectId);
+  const members = rows.map((m) => memberView(projectId, m, ctx));
+  const nameOf = new Map(rows.map((m: any) => [m.member, m.display_name || m.member]));
   const rollup = getRollup(projectId);
+  // Collisions are live: the rollup's computed ones are replaced by the overlaps
+  // as they stand right now (real edits, git, working_on), so a new collision shows
+  // the moment it happens and an ended one drops off without waiting for a rollup.
+  const overlaps = computeOverlaps(projectId);
+  const live = overlaps.map((o) => ({
+    area: o.area,
+    members: o.members.map((id) => nameOf.get(id) || id),
+    note: o.kind === "file" ? "both are working on this file" : "both are on this branch",
+    computed: true,
+  }));
+  // A stored model collision between the same people as a live overlap is the same
+  // collision (rollups saved before the `computed` tag existed carry no tag at all),
+  // so show the live one only.
+  const pairKey = (ids: string[]) => [...ids].sort().join("\u0000");
+  const liveKeys = new Set(overlaps.map((o) => pairKey(o.members)));
+  const storedCollisions = rollup
+    ? parseArr(rollup.collisions).filter(
+        (c: any) =>
+          !c?.computed &&
+          !liveKeys.has(pairKey((c?.members ?? []).map((n: string) => resolveMember(projectId, n) ?? n)))
+      )
+    : [];
   return {
     id: proj.id,
     name: proj.name,
@@ -96,7 +169,7 @@ export function projectSnapshot(projectId: string) {
     goalSetBy: proj.goal_set_by,
     updatedAt: proj.updated_at,
     members,
-    handoffs: listHandoffs(projectId).map(handoffView),
+    handoffs: listHandoffs(projectId).map((h) => handoffView(h, ctx.hideBranches)),
     pending: listPending(projectId).map((p) => ({
       id: p.id,
       member: p.member,
@@ -109,11 +182,16 @@ export function projectSnapshot(projectId: string) {
       ? {
           summary: rollup.summary,
           alignment: rollup.alignment,
-          collisions: JSON.parse(rollup.collisions || "[]"),
+          collisions: [...storedCollisions, ...live],
           risks: JSON.parse(rollup.risks || "[]"),
           updatedAt: rollup.updated_at,
         }
       : null,
+    // Overlaps also show before the first rollup exists.
+    collisions: live,
+    directives: activeDirectives(projectId).map(directiveView),
+    assignments: activeAssignments(projectId).map(assignmentView),
+    hideBranches: ctx.hideBranches,
   };
 }
 

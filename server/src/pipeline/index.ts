@@ -18,6 +18,7 @@ import { reconcile } from "./reconcile.js";
 import { distillCombined } from "./distill.js";
 import { scheduleRollup } from "./rollup.js";
 import { enqueueDistill, pauseDistill, distillQueueDepth } from "./queue.js";
+import { applyGitMeta } from "../collisions.js";
 
 // "combined" = 1 LLM call/event (default — robust on rate-limited endpoints).
 // "multi"    = staged triage -> extract -> reconcile (3 calls/event).
@@ -66,6 +67,13 @@ export async function ingest(input: IngestInput): Promise<{ eventId: string }> {
   });
 
   bus.emitChange({ type: "ingest", project: input.project, member: input.member });
+  // Git state (branch, dirty files, a detected merge) and the deterministic
+  // collision check run inline — no LLM, so they show on the board right away.
+  try {
+    applyGitMeta(input.project, input.member, input.meta, { eventId, kind: input.kind, text: input.text });
+  } catch (e: any) {
+    console.error("[git]", input.project, input.member, e?.message ?? e);
+  }
   enqueueEvent(eventId, input);
   return { eventId };
 }

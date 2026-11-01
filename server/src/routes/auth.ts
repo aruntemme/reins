@@ -34,6 +34,8 @@ import {
   setMemberRole,
   removeMembership,
   countOwners,
+  setShareTraits,
+  getShareTraits,
 } from "../auth.js";
 import { COOKIE, requireAdmin, requireUser, readCookie, asyncHandler, counterMap, recentHits, addHit, overLimit } from "../middleware.js";
 
@@ -108,6 +110,7 @@ auth.get("/auth/me", (req, res) => {
       role: sess.role,
       admin: roleIsAdmin(sess.role),
       member: sess.member ?? null, // the capture identity this account acts as
+      shareTraits: getShareTraits(sess.userId, sess.workspaceId),
     });
   }
   // Token-based session/bearer (machine credential).
@@ -211,6 +214,16 @@ auth.post("/auth/member", requireUser, (req, res) => {
   }
   setMembershipMember(req.userId!, req.workspaceId!, body.data.member || null);
   res.json({ ok: true, member: effectiveMember(req.userId!, req.workspaceId!) ?? null });
+});
+
+// Opt in/out of putting this account's taste profile to work: its strongest
+// traits in its own agent's session pack, and relevant ones in handoffs routed to
+// it. The member controls it; off by default.
+auth.post("/auth/traits-sharing", requireUser, (req, res) => {
+  const body = z.object({ on: z.boolean() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  setShareTraits(req.userId!, req.workspaceId!, body.data.on);
+  res.json({ ok: true, shareTraits: getShareTraits(req.userId!, req.workspaceId!) });
 });
 
 // Switch the active workspace for a logged-in account.

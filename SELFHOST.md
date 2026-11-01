@@ -250,8 +250,12 @@ Other commands: `npx reins-hook status` and `npx reins-hook uninstall [--global]
 ### What it sends
 
 On each `UserPromptSubmit` (intent) and `Stop` / `SubagentStop` (summary), the hook posts to
-`POST /api/ingest` with `{ project, member, kind, text, source, ... }`. Secrets are redacted and text
-is capped before sending. The identity (`--me`) is what links activity to a teammate account, so keep
+`POST /api/ingest` with `{ project, member, kind, text, source, ... }`, with git state (branch,
+short HEAD, dirty files) in `meta.git`. Secrets are redacted and text is capped before sending.
+After an edit tool runs it posts the repo-relative path to `POST /api/hook/touch`. It also reads:
+`POST /api/hook/pack` (the team pack injected at `SessionStart`, and deltas on `UserPromptSubmit`)
+and `POST /api/hook/check` (the pre-edit collision warning). These hook endpoints accept the same
+ingest token, scoped to its workspace, and answer without calling the model. The identity (`--me`) is what links activity to a teammate account, so keep
 it consistent with how that person signs in.
 
 See [`hooks/README.md`](hooks/README.md) for adapter details for non-Claude agents.
@@ -465,6 +469,8 @@ encrypted in the database. These env vars are the fallback used when no provider
 | `REINS_ROLLUP_MIN_INTERVAL_MS` | `60000` | Minimum time between automatic rollups per project (a trailing run catches up). |
 | `REINS_EVENT_RETENTION_DAYS` | `30` | Raw captured event text older than this is blanked by the hourly cleanup; distilled state is kept. `0` keeps it forever. |
 | `REINS_SHUTDOWN_GRACE_MS` | `8000` | How long `SIGTERM` waits for running distills before exiting. |
+| `REINS_TOUCH_WINDOW_MS` | `1800000` | How long a real file edit counts toward collisions and the pre-edit warning (30 min). |
+| `REINS_COLLISION_SWEEP_MS` | `120000` | How often open collision/blocker handoffs are re-checked, so they auto-close when an overlap ends by time. |
 
 ### Integrations
 

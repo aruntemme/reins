@@ -72,6 +72,18 @@ API keys are encrypted at rest (AES-256-GCM) on the server and never sent back t
 - Handoffs and @mentions, created automatically when two present teammates are working on the same
   file (from each one's distilled working-on list), when one is blocked on another's work, or when
   someone names a teammate.
+- Team state flows back into the agent automatically: the Claude Code hook injects a compact team
+  pack at session start and a short delta on a prompt only when something relevant changed, and
+  warns the model (never blocks) before it edits a file a present teammate just touched or the lead
+  assigned to someone else.
+- Real file touches and git state (branch, dirty files) from the hook, so collisions show the moment
+  they happen; two people on the same work branch count too. A merge (the default branch now holds
+  the member's last commit, or their agent reports a merged PR) settles their blockers. Admins can
+  hide branch names.
+- Collision and blocker handoffs close themselves when the overlap ends, the blocking item is
+  resolved, or the work merged — with the reason recorded and a one-click reopen.
+- Lead actions: owners/admins assign an area to one person from a collision or risk, and post
+  directives to members or the whole team (they expire); both reach agents on their next turn.
 - A live dashboard over SSE, and an MCP server so any agent can read or write the shared context.
 - An autonomous agent that watches up-for-grabs work and claims then resolves it over MCP and HTTP,
   so items get picked up without a person typing.

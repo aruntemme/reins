@@ -107,12 +107,18 @@ export async function runMcp(opts) {
     },
     {
       name: "reins_handoffs",
-      description: "List handoffs / @mentions directed AT a teammate in a project — collisions, blockers, or direct asks they should act on.",
+      description: "List what is directed AT a teammate in a project: lead directives, areas the lead assigned them, and handoffs / @mentions — collisions, blockers, or direct asks they should act on.",
       inputSchema: S({ project: str("Project id"), member: str("Whose incoming handoffs (you)") }, ["project", "member"]),
       run: async ({ project, member }) => {
         const m = await api("GET", `/api/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(member)}`);
-        const hs = m.handoffs || [];
-        return hs.length ? hs.map((h) => `- [${h.id}] (${h.kind}${h.from ? ` from ${h.from}` : ""}) ${h.text} {${h.status}}`).join("\n") : "No open handoffs for you. Clear.";
+        const out = [];
+        for (const d of m.directives || []) out.push(`- (directive from ${d.by || "the lead"}${d.targets?.length ? "" : ", whole team"}) ${d.text}`);
+        for (const a of m.assignments || []) out.push(`- (assigned to you${a.by ? ` by ${a.by}` : ""}) ${a.area}${a.note ? ` — ${a.note}` : ""}`);
+        for (const h of m.handoffs || []) {
+          const conv = h.conventions?.length ? ` [their conventions: ${h.conventions.join("; ")}]` : "";
+          out.push(`- [${h.id}] (${h.kind}${h.from ? ` from ${h.from}` : ""}) ${h.text} {${h.status}}${conv}`);
+        }
+        return out.length ? out.join("\n") : "No open handoffs for you. Clear.";
       },
     },
     {

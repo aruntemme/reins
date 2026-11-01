@@ -24,8 +24,11 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Reins: live shared context for AI-agent teams",
-  description: "The context your team actually shares. Captured from every agent, distilled live.",
+  // Resolves the relative OG image and canonical URLs to absolute ones.
+  metadataBase: new URL("https://reinshq.vercel.app"),
+  title: "Reins: live intent for teams of humans and agents",
+  description:
+    "Reins turns what every teammate's coding agent is doing into live team intent, and feeds it back into every agent before work collides.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
