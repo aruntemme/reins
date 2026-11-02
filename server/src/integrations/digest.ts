@@ -31,11 +31,16 @@ function collisionLines(rollup: DigestRollup): string[] {
   });
 }
 
+// Slack mrkdwn treats <…> as links/mentions (<!channel>, <@U123>) and & as an
+// entity start, so model-written text must be escaped before it goes in.
+const mrkdwn = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 // Slack Block Kit payload. We use blocks for structure but also keep a top-level
 // "text" as the notification fallback (required for accessibility/notifications).
 export function formatSlack(project: string, name: string, rollup: DigestRollup): Record<string, unknown> {
-  const risks = topRisks(rollup);
-  const collisions = collisionLines(rollup);
+  const risks = topRisks(rollup).map(mrkdwn);
+  const collisions = collisionLines(rollup).map(mrkdwn);
+  const summary = mrkdwn(rollup.summary || "(no summary)");
 
   const blocks: Array<Record<string, unknown>> = [
     {
@@ -44,11 +49,11 @@ export function formatSlack(project: string, name: string, rollup: DigestRollup)
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*Summary*\n${rollup.summary || "(no summary)"}` },
+      text: { type: "mrkdwn", text: `*Summary*\n${summary}` },
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*Goal alignment*\n${rollup.alignment || "(not assessed)"}` },
+      text: { type: "mrkdwn", text: `*Goal alignment*\n${mrkdwn(rollup.alignment || "(not assessed)")}` },
     },
   ];
 
@@ -66,7 +71,7 @@ export function formatSlack(project: string, name: string, rollup: DigestRollup)
   }
 
   return {
-    text: `Reins digest for ${name || project}: ${rollup.summary || "(no summary)"}`,
+    text: `Reins digest for ${mrkdwn(name || project)}: ${summary}`,
     blocks,
   };
 }

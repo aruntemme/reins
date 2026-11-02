@@ -102,3 +102,16 @@ test("postDigest delivers a real POST to a Slack webhook receiver", async () => 
     discord.server.close();
   }
 });
+
+test("formatSlack escapes <, > and & so model text can't ping or link", () => {
+  const payload = formatSlack("p", "P & Q", {
+    summary: "ping <!channel> & see <https://evil.example|docs>",
+    alignment: "a > b",
+    risks: ["<@U123> owns it"],
+    collisions: [],
+  });
+  const json = JSON.stringify(payload);
+  assert.ok(!json.includes("<!channel>") && !json.includes("<@U123>") && !json.includes("<https://"), "no raw control sequences");
+  assert.ok(json.includes("&lt;!channel&gt; &amp; see"), "escaped summary");
+  assert.ok(json.includes("a &gt; b"), "escaped alignment");
+});

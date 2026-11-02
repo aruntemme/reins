@@ -59,6 +59,8 @@ if (isMain) {
   const props = payload.properties || payload;
   sendEvent({
     url: process.env.REINS_URL,
+    // Git state (branch, dirty files) rides along from the repo the agent runs in.
+    cwd: (payload && payload.cwd) || process.cwd(),
     key: process.env.REINS_KEY,
     project: resolveProject(payload),
     member: process.env.REINS_MEMBER || resolveMember(),

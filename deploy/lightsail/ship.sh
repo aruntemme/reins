@@ -92,9 +92,9 @@ else
 fi
 
 echo
-echo "✓ deployed. Backend: http://${IP}:4319"
-echo "  • Set REINS_URL=http://${IP}:4319 in your Vercel project, redeploy the dashboard."
-echo "  • Onboard teammates: npx reins-hook install --url http://${IP}:4319 --me <name> --token <ingest-token>"
+echo "✓ deployed. Backend: https://<your-domain> (Caddy on ${IP} → localhost:4319)"
+echo "  • Set REINS_URL=https://<your-domain> in your Vercel project, redeploy the dashboard."
+echo "  • Onboard teammates: npx reins-hook install --url https://<your-domain> --me <name> --token <ingest-token>"
 echo "  • Re-deploy after changes: ./deploy/lightsail/ship.sh ${IP}
   • Pre-deploy DB backups: on box /data/backups/ and off box deploy/lightsail/backups/ (newest ${KEEP} kept)
   • Restore a backup: scp it to the box, then

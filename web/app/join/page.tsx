@@ -37,7 +37,12 @@ function JoinFlow() {
         if (cancelled) return;
         if (me && me.user) {
           setState({ phase: "joining", workspace: preview.workspace, role: preview.role });
-          await api.joinWorkspace(code);
+          const joined = await api.joinWorkspace(code);
+          // Joining only adds the membership; point the session at the new
+          // workspace so the dashboard opens there, not in the previous one. The
+          // join already succeeded (and consumed the invite), so a failed switch
+          // must not report the invite as broken: the account menu can switch.
+          await api.switchWorkspace(joined.workspace.id).catch(() => {});
           if (!cancelled) router.replace("/dashboard");
         } else {
           setState({ phase: "needAuth", workspace: preview.workspace, role: preview.role, code });

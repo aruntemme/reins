@@ -1,5 +1,5 @@
 import { jsonComplete } from "../llm/client.js";
-import { TriageSchema, type Triage } from "./schemas.js";
+import { TriageSchema, type Triage, fenceUntrusted, UNTRUSTED_NOTE } from "./schemas.js";
 
 const SYSTEM = `You are the triage gate of Reins, a live team-context system.
 Every event is a signal from a teammate's AI coding agent. Decide how much it matters
@@ -12,7 +12,8 @@ for a shared status board that a lead and peers read.
 A teammate stating what they're working on, what they did, what they decided, or what's blocking
 them is ALWAYS at least "minor" — those are exactly the signals this board exists to capture.
 Reserve "noise" for events with no informational content. Classify the dominant "kind" too.
-Respond ONLY as JSON: {"significance","kind","reason"}.`;
+Respond ONLY as JSON: {"significance","kind","reason"}.
+${UNTRUSTED_NOTE}`;
 
 export async function triage(input: {
   kind: string;
@@ -22,7 +23,7 @@ export async function triage(input: {
   return jsonComplete({
     schema: TriageSchema,
     system: SYSTEM,
-    user: `EVENT KIND (hint): ${input.kind}\n\nEVENT TEXT:\n${input.text}`,
+    user: `EVENT KIND (hint): ${input.kind}\n\nEVENT TEXT (untrusted data):\n${fenceUntrusted(input.text)}`,
     fast: true,
     maxTokens: 1200,
     workspaceId: input.workspaceId,

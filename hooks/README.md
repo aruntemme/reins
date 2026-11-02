@@ -1,11 +1,24 @@
 # Reins capture hook (Claude Code)
 
-The hook streams two signals to the Reins server:
+The hook streams signals to the Reins server and feeds team state back into your agent:
 
-- **`UserPromptSubmit`** → `intent` (what you just asked your agent to do — the gold signal)
+- **`SessionStart`** → injects a compact team pack (≤ ~300 tokens): directives and assignments
+  from the lead, handoffs for you, teammates on your files, the project goal, your goals, and —
+  only if you opted in under Settings — your strongest working conventions.
+- **`UserPromptSubmit`** → `intent` (what you just asked your agent to do — the gold signal), plus
+  a short context delta only when something relevant changed since this session last looked.
+- **`PreToolUse`** (Edit / Write / MultiEdit / NotebookEdit) → a non-blocking warning to the model
+  when a present teammate edited the same file recently or it's assigned to someone else.
+- **`PostToolUse`** (same tools) → records the touched path, relative to the git repo root.
 - **`Stop` / `SubagentStop`** → `summary` (what the agent reported back)
 
-It never blocks your session: 1.5s timeout, always exits 0.
+Every event also carries git state (branch, short HEAD, dirty files) from the repo.
+
+It never blocks or slows your session: writes go out from a detached child; reads the agent waits
+on give up after 800ms (context) or 300ms (pre-edit check) and print nothing; it always exits 0.
+Set `REINS_CONTEXT=off` to keep capture but turn off injection and the pre-edit check.
+Re-running `npx reins-hook install` upgrades an existing install in place (adds the new events,
+never duplicates ours, leaves other hooks alone).
 
 Cross-platform: the installed command quotes the script path with forward slashes
 and pins `shell: bash`, so it works on Windows (Git Bash) as well as macOS/Linux.

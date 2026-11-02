@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
-import { ingest } from "../pipeline/index.js";
+import { ingest, accepting } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
-import { setGoal, setPendingStatus, getProject, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
+import { setGoal, setPendingStatus, claimPending, getProject, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
   addGoalItem, updateGoalItem, deleteGoalItem, goalItemGoal, ensureMember,
@@ -16,9 +16,19 @@ import { llmConfigured, activeModel } from "../llm/client.js";
 import {
   listProviders, createProvider, updateProvider, deleteProvider, setActiveProvider,
 } from "../db.js";
-import { env } from "../env.js";
+import { env, envLlmConfigured } from "../env.js";
 import type { Request, Response } from "express";
-import { requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin } from "../middleware.js";
+import {
+  requireIngest, requireViewer, requireAdmin, authorizeProject, isWorkspaceAdmin,
+  asyncHandler, counterMap, overLimit,
+} from "../middleware.js";
+import { buildScopedContextPack, renderContextPack, handoffConventions } from "../context-pack.js";
+import { reconcileCollisions } from "../collisions.js";
+import {
+  reopenHandoff, createHandoff, createDirective, clearDirective, activeDirectives,
+  createAssignment, clearAssignment, activeAssignments, resolveMember, listMembers,
+  workspaceHidesBranches, setWorkspaceHidesBranches,
+} from "../db.js";
 
 export const api = Router();
 
@@ -34,16 +44,38 @@ const IngestBody = z.object({
   source: z.string().max(40).optional(), // capturing agent harness (default claude-code)
 });
 
-api.post("/ingest", requireIngest, async (req, res) => {
+// Per-workspace rate limits (fixed windows, in memory). Generous for real use —
+// a busy hook sends a couple of events per prompt — but they bound what one
+// tenant (or a leaked token) can make the server store and pay the LLM for.
+const INGEST_MAX_PER_MIN = 300;
+const ROLLUP_MAX_PER_MIN = 6;
+const ingestHits = counterMap();
+const rollupHits = counterMap();
+
+api.post("/ingest", requireIngest, asyncHandler(async (req, res) => {
   // Back-compat single-key mode (only when full auth is off).
   if (!env.authEnabled && env.ingestKey && req.header("x-reins-key") !== env.ingestKey) {
     return res.status(401).json({ error: "bad key" });
   }
+  if (!accepting()) return res.status(503).json({ error: "server is shutting down, retry shortly" });
   const parsed = IngestBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues });
-  const { eventId } = await ingest({ ...parsed.data, workspaceId: req.workspaceId });
+  // Project ids are global and the hook defaults to the folder name, so another
+  // workspace may already own this id. Never write into it: refuse, and say how
+  // to fix it, instead of silently landing events on someone else's board.
+  const ws = req.workspaceId ?? "default";
+  const owner = projectWorkspace(parsed.data.project);
+  if (env.authEnabled && owner && owner !== ws) {
+    return res.status(403).json({
+      error: `project "${parsed.data.project}" belongs to another workspace — use a different project id (reins-hook install --project <id>)`,
+    });
+  }
+  if (overLimit(ingestHits, ws, INGEST_MAX_PER_MIN, 60_000)) {
+    return res.status(429).json({ error: "ingest rate limit reached for this workspace, slow down" });
+  }
+  const { eventId } = await ingest({ ...parsed.data, workspaceId: ws });
   res.json({ ok: true, eventId });
-});
+}));
 
 // ── Read ──────────────────────────────────────────────────────
 api.get("/projects", requireViewer, (req, res) => {
@@ -56,6 +88,24 @@ api.get("/projects/:id", requireViewer, (req, res) => {
   const snap = projectSnapshot(req.params.id!);
   if (!snap) return res.status(404).json({ error: "not found" });
   res.json(snap);
+});
+
+// Scoped, rendered shared context — the same text the local MCP's reins_context
+// returns (goal, status, collisions, risks, team, pending), optionally focused on
+// a member, ranked by a task query, and trimmed to a token budget. Lets the HTTP
+// MCP give remote agents the same scoping without duplicating the logic.
+api.get("/projects/:id/context", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
+  const q = z
+    .object({
+      member: z.string().trim().max(120).optional(),
+      query: z.string().trim().max(500).optional(),
+      limit: z.coerce.number().int().positive().max(100_000).optional(),
+    })
+    .safeParse(req.query);
+  if (!q.success) return res.status(400).json({ error: q.error.issues });
+  res.json({ context: renderContextPack(buildScopedContextPack(req.params.id!, q.data)) });
 });
 
 api.get("/projects/:id/members/:member", requireViewer, (req, res) => {
@@ -123,7 +173,11 @@ api.post("/pending/:id/claim", requireViewer, (req, res) => {
   const body = z.object({ by: z.string(), project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  setPendingStatus(req.params.id!, "claimed", body.data.by);
+  // Atomic: only an OPEN item in this project can be claimed, so two claimers
+  // racing (or an id from another project) can't both "win".
+  if (!claimPending(body.data.project, req.params.id!, body.data.by)) {
+    return res.status(409).json({ error: "that item is no longer open (already claimed, done, or not in this project)" });
+  }
   bus.emitChange({ type: "pending.changed", project: body.data.project });
   res.json({ ok: true });
 });
@@ -132,18 +186,25 @@ api.post("/pending/:id/done", requireViewer, (req, res) => {
   const body = z.object({ project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  setPendingStatus(req.params.id!, "done");
+  if (!setPendingStatus(body.data.project, req.params.id!, "done")) return res.status(404).json({ error: "not found" });
   bus.emitChange({ type: "pending.changed", project: body.data.project });
+  reconcileCollisions(body.data.project); // a blocker waiting on this item can settle now
   res.json({ ok: true });
 });
 
 api.post("/handoffs/:id/:action", requireViewer, (req, res) => {
   const { action } = req.params;
-  if (action !== "ack" && action !== "resolve") return res.status(400).json({ error: "bad action" });
+  if (action !== "ack" && action !== "resolve" && action !== "reopen") return res.status(400).json({ error: "bad action" });
   const body = z.object({ project: z.string() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   if (!authorizeProject(req, res, body.data.project)) return;
-  setHandoffStatus(req.params.id!, action === "ack" ? "ack" : "resolved");
+  // Reopen applies only to an auto-closed handoff, and stops the same check from
+  // closing it again for the same reason.
+  const ok =
+    action === "reopen"
+      ? reopenHandoff(body.data.project, req.params.id!)
+      : setHandoffStatus(body.data.project, req.params.id!, action === "ack" ? "ack" : "resolved") > 0;
+  if (!ok) return res.status(404).json({ error: action === "reopen" ? "not an auto-closed handoff in this project" : "not found" });
   bus.emitChange({ type: "handoff.changed", project: body.data.project });
   res.json({ ok: true });
 });
@@ -154,7 +215,7 @@ api.post("/handoffs/:id/:action", requireViewer, (req, res) => {
 api.post("/projects/:id/handoffs/resolve", requireViewer, (req, res) => {
   if (!authorizeProject(req, res, req.params.id!)) return;
   const body = z
-    .object({ member: z.string().min(1), kind: z.enum(["mention", "collision", "blocker", "fyi"]).optional() })
+    .object({ member: z.string().min(1), kind: z.enum(["mention", "collision", "blocker", "fyi", "assignment"]).optional() })
     .safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
   const resolved = resolveHandoffs(req.params.id!, body.data);
@@ -162,12 +223,21 @@ api.post("/projects/:id/handoffs/resolve", requireViewer, (req, res) => {
   res.json({ ok: true, resolved });
 });
 
-api.post("/projects/:id/rollup", requireViewer, async (req, res) => {
+api.post("/projects/:id/rollup", requireViewer, asyncHandler(async (req, res) => {
   if (!authorizeProject(req, res, req.params.id!)) return;
   if (!getProject(req.params.id!)) return res.status(404).json({ error: "not found" });
-  await runRollup(req.params.id!);
+  if (overLimit(rollupHits, req.workspaceId ?? "default", ROLLUP_MAX_PER_MIN, 60_000)) {
+    return res.status(429).json({ error: "too many resyncs, wait a minute and try again" });
+  }
+  try {
+    await runRollup(req.params.id!);
+  } catch (e: any) {
+    // A bad provider key / unreachable model is the caller's to fix — report it.
+    console.error("[rollup]", req.params.id, e?.message ?? e);
+    return res.status(502).json({ error: `rollup failed: ${e?.message ?? "model provider error"}` });
+  }
   res.json({ ok: true, rollup: projectSnapshot(req.params.id!)?.rollup ?? null });
-});
+}));
 
 // ── Short-term goals (declared layer beneath the project goal) ────
 // Common (team) goals are admin-authored; individual goals are open to any
@@ -329,12 +399,13 @@ api.post("/goal-proposals/:id/dismiss", requireViewer, (req, res) => {
 // ── Taste profile (member "grain") ────────────────────────────
 // The profile (an abstraction) is readable by any teammate via memberDetail.
 // Editing/removing a trait is restricted to its owner — a person curates their
-// own grain. A token session (an agent acting as that member) is allowed through,
-// mirroring goal access.
+// own grain — so it needs that person's signed-in account (identities are unique
+// per workspace). A token carries no identity, so it can't edit anyone's traits
+// (no agent tool writes traits).
 function accessTrait(req: Request, res: Response, trait: TraitRow | undefined): TraitRow | null {
   if (!trait) { res.status(404).json({ error: "not found" }); return null; }
   if (!authorizeProject(req, res, trait.project)) return null;
-  if (req.userId && req.member !== trait.member) {
+  if (env.authEnabled && (!req.userId || req.member !== trait.member)) {
     res.status(403).json({ error: "this trait belongs to another teammate" });
     return null;
   }
@@ -401,6 +472,9 @@ api.get("/providers", requireAdmin, (req, res) => {
   res.json({
     providers: listProviders(ws).map(publicProvider),
     active: activeModel(ws),
+    // Whether the operator's env fallback (REINS_LLM_*) has a key, so the UI can
+    // tell "no providers, instance default in use" from "nothing configured".
+    instanceDefault: envLlmConfigured,
   });
 });
 
@@ -432,4 +506,110 @@ api.delete("/providers/:id", requireAdmin, (req, res) => {
   if (!deleteProvider(req.params.id!, wsOf(req))) return res.status(404).json({ error: "no such provider" });
   bus.emitChange({ type: "providers.changed" } as any);
   res.json({ ok: true });
+});
+
+// ── Lead actions (owners/admins) ──────────────────────────────
+// Assign an area to one person, and post directives to members or the whole
+// team. Reading them is open to every teammate (they're never hidden from the
+// people they target); writing them needs owner/admin, like a team goal.
+
+/** The lead's display name for directives/assignments: their capture identity,
+ *  or "the lead" for a machine credential. */
+const leadName = (req: Request) => req.member || "the lead";
+
+function requireLead(req: Request, res: Response, project: string): boolean {
+  if (!authorizeProject(req, res, project)) return false;
+  if (!getProject(project)) { res.status(404).json({ error: "not found" }); return false; }
+  if (!isWorkspaceAdmin(req)) { res.status(403).json({ error: "owner or admin role required" }); return false; }
+  return true;
+}
+
+api.get("/projects/:id/lead", requireViewer, (req, res) => {
+  if (!authorizeProject(req, res, req.params.id!)) return;
+  res.json({
+    directives: activeDirectives(req.params.id!).map((d) => ({
+      id: d.id, text: d.text, targets: JSON.parse(d.targets || "[]"), by: d.created_by, createdAt: d.created_at, expiresAt: d.expires_at,
+    })),
+    assignments: activeAssignments(req.params.id!).map((a) => ({ id: a.id, member: a.member, area: a.area, note: a.note, by: a.created_by, createdAt: a.created_at })),
+  });
+});
+
+const HOUR = 60 * 60 * 1000;
+api.post("/projects/:id/directives", requireViewer, (req, res) => {
+  const project = req.params.id!;
+  if (!requireLead(req, res, project)) return;
+  const body = z
+    .object({
+      text: z.string().trim().min(1).max(500),
+      targets: z.array(z.string().trim().min(1).max(200)).max(50).default([]), // [] = whole team
+      ttlHours: z.number().positive().max(24 * 30).default(24),
+    })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const targets: string[] = [];
+  for (const t of body.data.targets) {
+    const id = resolveMember(project, t);
+    if (!id) return res.status(400).json({ error: `no teammate "${t}" in this project` });
+    if (!targets.includes(id)) targets.push(id);
+  }
+  const id = createDirective({ project, text: body.data.text, targets, createdBy: leadName(req), ttlMs: body.data.ttlHours * HOUR });
+  bus.emitChange({ type: "lead.changed", project });
+  res.json({ ok: true, id });
+});
+
+api.post("/directives/:id/clear", requireViewer, (req, res) => {
+  const body = z.object({ project: z.string() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  if (!requireLead(req, res, body.data.project)) return;
+  if (!clearDirective(body.data.project, req.params.id!)) return res.status(404).json({ error: "not found" });
+  bus.emitChange({ type: "lead.changed", project: body.data.project });
+  res.json({ ok: true });
+});
+
+// Assign an area (a file/dir path or free text) to one teammate: a directed
+// handoff to them plus an advisory claim the pre-edit check warns others about.
+api.post("/projects/:id/assignments", requireViewer, (req, res) => {
+  const project = req.params.id!;
+  if (!requireLead(req, res, project)) return;
+  const body = z
+    .object({ area: z.string().trim().min(1).max(200), member: z.string().trim().min(1).max(200), note: z.string().trim().max(300).optional() })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const member = resolveMember(project, body.data.member);
+  if (!member) return res.status(400).json({ error: `no teammate "${body.data.member}" in this project` });
+  const { area, note } = body.data;
+  const by = leadName(req);
+  const text = `${area} is assigned to you by the lead${by !== "the lead" ? ` (${by})` : ""}${note ? ` — ${note}` : ""}.`;
+  const handoffId = createHandoff({
+    project, toMember: member, fromMember: req.member && listMembers(project).some((m) => m.member === req.member) ? req.member : undefined,
+    kind: "assignment", text, area, conventions: handoffConventions(project, member, `${area} ${note ?? ""}`),
+  });
+  const id = createAssignment({ project, member, area, note: note ?? null, createdBy: by, handoffId });
+  bus.emitChange({ type: "lead.changed", project });
+  bus.emitChange({ type: "handoff.changed", project });
+  res.json({ ok: true, id });
+});
+
+api.post("/assignments/:id/clear", requireViewer, (req, res) => {
+  const body = z.object({ project: z.string() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  if (!requireLead(req, res, body.data.project)) return;
+  const a = activeAssignments(body.data.project).find((x) => x.id === req.params.id);
+  if (!a || !clearAssignment(body.data.project, a.id)) return res.status(404).json({ error: "not found" });
+  if (a.handoff_id) setHandoffStatus(body.data.project, a.handoff_id, "resolved");
+  bus.emitChange({ type: "lead.changed", project: body.data.project });
+  bus.emitChange({ type: "handoff.changed", project: body.data.project });
+  res.json({ ok: true });
+});
+
+// ── Workspace settings (admin) ────────────────────────────────
+api.get("/workspace/settings", requireViewer, (req, res) => {
+  res.json({ hideBranches: workspaceHidesBranches(wsOf(req)) });
+});
+
+api.put("/workspace/settings", requireAdmin, (req, res) => {
+  const body = z.object({ hideBranches: z.boolean() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  setWorkspaceHidesBranches(wsOf(req), body.data.hideBranches);
+  res.json({ ok: true, hideBranches: body.data.hideBranches });
 });

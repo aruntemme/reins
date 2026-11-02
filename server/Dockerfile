@@ -19,4 +19,11 @@ ENV PORT=4319
 VOLUME ["/data"]
 EXPOSE 4319
 
-CMD ["npx", "tsx", "src/index.ts"]
+# Liveness for Docker/compose: /health also checks the database is reachable.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://localhost:'+(process.env.PORT||4319)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Exec form with node itself as PID 1 (not `npx` → a shell → node), so
+# SIGTERM from `docker stop` reaches the server and it shuts down gracefully
+# (finishes in-flight distills; queued events are recovered on the next boot).
+CMD ["node", "--import", "tsx", "src/index.ts"]

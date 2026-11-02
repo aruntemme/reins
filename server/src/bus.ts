@@ -9,7 +9,9 @@ export type ReinsEvent =
   | { type: "goal.updated"; project: string }
   | { type: "goals.changed"; project: string }
   | { type: "profile.changed"; project: string; member: string }
-  | { type: "ingest"; project: string; member: string };
+  | { type: "ingest"; project: string; member: string }
+  | { type: "touch"; project: string; member: string }
+  | { type: "lead.changed"; project: string };
 
 class Bus extends EventEmitter {
   emitChange(e: ReinsEvent) {

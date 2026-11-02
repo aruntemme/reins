@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import { db, now } from "./db.js";
 import { env } from "./env.js";
 
@@ -86,6 +87,7 @@ export function mintToken(workspaceId: string, kind: TokenKind, label?: string):
 }
 
 export interface TokenInfo {
+  id: string;
   workspaceId: string;
   kind: TokenKind;
 }
@@ -97,7 +99,7 @@ export function verifyToken(token: string | undefined): TokenInfo | null {
     .get(sha256(token)) as any;
   if (!row) return null;
   db.prepare("UPDATE tokens SET last_used = ? WHERE id = ?").run(now(), row.id);
-  return { workspaceId: row.workspace_id, kind: row.kind };
+  return { id: row.id, workspaceId: row.workspace_id, kind: row.kind };
 }
 
 export function listTokens(workspaceId: string): any[] {
@@ -106,8 +108,12 @@ export function listTokens(workspaceId: string): any[] {
     .all(workspaceId);
 }
 
-export function revokeToken(id: string): boolean {
-  const r = db.prepare("UPDATE tokens SET revoked = 1 WHERE id = ?").run(id);
+/** Revoke a token. With `workspaceId` (every dashboard/API caller) only that
+ *  workspace's token can match; the operator's admin CLI omits it. */
+export function revokeToken(id: string, workspaceId?: string): boolean {
+  const r = workspaceId
+    ? db.prepare("UPDATE tokens SET revoked = 1 WHERE id = ? AND workspace_id = ?").run(id, workspaceId)
+    : db.prepare("UPDATE tokens SET revoked = 1 WHERE id = ?").run(id);
   return r.changes > 0;
 }
 
@@ -115,15 +121,22 @@ export function revokeToken(id: string): boolean {
 const b64 = (s: string) => Buffer.from(s).toString("base64url");
 const unb64 = (s: string) => Buffer.from(s, "base64url").toString();
 
-export function signSession(workspaceId: string, kind: TokenKind = "access"): string {
-  const payload = b64(JSON.stringify({ ws: workspaceId, k: kind, iat: now() }));
+// Sessions are stateless, so the server enforces the same lifetime as the
+// cookie's Max-Age: a copied cookie can't outlive it.
+export const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Sign a session exchanged for a token. `tokenId` binds it to that token, so
+ *  revoking the token ends the session too. */
+export function signSession(workspaceId: string, kind: TokenKind, tokenId: string): string {
+  const payload = b64(JSON.stringify({ ws: workspaceId, k: kind, tid: tokenId, iat: now() }));
   const sig = createHmac("sha256", SECRET).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
 
 /** Sign a session for a logged-in user with an active workspace. */
 export function signUserSession(userId: string, workspaceId: string, role: Role): string {
-  const payload = b64(JSON.stringify({ uid: userId, ws: workspaceId, k: "user", role, iat: now() }));
+  const ep = getSessionEpoch(userId);
+  const payload = b64(JSON.stringify({ uid: userId, ws: workspaceId, k: "user", role, ep, iat: now() }));
   const sig = createHmac("sha256", SECRET).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
@@ -147,15 +160,25 @@ export function verifySession(cookie: string | undefined): SessionInfo | null {
   try {
     const data = JSON.parse(unb64(payload));
     if (!data.ws || !getWorkspace(data.ws)) return null;
+    if (typeof data.iat !== "number" || now() - data.iat > SESSION_MAX_AGE_MS) return null;
     // User session: membership is authoritative, so a removed/role-changed member
-    // loses access (or gets the new role) without needing to re-login.
+    // loses access (or gets the new role) without needing to re-login. A password
+    // reset bumps the epoch, ending every session signed before it.
     if (data.uid) {
       const m = getMembership(data.uid, data.ws);
       if (!m) return null;
+      if ((data.ep ?? 0) !== getSessionEpoch(data.uid)) return null;
       const member = m.member ?? getUserById(data.uid)?.email;
       return { workspaceId: data.ws, kind: "user", userId: data.uid, role: m.role, member };
     }
-    return { workspaceId: data.ws, kind: (data.k as TokenKind) ?? "access" };
+    // Token session: valid only while the token it was exchanged for is live and
+    // still belongs to this workspace (sessions minted before tid existed are refused).
+    if (!data.tid) return null;
+    const tok = db
+      .prepare("SELECT kind FROM tokens WHERE id = ? AND workspace_id = ? AND revoked = 0")
+      .get(data.tid, data.ws) as { kind: TokenKind } | undefined;
+    if (!tok) return null;
+    return { workspaceId: data.ws, kind: tok.kind };
   } catch {
     return null;
   }
@@ -173,6 +196,19 @@ export function hashPassword(plain: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(plain, salt, 64).toString("hex");
   return `scrypt$${salt}$${hash}`;
+}
+
+const scryptAsync = promisify(scrypt) as (pw: string, salt: string, len: number) => Promise<Buffer>;
+
+/** verifyPassword without blocking the event loop (scrypt is deliberately slow);
+ *  used on the public login route so concurrent attempts can't stall the server. */
+export async function verifyPasswordAsync(plain: string, stored: string): Promise<boolean> {
+  const parts = stored.split("$");
+  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+  const [, salt, hash] = parts;
+  const expected = Buffer.from(hash!, "hex");
+  const got = await scryptAsync(plain, salt!, 64);
+  return expected.length === got.length && timingSafeEqual(expected, got);
 }
 
 export function verifyPassword(plain: string, stored: string): boolean {
@@ -214,6 +250,13 @@ export function setUserPassword(userId: string, password: string): void {
   db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(password), userId);
 }
 
+export function getSessionEpoch(userId: string): number {
+  const row = db.prepare("SELECT session_epoch FROM users WHERE id = ?").get(userId) as
+    | { session_epoch: number }
+    | undefined;
+  return row?.session_epoch ?? 0;
+}
+
 export function touchUserLogin(userId: string): void {
   db.prepare("UPDATE users SET last_login = ? WHERE id = ?").run(now(), userId);
 }
@@ -226,10 +269,42 @@ export function addMembership(userId: string, workspaceId: string, role: Role): 
   ).run(userId, workspaceId, role, now());
 }
 
+/** Opt in/out of sharing this account's learned traits with agents (its own
+ *  session pack, and handoffs routed to it). Per workspace; off by default. */
+export function setShareTraits(userId: string, workspaceId: string, on: boolean): boolean {
+  return db
+    .prepare("UPDATE memberships SET share_traits = ? WHERE user_id = ? AND workspace_id = ?")
+    .run(on ? 1 : 0, userId, workspaceId).changes > 0;
+}
+
+export function getShareTraits(userId: string, workspaceId: string): boolean {
+  const r = db.prepare("SELECT share_traits FROM memberships WHERE user_id = ? AND workspace_id = ?").get(userId, workspaceId) as
+    | { share_traits: number }
+    | undefined;
+  return !!r?.share_traits;
+}
+
 export function getMembership(userId: string, workspaceId: string): { role: Role; member: string | null } | undefined {
   return db
     .prepare("SELECT role, member FROM memberships WHERE user_id = ? AND workspace_id = ?")
     .get(userId, workspaceId) as any;
+}
+
+/**
+ * Is `member` already the capture identity of ANOTHER account in this workspace —
+ * either set explicitly, or that account's email (the default identity)? Used to
+ * stop one account claiming a teammate's identity (and with it their goals/traits).
+ */
+export function memberClaimedByOther(userId: string, workspaceId: string, member: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id
+        WHERE m.workspace_id = ? AND m.user_id != ?
+          AND lower(COALESCE(m.member, u.email)) = lower(?)
+        LIMIT 1`
+    )
+    .get(workspaceId, userId, member.trim());
+  return !!row;
 }
 
 /** Set the capture identity (the hook's --me) this account uses in a workspace. */
@@ -332,6 +407,11 @@ export function acceptInvite(code: string, userId: string): { workspaceId: strin
     .prepare("SELECT id, workspace_id, role, expires_at, accepted_at FROM invites WHERE code_hash = ?")
     .get(sha256(code)) as any;
   if (!row || row.accepted_at || row.expires_at <= now()) return null;
+  // Already a member: never let an invite rewrite an existing role (an owner
+  // opening a member link to their own workspace must not demote themselves),
+  // and leave the invite unspent for the person it was meant for.
+  const existing = getMembership(userId, row.workspace_id);
+  if (existing) return { workspaceId: row.workspace_id, role: existing.role };
   db.prepare("UPDATE invites SET accepted_by = ?, accepted_at = ? WHERE id = ?").run(userId, now(), row.id);
   addMembership(userId, row.workspace_id, row.role as Role);
   return { workspaceId: row.workspace_id, role: row.role as Role };
@@ -362,5 +442,7 @@ export function useReset(code: string, newPassword: string): boolean {
   if (!row || row.used_at || row.expires_at <= now()) return false;
   setUserPassword(row.user_id, newPassword);
   db.prepare("UPDATE password_resets SET used_at = ? WHERE id = ?").run(now(), row.id);
+  // End every existing session for this account (whoever had the old password).
+  db.prepare("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?").run(row.user_id);
   return true;
 }

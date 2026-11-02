@@ -62,3 +62,36 @@ test("empty/undefined input is returned as-is", () => {
   // @ts-expect-error exercising the guard
   assert.equal(redactSecrets(undefined), undefined);
 });
+
+// Shapes that used to slip through: a prefixed env name (the "_" before the
+// keyword defeated the word boundary), URL userinfo, and HTTP auth headers.
+const LEAKY: [string, string, string][] = [
+  ["DB_PASSWORD=hunter2hunter2", "hunter2hunter2", "DB_PASSWORD=‹redacted›"],
+  ["export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI", "AWS_SECRET_ACCESS_KEY=‹redacted›"],
+  ["STRIPE_SECRET_KEY=whsec9876543210abcdef", "whsec9876543210abcdef", "STRIPE_SECRET_KEY=‹redacted›"],
+  ["connect to postgres://admin:pw@db.internal:5432/app", "admin:pw@", "postgres://admin:‹redacted›@db.internal:5432/app"],
+  ["curl -H 'Authorization: Bearer abc123def456ghi789'", "abc123def456ghi789", "Authorization: Bearer ‹redacted›"],
+  ["Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA", "Basic ‹redacted›"],
+];
+// Ordinary prose and identifiers that mention the keywords must survive.
+const PROSE = [
+  "the password is required",
+  "password: required",
+  "the auth flow uses bearer tokens now",
+  "Bearer authentication is used for the API",
+  "tokenizer=sentencepiece_v2_model",
+  "see https://github.com/org/repo and http://localhost:4319/health",
+  "git@github.com:aruntemme/reins.git",
+];
+
+test("masks prefixed env secrets, URL passwords and auth headers", () => {
+  for (const [input, secret, expected] of LEAKY) {
+    const out = redactSecrets(input);
+    assert.ok(!out.includes(secret), `secret gone: ${input} -> ${out}`);
+    assert.ok(out.includes(expected), `kept the readable parts: ${out}`);
+  }
+});
+
+test("does not over-redact ordinary prose that mentions secret keywords", () => {
+  for (const s of PROSE) assert.equal(redactSecrets(s), s, `unchanged: ${s}`);
+});

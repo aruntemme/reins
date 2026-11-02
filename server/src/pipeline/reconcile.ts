@@ -63,7 +63,7 @@ export function applyOps(project: string, member: string, ops: Ops): void {
   const validIds = new Set(openPending.map((p) => p.id));
   for (const id of ops.pending_resolve ?? []) {
     if (!validIds.has(id)) continue;
-    setPendingStatus(id, "done");
+    setPendingStatus(project, id, "done");
     pendingTouched = true;
   }
 

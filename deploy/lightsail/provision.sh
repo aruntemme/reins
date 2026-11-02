@@ -30,9 +30,11 @@ until [ "$(aws lightsail get-instance-state --instance-name "$NAME" --query 'sta
 done
 echo
 
-echo "→ opening firewall (22 ssh, 4319 reins)"
+# 4319 stays closed: Caddy on the box terminates TLS on 443 (80 is for the ACME
+# challenge + HTTP→HTTPS redirect) and proxies to localhost:4319.
+echo "→ opening firewall (22 ssh, 80/443 caddy)"
 aws lightsail put-instance-public-ports --instance-name "$NAME" --port-infos \
-  "fromPort=22,toPort=22,protocol=TCP" "fromPort=4319,toPort=4319,protocol=TCP" >/dev/null
+  "fromPort=22,toPort=22,protocol=TCP" "fromPort=80,toPort=80,protocol=TCP" "fromPort=443,toPort=443,protocol=TCP" >/dev/null
 
 echo "→ downloading SSH key → ${KEY}"
 aws lightsail download-default-key-pair --query 'privateKeyBase64' --output text > "$KEY"
@@ -41,5 +43,5 @@ chmod 600 "$KEY"
 IP="$(aws lightsail get-instance --instance-name "$NAME" --query 'instance.publicIpAddress' --output text)"
 echo
 echo "✓ instance running at ${IP}"
-echo "  next:  ./deploy/lightsail/ship.sh ${IP}"
+echo "  next:  point your domain at ${IP}, set up Caddy (deploy/DEPLOY.md), then ./deploy/lightsail/ship.sh ${IP}"
 echo "  (give cloud-init ~60s to finish installing Docker first)"

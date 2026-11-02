@@ -35,11 +35,13 @@ export function claimItem(
 export function resolveItem(args: AgentConn & { id: string }): Promise<unknown>;
 
 export function note(
-  args: AgentConn & { member: string; text: string }
+  args: AgentConn & { member: string; text: string; ingestToken?: string }
 ): Promise<unknown>;
 
 export function runOnce(
   args: AgentConn & {
+    /** Ingest token for the summary note (an access token can't ingest when auth is on). */
+    ingestToken?: string;
     by?: string;
     policy?: string;
     dryRun?: boolean;

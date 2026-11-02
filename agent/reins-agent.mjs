@@ -11,8 +11,13 @@
  *
  * Bearer auth is opt-in: when a token is supplied we send
  * `Authorization: Bearer <token>`, which is harmless when the server runs with
- * auth off and required when it is on.
+ * auth off and required when it is on. With auth on, reading/claiming needs an
+ * ACCESS token while posting the note needs an INGEST token: pass the latter as
+ * `ingestToken` (--ingest-token); the note falls back to `token` when unset.
  */
+
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_URL = "http://localhost:4319";
 const SOURCE = "auto"; // every write this agent makes is tagged so humans can tell it apart.
@@ -93,10 +98,10 @@ export async function resolveItem({ url, token, project, id }) {
 }
 
 /** Post a source:"auto" note to the project timeline. */
-export async function note({ url, token, project, member, text }) {
+export async function note({ url, token, ingestToken, project, member, text }) {
   const res = await fetch(`${trimUrl(url)}/api/ingest`, {
     method: "POST",
-    headers: headers(token),
+    headers: headers(ingestToken || token),
     body: JSON.stringify({
       project,
       member,
@@ -117,7 +122,7 @@ export async function note({ url, token, project, member, text }) {
  *
  * @returns {Promise<{matched:Array, claimed:string[], resolved:string[], dryRun:boolean, noted:boolean}>}
  */
-export async function runOnce({ url, token, project, by, policy, dryRun = false, log = () => {} }) {
+export async function runOnce({ url, token, ingestToken, project, by, policy, dryRun = false, log = () => {} }) {
   const actor = by || "auto-agent";
   const open = await fetchOpenPending({ url, token, project });
   const matched = selectItems(open, policy);
@@ -145,7 +150,7 @@ export async function runOnce({ url, token, project, by, policy, dryRun = false,
       resolved.length === 1
         ? `Auto-claimed and resolved 1 pending item (${matched[0].text?.slice(0, 60) ?? ""}).`
         : `Auto-claimed and resolved ${resolved.length} pending items.`;
-    await note({ url, token, project, member: actor, text: summary });
+    await note({ url, token, ingestToken, project, member: actor, text: summary });
     noted = true;
   }
 
@@ -161,6 +166,7 @@ function parseArgs(argv) {
     switch (a) {
       case "--url": out.url = next(); break;
       case "--token": out.token = next(); break;
+      case "--ingest-token": out.ingestToken = next(); break;
       case "--project": out.project = next(); break;
       case "--by": out.by = next(); break;
       case "--policy": out.policy = next(); break;
@@ -183,7 +189,9 @@ Usage:
 
 Options:
   --url <url>        Reins server (default ${DEFAULT_URL} or $REINS_URL)
-  --token <token>    bearer token (default $REINS_TOKEN), sent only if present
+  --token <token>    access token for reading + claiming (default $REINS_TOKEN)
+  --ingest-token <t> ingest token for the summary note (default $REINS_INGEST_TOKEN;
+                     falls back to --token)
   --project <id>     project to watch (required)
   --by <member>      who to claim as (default $REINS_MEMBER or "auto-agent")
   --policy <p>       "all" (default) or a regex matched against item text
@@ -209,6 +217,7 @@ async function main() {
   const cfg = {
     url: opts.url || process.env.REINS_URL || DEFAULT_URL,
     token: opts.token || process.env.REINS_TOKEN,
+    ingestToken: opts.ingestToken || process.env.REINS_INGEST_TOKEN,
     project: opts.project,
     by: opts.by || process.env.REINS_MEMBER || "auto-agent",
     policy: opts.policy,
@@ -244,8 +253,12 @@ async function main() {
 }
 
 // Import-safe: only run the CLI when invoked directly, never on import (tests).
-const invokedDirectly =
-  process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+// realpath + pathToFileURL so it also holds behind an npm bin symlink, on
+// Windows (file:///C:/…), and for paths with spaces (percent-encoded in URLs).
+const invokedDirectly = (() => {
+  try { return !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; }
+  catch { return false; }
+})();
 if (invokedDirectly) {
   main().catch((err) => {
     console.error(err);

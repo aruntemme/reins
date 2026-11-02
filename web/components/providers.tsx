@@ -15,6 +15,8 @@ const EMPTY: ProviderInput = { label: "", baseURL: "https://api.openai.com/v1", 
 export function Providers() {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [active, setActive] = useState<{ model: string; label: string } | null>(null);
+  // Whether the operator's instance-wide fallback model is configured.
+  const [instanceDefault, setInstanceDefault] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -28,6 +30,7 @@ export function Providers() {
       const r = await api.providers();
       setProviders(r.providers);
       setActive({ model: r.active.model, label: r.active.label });
+      setInstanceDefault(!!r.instanceDefault);
     } catch {
       setErr("Could not load providers. Try again.");
     }
@@ -107,7 +110,11 @@ export function Providers() {
       ) : (
         <div className="card pad" style={{ display: "grid", gap: 14 }}>
           {providers.length === 0 ? (
-            <div className="empty" style={{ padding: "8px 0" }}>No providers yet. Add one to enable distillation.</div>
+            <div className="empty" style={{ padding: "8px 0" }}>
+              {instanceDefault
+                ? "No workspace providers yet. Distillation uses the instance default; add one to use your own."
+                : "No providers yet. Add one to enable distillation."}
+            </div>
           ) : providers.map((p) => {
             const rowBusy = busy === p.id;
             return (

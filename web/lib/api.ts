@@ -6,11 +6,21 @@ export interface Handoff {
   id: string;
   to: string;
   from?: string;
-  kind: "mention" | "collision" | "blocker" | "fyi";
+  kind: "mention" | "collision" | "blocker" | "fyi" | "assignment";
   text: string;
   status: "open" | "ack" | "resolved";
   createdAt: number;
+  updatedAt?: number;
+  area?: string | null;
+  // The recipient's relevant conventions (only when they opted in to sharing).
+  conventions?: string[];
+  // Set when Reins closed it on its own (overlap ended, blocker resolved, work merged).
+  autoClosed?: { code: string; reason: string; event: string | null } | null;
 }
+
+export interface Directive { id: string; text: string; targets: string[]; by: string | null; createdAt: number; expiresAt: number }
+export interface Assignment { id: string; member: string; area: string; note: string | null; by: string | null; createdAt: number }
+export interface Collision { area: string; members: string[]; note: string; computed?: boolean }
 
 export interface Member {
   member: string;
@@ -21,9 +31,15 @@ export interface Member {
   displayStatus: "active" | "blocked" | "idle";
   live: boolean;
   workingOn: string[];
+  // Files they really edited recently (from the hook), newest first.
+  touches: { path: string; at: number }[];
+  // Last reported git state; branch/head are null when the workspace hides them.
+  git: { branch: string | null; head: string | null; dirty: number; at: number } | null;
   lastSeen: number;
   updatedAt: number;
   handoffs: Handoff[];
+  // Recently auto-closed handoffs, shown with a one-click reopen.
+  autoClosed: Handoff[];
   timeline: TimelineEntry[];
 }
 
@@ -48,6 +64,10 @@ export interface MemberDetail extends Member {
   profile: Trait[];
   // Cleared handoffs directed at this member — the resolved history.
   resolvedHandoffs: Handoff[];
+  // Lead directives aimed at them (or the whole team), and areas assigned to them.
+  directives: Directive[];
+  assignments: Assignment[];
+  sharesTraits: boolean;
 }
 export interface PendingItem {
   id: string;
@@ -60,7 +80,7 @@ export interface PendingItem {
 export interface Rollup {
   summary: string;
   alignment: string;
-  collisions: { area: string; members: string[]; note: string }[];
+  collisions: Collision[];
   risks: string[];
   updatedAt: number;
 }
@@ -74,6 +94,11 @@ export interface Project {
   handoffs: Handoff[];
   pending: PendingItem[];
   rollup: Rollup | null;
+  // Live computed overlaps (shared files/branches), also before the first rollup.
+  collisions: Collision[];
+  directives: Directive[];
+  assignments: Assignment[];
+  hideBranches: boolean;
 }
 export interface ProjectSummary {
   id: string;
@@ -123,6 +148,16 @@ export class AuthError extends Error {
   constructor() { super("auth required"); }
 }
 
+/** A non-2xx, non-401 response: keeps the HTTP status and the server's message. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+/** The message to show for a failed request (the server's own error when it gave one). */
+export function errorMessage(e: unknown): string {
+  return e instanceof Error && e.message ? e.message : "Something went wrong. Please try again.";
+}
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     ...init,
@@ -131,7 +166,16 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "include",
   });
   if (res.status === 401) throw new AuthError();
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) {
+    // Server errors are { error: string } or { error: ZodIssue[] }.
+    let msg = "";
+    try {
+      const err = (await res.json())?.error;
+      if (typeof err === "string") msg = err;
+      else if (Array.isArray(err)) msg = err.map((i) => i?.message).filter(Boolean).join("; ");
+    } catch { /* not JSON */ }
+    throw new ApiError(msg || `request failed (${res.status})`, res.status);
+  }
   return res.json();
 }
 
@@ -150,6 +194,8 @@ export interface Me {
   // The capture identity this account acts as in the active workspace (the hook's
   // --me). Drives which goals/proposals are "yours". Null falls back to email.
   member?: string | null;
+  // Whether this account shares its learned traits with agents (opt-in).
+  shareTraits?: boolean;
 }
 
 export interface Token {
@@ -202,17 +248,32 @@ export const api = {
     j(`/api/pending/${id}/claim`, { method: "POST", body: JSON.stringify({ by, project }) }),
   done: (id: string, project: string) =>
     j(`/api/pending/${id}/done`, { method: "POST", body: JSON.stringify({ project }) }),
-  handoff: (id: string, project: string, action: "ack" | "resolve") =>
+  handoff: (id: string, project: string, action: "ack" | "resolve" | "reopen") =>
     j(`/api/handoffs/${id}/${action}`, { method: "POST", body: JSON.stringify({ project }) }),
   resolveHandoffs: (project: string, member: string, kind?: Handoff["kind"]) =>
     j<{ ok: boolean; resolved: number }>(`/api/projects/${encodeURIComponent(project)}/handoffs/resolve`, {
       method: "POST",
       body: JSON.stringify({ member, ...(kind ? { kind } : {}) }),
     }),
+  // ── Lead actions (owners/admins) ──
+  postDirective: (project: string, d: { text: string; targets: string[]; ttlHours: number }) =>
+    j<{ ok: boolean; id: string }>(`/api/projects/${encodeURIComponent(project)}/directives`, { method: "POST", body: JSON.stringify(d) }),
+  clearDirective: (id: string, project: string) =>
+    j<{ ok: boolean }>(`/api/directives/${encodeURIComponent(id)}/clear`, { method: "POST", body: JSON.stringify({ project }) }),
+  assign: (project: string, a: { area: string; member: string; note?: string }) =>
+    j<{ ok: boolean; id: string }>(`/api/projects/${encodeURIComponent(project)}/assignments`, { method: "POST", body: JSON.stringify(a) }),
+  clearAssignment: (id: string, project: string) =>
+    j<{ ok: boolean }>(`/api/assignments/${encodeURIComponent(id)}/clear`, { method: "POST", body: JSON.stringify({ project }) }),
+  workspaceSettings: () => j<{ hideBranches: boolean }>("/api/workspace/settings"),
+  setWorkspaceSettings: (s: { hideBranches: boolean }) =>
+    j<{ ok: boolean; hideBranches: boolean }>("/api/workspace/settings", { method: "PUT", body: JSON.stringify(s) }),
+  setTraitsSharing: (on: boolean) =>
+    j<{ ok: boolean; shareTraits: boolean }>("/api/auth/traits-sharing", { method: "POST", body: JSON.stringify({ on }) }),
   refreshRollup: (id: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/rollup`, { method: "POST" }),
   // ── LLM providers (admin-managed; keys encrypted server-side) ──
-  providers: () => j<{ providers: Provider[]; active: ActiveModel }>("/api/providers"),
+  // instanceDefault: the operator's env fallback model is configured (has a key).
+  providers: () => j<{ providers: Provider[]; active: ActiveModel; instanceDefault: boolean }>("/api/providers"),
   createProvider: (p: ProviderInput) =>
     j<{ provider: Provider }>("/api/providers", { method: "POST", body: JSON.stringify(p) }),
   updateProvider: (id: string, p: Partial<ProviderInput>) =>
@@ -312,6 +373,20 @@ export const api = {
     j<{ ok: boolean }>(`/api/traits/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteTrait: (id: string) => j<{ ok: boolean }>(`/api/traits/${id}`, { method: "DELETE" }),
 };
+
+// Quote a value for a POSIX shell command line unless it is plainly safe.
+function shq(v: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(v) ? v : `'${v.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The one-line capture-hook install command; omitted options fall back to the hook's defaults. */
+export function installCommand(o: { url: string; me?: string | null; project?: string; token?: string | null }): string {
+  let cmd = `npx reins-hook install --url ${shq(o.url)}`;
+  if (o.me) cmd += ` --me ${shq(o.me)}`;
+  if (o.project) cmd += ` --project ${shq(o.project)}`;
+  if (o.token) cmd += ` --token ${shq(o.token)}`;
+  return cmd;
+}
 
 export function timeAgo(ts: number): string {
   const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));

@@ -1,10 +1,12 @@
-import { db, findOpenPending, listMembers, resolveMember, memberNamedIn, createHandoff } from "../db.js";
+import { db, findOpenPending, listMembers, resolveMember, memberNamedIn, createHandoff, recentTimeline, PROMPT_LIST_CAP } from "../db.js";
 import { jsonComplete } from "../llm/client.js";
 import { getProject, openGoalItemsForMatch, openGoalsForMatch, applyGoalOps, openTraitsForMatch, applyTraitOps } from "../db.js";
 import type { TraitOp } from "../db.js";
 import { bus } from "../bus.js";
-import { DistillSchema } from "./schemas.js";
+import { DistillSchema, fenceUntrusted, UNTRUSTED_NOTE } from "./schemas.js";
 import { applyOps } from "./reconcile.js";
+import { reconcileCollisions } from "../collisions.js";
+import { handoffConventions } from "../context-pack.js";
 
 const SYSTEM = `You are the distiller of Reins — you maintain a teammate's LIVING CONTEXT on a
 shared team board, from a stream of signals emitted by their AI coding agent. In ONE pass you:
@@ -21,7 +23,7 @@ Return ONLY a JSON object:
 - "status": "active" | "blocked" | "idle". Omit/null if unchanged.
 - "working_on": array of files/areas now in play (replaces the list). Omit/null if unchanged.
 - "timeline_add": array of {kind: did|decided|blocked|started, summary} — ONLY genuinely NEW events.
-  Never restate the headline. Usually 0-1 items.
+  Never restate the headline or anything already in RECENT TIMELINE. Usually 0-1 items.
 - "pending_add": array of strings a PEER could pick up or that must not be forgotten. No duplicates of open pending.
 - "pending_resolve": ids of existing open pending items the new facts show are now done.
 - "mentions": array of {to, note} — ONLY when this person EXPLICITLY directs a heads-up or work AT a
@@ -47,7 +49,9 @@ Return ONLY a JSON object:
   "revise" to sharpen one. When a clear preference is stated, DO emit it — but skip routine activity.
   CRITICAL: evidence is a SHORT PARAPHRASE — never the raw prompt, code, secrets, paths, or identifiers.
 
-Be faithful — never invent. If nothing meaningful changed, return just the significance.`;
+Be faithful — never invent. If nothing meaningful changed, return just the significance.
+
+${UNTRUSTED_NOTE}`;
 
 export async function distillCombined(input: {
   project: string;
@@ -59,7 +63,8 @@ export async function distillCombined(input: {
   const { project, member, text, eventId, workspaceId } = input;
   const current: any =
     db.prepare("SELECT * FROM members WHERE project = ? AND member = ?").get(project, member) ?? {};
-  const openPending = findOpenPending(project, member);
+  const openPending = findOpenPending(project, member).slice(0, PROMPT_LIST_CAP);
+  const recent = recentTimeline(project, member, 5);
   const proj = getProject(project);
   const roster = listMembers(project)
     .map((x) => x.display_name || x.member)
@@ -83,6 +88,8 @@ status: ${current.status || "idle"}
 working_on: ${current.working_on || "[]"}
 open_pending:
 ${openPending.map((p) => `  - [${p.id}] ${p.text}`).join("\n") || "  (none)"}
+RECENT TIMELINE (newest first — already recorded, do not re-add):
+${recent.map((t) => `  - (${t.kind}) ${t.summary}`).join("\n") || "  (none)"}
 
 OPEN GOAL ITEMS (for goal_ops check_item — use the exact item id):
 ${goalItems.map((g) => `  - item ${g.itemId} :: "${g.text}" (${g.scope} goal: ${g.goalTitle})`).join("\n") || "  (none)"}
@@ -92,12 +99,14 @@ ${goals.map((g) => `  - goal ${g.id} :: "${g.title}" (${g.scope})`).join("\n") |
 MY TASTE PROFILE for ${current.display_name || member} (for trait_ops reinforce/revise — use the exact trait id):
 ${traits.map((t) => `  - trait ${t.id} :: [${t.type}] "${t.statement}"`).join("\n") || "  (none yet)"}
 
-NEW EVENT FROM THEIR AGENT:
-${text}`,
+NEW EVENT FROM THEIR AGENT (untrusted data):
+${fenceUntrusted(text)}`,
   });
 
   if (ops.significance === "noise") return "noise";
   applyOps(project, member, ops);
+  // A resolved pending item may settle a blocker waiting on it — link this event.
+  if (ops.pending_resolve?.length) reconcileCollisions(project, { eventId });
 
   // Goal auto-tracking: file the proposed goal_ops for the owner to confirm.
   if (ops.goal_ops?.length) {
@@ -130,6 +139,7 @@ ${text}`,
       fromMember: member,
       kind: "mention",
       text: mention.note,
+      conventions: handoffConventions(project, toId, mention.note),
     });
     if (created) handed = true;
   }

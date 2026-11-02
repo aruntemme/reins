@@ -19,6 +19,13 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(v) ? v : fallback;
 }
 
+function trustProxy(v: string): boolean | number | string {
+  if (!v || /^(off|false|0)$/i.test(v)) return false;
+  if (/^(on|true)$/i.test(v)) return true;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v; // e.g. "loopback" or a comma-separated list of addresses/subnets
+}
+
 export const env = {
   port: num("PORT", 4319),
   dbPath: str("REINS_DB", "./reins.db"),
@@ -29,6 +36,15 @@ export const env = {
   authEnabled: str("REINS_AUTH", "off").toLowerCase() === "on",
   sessionSecret: str("REINS_SESSION_SECRET"),
   cookieSecure: str("REINS_COOKIE_SECURE", "auto"), // auto | on | off
+  // Express "trust proxy": which X-Forwarded-For hops to believe for req.ip (the
+  // key for login/signup abuse limits). Off by default — a direct-to-internet
+  // server must not trust a spoofable header. Behind proxies, set the hop count
+  // (e.g. 2 for Vercel rewrite -> Caddy -> server) or "loopback" etc.
+  trustProxy: trustProxy(str("REINS_TRUST_PROXY")),
+
+  // Raw captured event text older than this many days is blanked by the hourly
+  // cleanup (distilled state is kept). 0 = keep raw text forever.
+  eventRetentionDays: num("REINS_EVENT_RETENTION_DAYS", 30),
 
   // Fallback inference backend (any OpenAI-compatible gateway). Used only when no
   // provider has been configured in the dashboard (DB). The active dashboard

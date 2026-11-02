@@ -80,3 +80,48 @@ test("goalItemProjectId / goalProjectId resolve for authorization", () => {
   assert.equal(db.goalItemGoal(it)!.project, "p6");
   assert.equal(db.goalProjectId("nope"), null);
 });
+
+test("goal lists fed to the distiller skip completed goals and are capped", () => {
+  db.ensureProject("cap", "Cap", "w1");
+  const done = db.createGoal({ project: "cap", scope: "team", title: "Finished goal" });
+  db.updateGoalItem(db.addGoalItem({ goalId: done, text: "only step" }), { done: true });
+  const empty = db.createGoal({ project: "cap", scope: "team", title: "No steps yet" });
+  const open = db.createGoal({ project: "cap", scope: "team", title: "Half done" });
+  db.updateGoalItem(db.addGoalItem({ goalId: open, text: "a" }), { done: true });
+  db.addGoalItem({ goalId: open, text: "b" });
+  const ids = db.openGoalsForMatch("cap", "asha").map((g) => g.id);
+  assert.ok(!ids.includes(done), "a completed goal is not offered");
+  assert.ok(ids.includes(empty) && ids.includes(open));
+
+  for (let i = 0; i < 45; i++) {
+    const g = db.createGoal({ project: "cap", scope: "team", title: `goal ${i}` });
+    db.addGoalItem({ goalId: g, text: `step ${i}` });
+  }
+  assert.equal(db.openGoalsForMatch("cap", "asha").length, db.PROMPT_LIST_CAP);
+  assert.equal(db.openGoalItemsForMatch("cap", "asha").length, db.PROMPT_LIST_CAP);
+});
+
+test("pruneStale drops dead invites/resets, week-old touches, and blanks old raw event text only", () => {
+  db.ensureProject("prune", "Prune", "w1");
+  const t = Date.now();
+  db.db.prepare("INSERT INTO invites (id, workspace_id, role, code_hash, expires_at, created_at) VALUES ('i-old','w1','member','h-old',?,?)").run(t - 1000, t - 9000);
+  db.db.prepare("INSERT INTO invites (id, workspace_id, role, code_hash, expires_at, created_at) VALUES ('i-live','w1','member','h-live',?,?)").run(t + 99999, t);
+  db.db.prepare("INSERT INTO password_resets (id, user_id, code_hash, expires_at, used_at, created_at) VALUES ('r-used','u','rh1',?,?,?)").run(t + 99999, t, t);
+  db.db.prepare("INSERT INTO password_resets (id, user_id, code_hash, expires_at, created_at) VALUES ('r-live','u','rh2',?,?)").run(t + 99999, t);
+  const oldEv = db.insertEvent({ project: "prune", member: "asha", kind: "progress", text: "old raw prompt" });
+  const newEv = db.insertEvent({ project: "prune", member: "asha", kind: "progress", text: "fresh raw prompt" });
+  db.db.prepare("UPDATE events SET created_at = ? WHERE id = ?").run(t - 40 * 24 * 60 * 60 * 1000, oldEv);
+  db.addTimeline("prune", "asha", "did", "distilled summary stays");
+  db.recordTouch("prune", "asha", "src/old.ts");
+  db.recordTouch("prune", "asha", "src/fresh.ts");
+  db.db.prepare("UPDATE file_touches SET created_at = ? WHERE path = 'src/old.ts'").run(t - 8 * 24 * 60 * 60 * 1000);
+
+  const r = db.pruneStale(30, t);
+  assert.deepEqual(r, { invites: 1, resets: 1, events: 1, touches: 1 });
+  assert.deepEqual(db.recentTouches("prune", 0).map((x) => x.path), ["src/fresh.ts"], "a week-old touch is pruned, a fresh one kept");
+  const text = (id: string) => (db.db.prepare("SELECT text FROM events WHERE id = ?").get(id) as any).text;
+  assert.equal(text(oldEv), "", "old raw text blanked");
+  assert.equal(text(newEv), "fresh raw prompt");
+  assert.equal(db.recentTimeline("prune", "asha").length, 1, "distilled state untouched");
+  assert.equal(db.pruneStale(0, t).events, 0, "retention 0 keeps raw text forever");
+});

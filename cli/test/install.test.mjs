@@ -191,3 +191,79 @@ test("installing a second agent replaces ours but keeps foreign hooks", () => {
   assert.ok(cmds.some((c) => c.includes("adapters/opencode.mjs")));
   assert.ok(!cmds.some((c) => c.includes("adapters/codex.mjs")), "previous reins agent should be replaced");
 });
+
+test("--me with spaces/quotes is shell-quoted so bash hands the hook the exact value", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-quote-"));
+  runInstall(home, ["--me", "Asha O'Rao", "--url", "http://localhost:4319"]);
+  const ours = allCommands(settingsFor(home)).find((c) => c.includes("reins-hook.mjs"));
+  assert.ok(ours);
+  // Run the env prefix through real bash, swapping the hook for a printer.
+  const probe = ours.replace(/node "[^"]+"/, `node -e 'process.stdout.write(process.env.REINS_MEMBER)'`);
+  const got = execFileSync("bash", ["-c", probe], { encoding: "utf8" });
+  assert.equal(got, "Asha O'Rao");
+});
+
+test("status masks the ingest token instead of printing it", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-status-"));
+  runInstall(home, ["--token", "rk_ingest_0123456789abcdef0123", "--url", "http://127.0.0.1:9"]);
+  const out = execFileSync(process.execPath, [BIN, "status", "--url", "http://127.0.0.1:9"], {
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    cwd: home,
+    encoding: "utf8",
+  });
+  assert.ok(out.includes("REINS_KEY="), "the command is still shown");
+  assert.ok(!out.includes("rk_ingest_0123456789abcdef0123"), "the full token is not printed");
+});
+
+test("install registers the context, pre-edit and touch hooks with edit-tool matchers", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-install-"));
+  runInstall(home, ["--me", "asha"]);
+  const s = settingsFor(home);
+  assert.deepEqual(Object.keys(s.hooks).sort(), ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
+  for (const evt of ["PreToolUse", "PostToolUse"]) {
+    assert.equal(s.hooks[evt][0].matcher, "Edit|Write|MultiEdit|NotebookEdit", `${evt} limited to edit tools`);
+  }
+  assert.equal(s.hooks.SessionStart[0].matcher, undefined);
+  assert.ok(allHooks(s).every((h) => h.timeout === 10 && h.shell === "bash"));
+});
+
+test("re-running install upgrades an old install in place: no duplicates, foreign hooks kept (even in a shared group)", () => {
+  const home = mkdtempSync(join(tmpdir(), "reins-install-"));
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const old = `REINS_MEMBER=asha REINS_SOURCE=claude-code node "${join(home, ".reins", "reins-hook.mjs").replace(/\\/g, "/")}"`;
+  const foreign = "echo foreign";
+  const sharedForeign = "echo shares-a-group-with-ours";
+  // What reins-hook 0.1.6 wrote: ours on UserPromptSubmit + Stop only.
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({
+    hooks: {
+      UserPromptSubmit: [
+        { hooks: [{ type: "command", command: foreign }] },
+        { hooks: [{ type: "command", command: old, shell: "bash" }, { type: "command", command: sharedForeign }] },
+      ],
+      Stop: [{ hooks: [{ type: "command", command: old, shell: "bash" }] }],
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: foreign }] }],
+    },
+  }));
+  runInstall(home, ["--me", "asha"]);
+  runInstall(home, ["--me", "asha"]); // twice: still exactly one of ours per event
+  const s = settingsFor(home);
+  for (const evt of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]) {
+    const ours = s.hooks[evt].flatMap((g) => g.hooks).filter((h) => h.command.includes("reins-hook.mjs"));
+    assert.equal(ours.length, 1, `${evt}: one Reins hook`);
+  }
+  const cmds = allCommands(s);
+  assert.equal(cmds.filter((c) => c === foreign).length, 2, "both foreign hooks kept");
+  assert.ok(cmds.includes(sharedForeign), "a foreign hook sharing a group with ours survives");
+  assert.ok(s.hooks.PreToolUse.some((g) => g.matcher === "Bash"), "a foreign matcher group is untouched");
+
+  // Switching to an adapter drops the Claude-only events; uninstall leaves only foreign hooks.
+  runInstall(home, ["--agent", "codex", "--me", "asha"]);
+  const s2 = settingsFor(home);
+  assert.equal(s2.hooks.SessionStart, undefined);
+  assert.ok(!allCommands(s2).some((c) => c.includes("reins-hook.mjs")));
+  assert.ok(allCommands(s2).some((c) => c.includes("adapters/codex.mjs")));
+  execFileSync(process.execPath, [BIN, "uninstall", "--global"], { env: { ...process.env, HOME: home, USERPROFILE: home }, cwd: home, stdio: "ignore" });
+  const s3 = settingsFor(home);
+  assert.ok(!allCommands(s3).some((c) => c.includes(".reins")));
+  assert.deepEqual(allCommands(s3).sort(), [foreign, foreign, sharedForeign].sort());
+});

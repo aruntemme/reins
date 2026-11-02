@@ -41,7 +41,7 @@ export function TopBar({
           <Mark />
           reins
         </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="topbar-right">
           {right}
           {!hideLive && (
             <span className="livechip">

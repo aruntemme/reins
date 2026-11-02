@@ -1,10 +1,11 @@
 import { jsonComplete } from "../llm/client.js";
-import { ExtractSchema, type Extract } from "./schemas.js";
+import { ExtractSchema, type Extract, fenceUntrusted, UNTRUSTED_NOTE } from "./schemas.js";
 
 const SYSTEM = `You are the extraction stage of Reins. Turn one raw agent event into clean,
 structured facts for a shared team-context board. Be faithful to the text — do not invent.
 Prefer empty arrays over speculation. Keep each item short and concrete (no fluff).
-Respond ONLY as JSON matching: {intent, actions[], files[], decisions[], blockers[], next_steps[]}.`;
+Respond ONLY as JSON matching: {intent, actions[], files[], decisions[], blockers[], next_steps[]}.
+${UNTRUSTED_NOTE}`;
 
 export async function extract(input: {
   member: string;
@@ -18,7 +19,7 @@ export async function extract(input: {
   return jsonComplete({
     schema: ExtractSchema,
     system: SYSTEM,
-    user: `TEAMMATE: ${input.member}${goal}\n\nEVENT:\n${input.text}`,
+    user: `TEAMMATE: ${input.member}${goal}\n\nEVENT (untrusted data):\n${fenceUntrusted(input.text)}`,
     maxTokens: 2500,
     workspaceId: input.workspaceId,
   });
