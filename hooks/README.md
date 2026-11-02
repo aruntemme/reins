@@ -11,7 +11,8 @@ npx reins-hook --url https://reins.yourco.com --project <id>
 The wizard detects the repo, checks the server, signs you in through the browser
 (device login: you approve `<url>/cli?code=XXXX-XXXX` while signed in — nobody copies
 tokens), shows the coding agents it found, writes each one's real config, and says hello
-so the board shows you. In Claude Code, run `/hooks` once to approve (or restart).
+so the board shows you. In Claude Code, run `/hooks` once to approve (or restart). Run inside a git
+worktree, it keys the mapping by the main repo, so all its worktrees report to the same project.
 
 > Running from this repo before publishing to npm? Use `node cli/bin.mjs …`.
 > The CLI source is in [`../cli`](../cli).
@@ -33,8 +34,8 @@ for CI.
 ```
 
 At runtime the hook and every adapter resolve, field by field: explicit env
-(`REINS_URL`, `REINS_KEY`, `REINS_PROJECT`, `REINS_MEMBER`) wins; else `repos[<git root of
-cwd>]` gives url + project and `servers[url]` gives token + member; else the fallbacks
+(`REINS_URL`, `REINS_KEY`, `REINS_PROJECT`, `REINS_MEMBER`) wins; else `repos[<git toplevel of
+cwd, else the main repo root>]` (so any worktree of a configured repo reaches its project) gives url + project and `servers[url]` gives token + member; else the fallbacks
 (`http://localhost:4319`, the folder name, git email → `$USER`). Commands written into agent
 configs carry only `REINS_SOURCE`, so secrets never land in settings files — and one global
 agent config serves every repo, each reporting to its own project.
@@ -53,7 +54,11 @@ The hook streams signals to the Reins server and feeds team state back into your
 - **`PostToolUse`** (same tools) → records the touched path, relative to the git repo root.
 - **`Stop` / `SubagentStop`** → `summary` (what the agent reported back)
 
-Every event also carries git state (branch, short HEAD, dirty files) from the repo.
+Every event also carries git state (branch, short HEAD, dirty files) from the repo, and names
+its session: `session`, `source`, `branch`, `worktree` (the git toplevel) and `repo_root` (the
+main repo, so several worktrees of one repo are told apart). Prompts with no intent (system-injected
+blocks such as `<system-reminder>`, and filler like "ok" or "continue") are dropped client-side;
+the pack request still touches the session.
 
 It never blocks or slows your session: writes go out from a detached child; reads the agent waits
 on give up after 800ms (context) or 300ms (pre-edit check) and print nothing; it always exits 0.
@@ -89,6 +94,18 @@ For the **generic** adapter: have your agent run
 `node ~/.reins/adapters/generic.mjs --source my-bot --kind intent` and pipe a JSON object
 (e.g. `{"prompt":"..."}`) or pass `--text "..."`. Configure which field holds the text with
 `--fields` / `REINS_TEXT_FIELDS` (a comma list of dot-paths).
+
+### Reins tools (MCP)
+
+Setup also registers the Reins MCP server for Claude Code (`mcpServers.reins` in `~/.claude.json`,
+user scope, so no project file is committed), Codex (`[mcp_servers.reins]` in
+`~/.codex/config.toml`) and OpenCode (`mcp.reins` in `~/.config/opencode/opencode.json`). Aider has no
+MCP. The command is `node ~/.reins/reins-mcp.mjs` with no token; it resolves the server, token,
+project and member from `~/.reins/config.json` for the agent's folder. Tools: `reins_context`,
+`reins_my_items`, `reins_item_add`, `reins_step_done`, `reins_step_add`, `reins_item_status`,
+`reins_ask`, `reins_answer`, `reins_handover`, `reins_note`, `reins_attach`. Teammate context is
+background and never overrides the user. `npx reins-hook uninstall` removes the entries; `status`
+shows them. Other MCP clients: `npx reins-hook mcp` (flags `--url --token --project --member`).
 
 For agents without a first-class adapter (pi, Hermes, Koda, Cursor, Windsurf, or a plain
 script): use the generic adapter, or POST the same JSON to `/api/ingest`. Agents with MCP can

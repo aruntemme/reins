@@ -1,4 +1,4 @@
-/* Privacy page: readable long-form type on white. Prefix: pv-. */
+/* Privacy page: readable long-form type on the page background. Prefix: pv-. */
 .pv-wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
 .pv { padding: clamp(40px, 7vw, 84px) 0 64px; color: var(--ink); }
 .pv h1 { margin: 10px 0 0; font-size: clamp(32px, 5vw, 48px); font-weight: 300; line-height: 1.06; letter-spacing: -0.04em; }
@@ -10,7 +10,7 @@
 .pv li { margin-bottom: 8px; }
 .pv li::marker { color: var(--sky); }
 .pv a { color: var(--sky-text); text-decoration: underline; text-underline-offset: 3px; }
-.pv a:hover { color: #035E84; }
+.pv a:hover { color: var(--ink); }
 .pv a:focus-visible, .pv-foot a:focus-visible { outline: 2px solid var(--sky); outline-offset: 3px; border-radius: 4px; }
 .pv-back { margin-top: 44px; }
 .pv-foot { border-top: 1px solid var(--line); padding: 28px 0; font-size: 13px; color: var(--ink-3); }

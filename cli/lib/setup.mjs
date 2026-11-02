@@ -9,7 +9,8 @@
  *   4 Sign in      device login in the browser (POST /api/cli/login + /api/cli/poll),
  *                  or reuse a saved credential that still works; when the server
  *                  runs without accounts, pick a project from GET /api/projects
- *   5 Configure    save ~/.reins/config.json (0600), write each agent's real config,
+ *   5 Configure    save ~/.reins/config.json (0600), write each agent's real config
+ *                  (capture, plus the Reins MCP tools where the agent supports them),
  *                  POST /api/hook/hello per agent so the board shows you
  *   → summary + board link
  *
@@ -21,6 +22,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { basename, join, resolve } from "node:path";
 import os from "node:os";
 import { createUI, createPrompter, CancelError } from "./tui.mjs";
+import { mainRootOf } from "./git.mjs";
 import { loadConfig, rememberSetup, normalizeUrl, gitEmail, HOSTED_URL } from "./config.mjs";
 import { AGENTS, WIZARD_AGENTS, detectAgents, installAgent, tildify } from "./agents.mjs";
 
@@ -161,7 +163,13 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
   let key = root;
   if (root) {
     const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], root);
-    ui.ok(`${c.b(basename(root))}${branch && branch !== "HEAD" ? c.dim(` on ${branch}`) : ""}  ${c.dim(tildify(root, { home }))}`);
+    // In a linked worktree the config is keyed by the main repo, so all its worktrees share one project.
+    const main = mainRootOf(git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root), root);
+    ui.ok(`${c.b(basename(main))}${branch && branch !== "HEAD" ? c.dim(` on ${branch}`) : ""}  ${c.dim(tildify(root, { home }))}`);
+    if (main !== root) {
+      ui.hint(`This is a git worktree of ${tildify(main, { home })}. Reins maps the main repo, so every worktree reports to the same project.`);
+      key = main;
+    }
   } else {
     ui.warn(`Not inside a git repository ${c.dim(`(${tildify(cwd, { home })})`)}`);
     ui.hint("Reins maps a repo to a project; run this from your repo's folder for the best results.");
@@ -249,6 +257,7 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
     if (args.scope === "global" || args.global) scope = "global";
     else if (args.scope && args.scope !== "repo") { ui.err(`--scope must be "repo" or "global"`); return 1; }
     else if (!args.scope && interactive) {
+      if (root && key !== root) ui.hint("In a worktree, \"This repo\" covers only this worktree; \"All repos\" covers every worktree.");
       scope = await p.select({
         message: "Claude Code: capture in which repos?",
         choices: [
@@ -310,29 +319,39 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
   }, cfgFile);
   ui.ok(`${tildify(cfgFile, { home })}  ${c.dim("(your sign-in and this repo → project; only you can read it)")}`);
   const wired = [];
+  const withTools = [];
   const nexts = [];
   let problems = 0;
   for (const id of agents) {
     let r;
     try {
-      r = installAgent(id, { home, cwd: key, dir: key, scope, env });
+      r = installAgent(id, { home, cwd: root || key, dir: root || key, scope, env });
     } catch (e) {
       ui.err(`${AGENTS[id].label}: ${e.message}`);
       problems++;
       continue;
     }
+    // The Reins tools (MCP) are wired separately from capture, so report them either way.
+    const toolsLine = () => {
+      for (const w of r.wrote) if (w.note.includes("MCP")) ui.ok(`${AGENTS[id].label} ${c.dim("→")} ${tildify(w.path, { home })} ${c.dim(`(${w.note})`)}`);
+      if (r.tools) { ui.ok(`${AGENTS[id].label}: Reins tools connected`); withTools.push(AGENTS[id].label); }
+      else if (r.toolsNote) (id === "aider" ? ui.hint : ui.warn)(r.toolsNote);
+    };
     if (r.conflict) {
       ui.warn(`${AGENTS[id].label}: not wired — ${r.conflict}`);
+      toolsLine();
       problems++;
       continue;
     }
-    for (const w of r.wrote) ui.ok(`${AGENTS[id].label} ${c.dim("→")} ${tildify(w.path, { home })} ${c.dim(`(${w.note})`)}`);
+    for (const w of r.wrote) if (!w.note.includes("MCP")) ui.ok(`${AGENTS[id].label} ${c.dim("→")} ${tildify(w.path, { home })} ${c.dim(`(${w.note})`)}`);
     for (const n of r.notes || []) ui.hint(n);
+    toolsLine();
     wired.push({ id, wrote: r.wrote });
     if (r.next) nexts.push(id === "claude-code" ? "Claude Code: run /hooks to approve (or restart)." : `${AGENTS[id].label}: ${r.next}`);
   }
 
   // Say hello per agent so the board (and the web connect page) sees you now.
+  const where = root ? { worktree: root, repo_root: key } : {};
   const sources = wired.length ? wired.map((w) => AGENTS[w.id].source) : [undefined];
   let greeted = 0;
   let helloError = null;
@@ -340,7 +359,7 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
     const r = await http(url, "/api/hook/hello", {
       method: "POST",
       key: creds.token,
-      body: { project: creds.project.id, member: creds.member, ...(displayName ? { displayName } : {}), ...(source ? { source } : {}) },
+      body: { project: creds.project.id, member: creds.member, ...(displayName ? { displayName } : {}), ...(source ? { source } : {}), ...where },
     });
     if (r.ok) greeted++;
     else helloError = r.unreachable ? r.error : r.json?.error || `HTTP ${r.status}`;
@@ -356,9 +375,11 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
   ui.kv("project", creds.project.id);
   ui.kv("repo", tildify(key, { home }));
   ui.kv("agents", wired.length ? wired.map((w) => AGENTS[w.id].label).join(", ") : c.dim("none"));
+  ui.kv("tools", withTools.length ? `Reins tools connected in ${withTools.join(", ")}` : c.dim("none"));
   ui.write("");
   ui.write(`  Open the board: ${c.cyan(board)}`);
   for (const n of nexts) ui.write(`  ${n.startsWith("Claude Code") ? c.b(n) : n}`);
+  if (withTools.length) ui.write(`  Restart your agents to load the Reins tools.`);
   ui.write("");
   if (interactive && !noOpen && (await p.confirm({ message: "Open the board now?", initial: true }))) open(board);
   return problems ? 1 : 0;

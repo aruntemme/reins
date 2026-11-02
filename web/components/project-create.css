@@ -1,16 +1,16 @@
 /* New-project dialog. Prefix: pc-. */
-.pc-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; background: rgba(11,37,64,.4); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
-.pc-modal { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 14px; padding: 28px; background: var(--panel); border-radius: 22px; box-shadow: 0 30px 70px -28px rgba(11,37,64,.55); color: var(--ink); max-height: calc(100vh - 40px); overflow-y: auto; }
+.pc-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; background: var(--scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+.pc-modal { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 14px; padding: 28px; background: var(--panel); border-radius: 22px; box-shadow: var(--shadow-pop); color: var(--ink); max-height: calc(100vh - 40px); overflow-y: auto; }
 .pc-modal .rz-eyebrow { margin: 0; }
 .pc-title { margin: 0; font-size: 28px; font-weight: 300; letter-spacing: -0.035em; line-height: 1.1; }
 .pc-sub { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-3); }
 .pc-field { display: flex; flex-direction: column; gap: 6px; }
 .pc-field label { font-size: 13px; font-weight: 500; }
-.pc-input { width: 100%; min-height: 46px; padding: 0 14px; font: inherit; font-size: 15px; color: var(--ink); background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.pc-input { width: 100%; min-height: 46px; padding: 0 14px; font: inherit; font-size: 15px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
 .pc-input.mono { font-family: var(--font-mono), monospace; font-size: 13.5px; }
 .pc-input::placeholder { color: var(--ink-3); opacity: .8; }
 .pc-input:hover { border-color: var(--ink-3); }
-.pc-input:focus-visible { border-color: var(--sky); box-shadow: 0 0 0 3px rgba(5,147,198,.2); }
+.pc-input:focus-visible { border-color: var(--sky); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky) 22%, transparent); }
 .pc-err { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--amber-text); background: var(--amber-soft); border: 1px solid var(--amber-line); border-radius: 12px; padding: 10px 14px; }
 .pc-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 @media (max-width: 480px) { .pc-modal { padding: 22px 20px; } .pc-actions .rz-btn { flex: 1; } }

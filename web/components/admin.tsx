@@ -66,7 +66,7 @@ export function ManageTokens() {
               Revoke any token to cut off the agent or dashboard session using it. Revoked tokens stop
               working immediately and cannot be restored.
             </p>
-            {err && <div className="mono" style={{ color: "var(--blocked)", marginBottom: 12 }}>{err}</div>}
+            {err && <div className="mono" style={{ color: "var(--amber-text)", marginBottom: 12 }}>{err}</div>}
             {tokens === null ? (
               <div className="empty">Loading…</div>
             ) : tokens.length === 0 ? (

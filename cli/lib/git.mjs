@@ -33,20 +33,62 @@ function git(args, cwd, timeout = GIT_TIMEOUT_MS) {
   }
 }
 
-/** The git repo root for a directory (cached), or null outside a repo. */
-export function gitRoot(cwd) {
+/** The main repo root from `git rev-parse --git-common-dir` output (absolute): the
+ *  common dir minus its `/.git`. Submodules and bare repos have no such root: `toplevel` stands in. */
+export function mainRootOf(common, toplevel) {
+  return /[\\/]\.git$/.test(common || "") ? common.replace(/[\\/]\.git$/, "") : toplevel;
+}
+
+/**
+ * The worktree (git toplevel) and main repo root for a directory (cached), or
+ * null outside a repo. In the main checkout both are the same folder; in a linked
+ * worktree `repoRoot` is the main repo (the git common dir minus its `/.git`), so
+ * every worktree of a repo can be mapped to the same project.
+ */
+export function repoRoots(cwd) {
   if (!cwd) return null;
   const file = stateFile("roots.json");
   const cache = readJson(file) || {};
   const hit = cache[cwd];
-  if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.root;
-  const out = git(["rev-parse", "--show-toplevel"], cwd);
-  const root = out ? out.trim() : null;
+  if (hit && Date.now() - hit.at < ROOT_TTL_MS && (hit.root === null || hit.repoRoot)) {
+    return hit.root ? { worktree: hit.root, repoRoot: hit.repoRoot } : null;
+  }
+  // One call for both; an old git without --path-format falls back to the toplevel alone.
+  const out = git(["rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir"], cwd);
+  let root = null;
+  let repoRoot = null;
+  if (out) {
+    const [top, common] = out.trim().split("\n");
+    root = top || null;
+    repoRoot = mainRootOf(common, root);
+  } else {
+    const top = git(["rev-parse", "--show-toplevel"], cwd);
+    root = top ? top.trim() : null;
+    repoRoot = root;
+  }
   // Keep the cache small: drop entries past their TTL.
   for (const k of Object.keys(cache)) if (Date.now() - cache[k].at >= ROOT_TTL_MS) delete cache[k];
-  cache[cwd] = { root, at: Date.now() };
+  cache[cwd] = { root, repoRoot, at: Date.now() };
   writeJson(file, cache);
-  return root;
+  return root ? { worktree: root, repoRoot } : null;
+}
+
+/** The git repo root (worktree toplevel) for a directory (cached), or null outside a repo. */
+export function gitRoot(cwd) {
+  return repoRoots(cwd)?.worktree ?? null;
+}
+
+/**
+ * Where a session runs, for every event we send: { branch, worktree, repo_root }
+ * (keys left out when unknown). Roots are cached; the branch is one quick git call,
+ * so a worktree that switches branches is never reported stale.
+ */
+export function gitIdentity(cwd) {
+  const r = repoRoots(cwd);
+  if (!r) return {};
+  const head = git(["rev-parse", "--abbrev-ref", "HEAD"], r.worktree);
+  const branch = head ? head.trim() : "";
+  return { ...(branch && branch !== "HEAD" ? { branch } : {}), worktree: r.worktree, repo_root: r.repoRoot };
 }
 
 /**

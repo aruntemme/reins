@@ -14,7 +14,7 @@
 .copycmd.copied .cc-ic { color: var(--sky-text); }
 
 .copycmd.block {
-  background: var(--navy); border-color: var(--navy); color: var(--white);
+  background: var(--terminal-bg); border-color: var(--terminal-bg); color: var(--terminal-ink);
   border-radius: 14px; align-items: flex-start; padding: 14px 16px; max-width: none;
 }
 .copycmd.block::before { content: none; }
@@ -22,7 +22,7 @@
 .copycmd.block .cc-text { min-width: 0; flex: 1; }
 .copycmd.block .cc-ic { color: var(--sky-hi); margin-top: 0; }
 .copycmd.block:hover .cc-ic { color: var(--sky-hi); }
-.copycmd.block.copied { background: var(--navy); border-color: var(--sky-hi); color: var(--white); }
+.copycmd.block.copied { background: var(--terminal-bg); border-color: var(--sky-hi); color: var(--terminal-ink); }
 .copycmd.block.copied .cc-ic { color: var(--sky-hi); }
 
 .cc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

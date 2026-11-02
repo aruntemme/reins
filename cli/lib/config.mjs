@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync, chmodSync, existsSy
 import { execFileSync } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 import os from "node:os";
-import { gitRoot } from "./git.mjs";
+import { repoRoots } from "./git.mjs";
 
 export const DEFAULT_RUNTIME_URL = "http://localhost:4319";
 export const HOSTED_URL = "https://reinshq.vercel.app";
@@ -101,15 +101,16 @@ export function forgetSetup({ root, credentials = false } = {}, path = configPat
 }
 
 /**
- * The repo entry for a working directory: the git root's entry, else the nearest
- * mapped ancestor of cwd (a folder set up outside git is keyed by its own path).
- * Returns { root, url, project } or null.
+ * The repo entry for a working directory: the git toplevel's entry, else the main
+ * repo root's (so any worktree of a configured repo maps to its project), else the
+ * nearest mapped ancestor of cwd (a folder set up outside git is keyed by its own
+ * path). Returns { root, url, project } or null.
  */
 export function repoEntry(cfg, cwd) {
   const repos = cfg?.repos || {};
   if (!cwd) return null;
-  const root = gitRoot(cwd);
-  if (root && repos[root]) return { root, ...repos[root] };
+  const roots = repoRoots(cwd);
+  for (const root of [roots?.worktree, roots?.repoRoot]) if (root && repos[root]) return { root, ...repos[root] };
   for (let dir = resolve(cwd); ; ) {
     if (repos[dir]) return { root: dir, ...repos[dir] };
     const up = dirname(dir);

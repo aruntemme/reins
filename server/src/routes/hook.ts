@@ -15,6 +15,7 @@ import { applyGitMeta, editWarnings, reconcileCollisions } from "../collisions.j
 import { buildMemberPack } from "../context-pack.js";
 import { redactSecrets } from "../redact.js";
 import { accepting } from "../pipeline/index.js";
+import { captureFrom, recordSession, recordMark } from "../sessions.js";
 
 export const hook = Router();
 
@@ -68,6 +69,10 @@ hook.post("/hook/touch", requireHook, (req, res) => {
   ensureMember(project, member, displayName);
   touchMember(project, member);
   recordTouch(project, member, path, tool);
+  // An edit means the agent is mid-turn: its session is working; the edit is a mark.
+  // (An older hook sends neither session nor worktree: nothing to attribute it to.)
+  const cap = captureFrom(req.body);
+  if (cap.session || cap.worktree) recordMark(recordSession(project, member, cap, "working").session, "edit", path);
   bus.emitChange({ type: "touch", project, member });
   // Git state rides along (and runs the collision check); otherwise check here.
   if (!applyGitMeta(project, member, meta)) reconcileCollisions(project);
@@ -90,6 +95,8 @@ hook.post("/hook/hello", requireHook, (req, res) => {
   ensureProject(project, undefined, ws);
   ensureMember(project, member, displayName);
   touchMember(project, member);
+  const cap = captureFrom(req.body);
+  if (cap.session) recordSession(project, member, cap, "seen");
   bus.emitChange({ type: "member.updated", project, member });
   const p = getProject(project);
   res.json({ ok: true, project: { id: p.id, name: p.name } });
@@ -127,6 +134,14 @@ hook.post("/hook/pack", requireHook, (req, res) => {
   if (!p) return;
   if (p === "missing") return res.json({ version: "", text: "", shown: [] });
   if (overLimit(readHits, req.workspaceId ?? "default", READ_MAX_PER_MIN, 60_000)) return res.json({ version: "", text: "", shown: [] });
+  // The pack is the session heartbeat: it is sent on every prompt (even one the
+  // CLI dropped as noise), so a UserPromptSubmit pack marks the session working.
+  const cap = captureFrom(req.body);
+  let session: string | undefined;
+  if (cap.session) {
+    ensureMember(project, member);
+    session = recordSession(project, member, cap, cap.event === "UserPromptSubmit" ? "working" : "seen").session.id;
+  }
   const q = query ? redactSecrets(query).slice(0, 500) : undefined;
-  res.json(buildMemberPack(project, member, { mode, query: q, seen }));
+  res.json(buildMemberPack(project, member, { mode, query: q, seen, session }));
 });

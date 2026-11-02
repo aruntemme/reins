@@ -64,7 +64,8 @@ export function TopBar({
 }
 
 export function initials(name: string): string {
-  const parts = name.replace(/@.*/, "").split(/[.\s_-]+/).filter(Boolean);
+  // Letters and digits only, so "Dev (alice)" gives "DA", not "D(".
+  const parts = name.replace(/@.*/, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 

@@ -26,13 +26,17 @@
  *   REINS_KEY      ingest token (sent as x-reins-key)
  *   REINS_SOURCE   capture source label (default "claude-code")
  *   REINS_CONTEXT  "off" disables context injection and the pre-edit check
+ *
+ * Every request names the session and where it runs (session, source, branch,
+ * worktree, repo_root). Prompts with no intent (system-injected blocks, "ok",
+ * "continue", …) are not sent as events; the pack request still touches the session.
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
-  lastAssistantText, sendEvent, sendEventDetached, sendTouchDetached, postJson,
+  lastAssistantText, sendEvent, sendEventDetached, sendTouchDetached, postJson, isNoisePrompt,
 } from "./lib/capture.mjs";
-import { repoPath } from "./lib/git.mjs";
+import { repoPath, gitIdentity } from "./lib/git.mjs";
 import { resolveRuntime } from "./lib/config.mjs";
 import { readJson, writeJson, sessionFile, pruneSessions } from "./lib/state.mjs";
 
@@ -100,12 +104,17 @@ async function main() {
 
   /** Fetch the member's pack (start) or what changed since this session's seen keys (delta). */
   async function pack(mode, query) {
+    const where = gitIdentity(hook.cwd); // branch, worktree, repo_root
+    // The pack request doubles as the session's heartbeat: it names the session and
+    // where it runs (also for a prompt we don't ship as an event).
     const r = await postJson(conn, "/api/hook/pack", {
       project, member, mode, query, seen: mode === "delta" ? state?.seen ?? [] : undefined,
+      event: evt, session: hook.session_id, source, ...where,
     }, CONTEXT_TIMEOUT_MS);
     if (!r.ok || !r.json) return null;
     const seen = [...(mode === "delta" ? state?.seen ?? [] : []), ...(r.json.shown || [])].slice(-MAX_SEEN);
-    save({ ...(state || {}), version: r.json.version || "", seen, at: Date.now() });
+    // `session` + `worktree` let the MCP server name this session in its own calls.
+    save({ ...(state || {}), version: r.json.version || "", seen, at: Date.now(), session: hook.session_id, worktree: where.worktree });
     return r.json.text || "";
   }
 
@@ -118,7 +127,8 @@ async function main() {
 
   if (evt === "UserPromptSubmit") {
     const prompt = (hook.prompt || "").trim();
-    if (prompt) {
+    const noise = isNoisePrompt(prompt); // injected or filler: no event, no pack query
+    if (!noise) {
       const event = {
         ...conn, project, member, kind: "intent", text: prompt, session: hook.session_id,
         source, cwd: hook.cwd,
@@ -130,7 +140,7 @@ async function main() {
     if (!inject) return process.exit(0);
     // A session we haven't primed (e.g. installed before SessionStart was hooked)
     // gets the full pack once; after that only deltas.
-    const text = await pack(state ? "delta" : "start", prompt.slice(0, 2000));
+    const text = await pack(state ? "delta" : "start", noise ? "" : prompt.slice(0, 2000));
     return text ? emit(contextOutput("UserPromptSubmit", text)) : process.exit(0);
   }
 
@@ -164,7 +174,7 @@ async function main() {
   if (evt === "PostToolUse") {
     if (!EDIT_TOOLS.has(hook.tool_name)) return process.exit(0);
     const file = editedFile(hook);
-    if (file) sendTouchDetached({ ...conn, project, member, file, cwd: hook.cwd, tool: hook.tool_name });
+    if (file) sendTouchDetached({ ...conn, project, member, file, cwd: hook.cwd, tool: hook.tool_name, session: hook.session_id, source });
     return process.exit(0);
   }
 

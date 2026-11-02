@@ -1,472 +1,322 @@
 "use client";
-import "./project.css";
-import { useEffect, useState, useCallback, use } from "react";
+import { use, useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
-import { ProjectTabs } from "@/components/project-tabs";
-import { api, ApiError, errorMessage, timeAgo, type Project, type Goal, type GoalProposal, type Member, type Handoff } from "@/lib/api";
-import { useStream } from "@/lib/useStream";
-import { handleAuth } from "@/lib/guard";
-import { Mark } from "@/components/ui";
-import { UserMenu } from "@/components/user-menu";
+import { api, type ItemKind, type TodayData } from "@/lib/api";
 import { Invite } from "@/components/invite";
-import { ManageTokens } from "@/components/admin";
-import {
-  Lanes, PeopleList, Legend, HotFiles, useNow, rowsOf, collisionIds, caughtAt, blockedSince, isBranchArea, clock, span, WINDOW_MS,
-} from "@/components/lanes";
+import { PageState, PhoneTabs, StaleNote, WorkHeader, isLead, useAction, useNow, useViewer, useWork } from "@/components/work/shell";
+import { AgentTile, Avatar, SectionHead } from "@/components/work/bits";
+import { LaneCompact, LaneRow, itemHref } from "@/components/work/lane";
+import { Legend, Tracks } from "@/components/work/tracks";
+import { NeedsPanel } from "@/components/work/needs";
+import { HandoverDialog, NewItemDialog, ReleaseDialog, WriteDialog } from "@/components/work/dialogs";
+import { KINDS, KIND_LABEL, agentName, clock, countWord, dayLine, kindPhrase, ownsPhrase, plural, shortDate, voice } from "@/components/work/format";
 
-type Viewer = { admin: boolean; me: string; auth: boolean };
-type Act = (p: Promise<unknown>) => void;
+const GROUP_TITLE: Record<TodayData["groups"][number]["kind"], string> = {
+  feature: "Features",
+  bug: "Bugs",
+  try_chore: "Trying out & chores",
+};
 
-export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+export default function TodayPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [proj, setProj] = useState<Project | null>(null);
-  const [missing, setMissing] = useState(false);
-  // A failed load that is not a 404 (server down, 5xx): transient, cleared on the next good load.
-  const [loadErr, setLoadErr] = useState("");
-  // The last failed board action (resync, ack/resolve/reopen), with the server's message.
-  const [actErr, setActErr] = useState("");
-  const [goals, setGoals] = useState<Goal[]>([]);
-  // Already scoped server-side to what this caller can act on.
-  const [proposals, setProposals] = useState<GoalProposal[]>([]);
-  const [viewer, setViewer] = useState<Viewer>({ admin: false, me: "", auth: true });
-  const [workspace, setWorkspace] = useState("");
+  const fetcher = useCallback(() => api.today(id), [id]);
+  const { data, missing, err, load, live } = useWork(id, id, fetcher);
   const now = useNow();
+  const me = useViewer();
+  const [newItem, setNewItem] = useState(false);
+  const [release, setRelease] = useState(false);
+  const [write, setWrite] = useState(false);
+  const [handover, setHandover] = useState<{ id: string; title: string } | null>(null);
 
-  useEffect(() => {
-    api.me()
-      .then((m) => {
-        setViewer({
-          admin: !!m.admin || !m.auth,
-          // The account's capture identity marks "you" and who claims; falls back to
-          // a local name only in the auth-off dev instance.
-          me: m.member || m.user?.email || (!m.auth ? localStorage.getItem("reins-me") : "") || "",
-          auth: m.auth,
-        });
-        setWorkspace(m.workspace?.name || "");
-      })
-      .catch(() => {});
-  }, []);
+  const name = data?.project.name || id;
+  useEffect(() => { document.title = `Today · ${name} · Reins`; }, [name]);
 
-  const load = useCallback(async () => {
-    try {
-      setProj(await api.project(id));
-      setMissing(false);
-      setLoadErr("");
-    } catch (e) {
-      if (handleAuth(e)) return;
-      if (e instanceof ApiError && e.status === 404) setMissing(true);
-      else setLoadErr(errorMessage(e));
-    }
-  }, [id]);
+  if (!data) {
+    return (
+      <div className="w-page">
+        <div className="w-wash"><WorkHeader projectId={id} projectName={name} view="today" /></div>
+        <PageState projectId={id} missing={missing} err={err} retry={load} />
+        <PhoneTabs projectId={id} current="today" />
+      </div>
+    );
+  }
 
-  const fail = useCallback((e: unknown) => { if (!handleAuth(e)) setActErr(errorMessage(e)); }, []);
-  const act = useCallback<Act>((p) => { setActErr(""); p.then(load, fail); }, [load, fail]);
-
-  const loadGoals = useCallback(async () => {
-    try {
-      const [g, p] = await Promise.all([api.goals(id), api.goalProposals(id)]);
-      setGoals(g.goals);
-      setProposals(p.proposals);
-    } catch (e) { handleAuth(e); }
-  }, [id]);
-
-  const onChange = useCallback(() => { load(); loadGoals(); }, [load, loadGoals]);
-  useEffect(() => { load(); loadGoals(); }, [load, loadGoals]);
-  const live = useStream(id, onChange);
-
-  const name = proj?.name || id;
-  useEffect(() => { document.title = `${name} · Reins`; }, [name]);
-  const enc = encodeURIComponent(id);
-  const meInProject = !!viewer.me && !!proj?.members.some((m) => m.member === viewer.me);
-  const liveCount = proj ? proj.members.filter((m) => m.live).length : 0;
+  const t = data;
+  const at = now || t.now;
+  const lead = isLead(me, t.viewer.role);
+  const viewerId = t.viewer.member;
+  const total = t.counts.feature + t.counts.bug + t.counts.try + t.counts.chore;
+  const w = t.counts.waitingOnViewer;
+  const waitLine = w > 0 ? `${countWord(w)} ${w === 1 ? "is" : "are"} waiting on you.` : "Nothing is waiting on you.";
+  const moving = total === 0 ? "Nothing is moving yet." : `${plural(total, "thing")} moving`;
+  const liveRows = t.tracks.rows.filter((r) => r.clips.some((c) => c.to == null));
+  const livePeople = new Set(liveRows.map((r) => r.who.member)).size;
+  const sinceParts = [
+    t.since.tasksDone ? plural(t.since.tasksDone, "task") + " done" : "",
+    t.since.questionsSettled ? `${plural(t.since.questionsSettled, "question")} settled between agents` : "",
+    t.since.blocked ? `${t.since.blocked} blocked` : "",
+  ].filter(Boolean);
+  const anyItems = t.groups.some((g) => g.items.length > 0);
+  const needCount = t.needs.length;
+  const allLanes = t.groups.flatMap((g) => g.items);
+  const quiet = !anyItems && t.untracked.length === 0 && t.tracks.rows.length === 0;
 
   return (
-    <div className="pj">
-      <header className="pj-top">
-        <div className="pj-top-l">
-          <Link href="/dashboard" className="pj-logo" aria-label="Reins projects"><Mark size={36} /></Link>
-          <nav aria-label="Breadcrumb" className="pj-crumbs">
-            <ol>
-              {workspace && <li className="pj-crumb-ws"><Link href="/dashboard">{workspace}</Link></li>}
-              <li className="pj-crumb-cur" aria-current="page">{name}</li>
-            </ol>
-          </nav>
-        </div>
-        <nav aria-label="View" className="pj-views">
-          <Link href={`/project/${enc}`} aria-current="page">Lanes</Link>
-          {meInProject && <Link href={`/project/${enc}/${encodeURIComponent(viewer.me)}`}>Brief</Link>}
-        </nav>
-        <div className="pj-top-r">
-          <span className={`pj-livecount${live && liveCount ? "" : " off"}`} role="status">
-            <span className={`rz-live${live && liveCount ? "" : " away"}`} aria-hidden="true" />
-            {!live ? "offline" : liveCount === 0 ? "nobody live" : <>{liveCount}<span className="pj-lc-long">&nbsp;agent{liveCount > 1 ? "s" : ""}</span>&nbsp;live</>}
+    <div className="w-page">
+      <div className="w-wash">
+        <WorkHeader projectId={id} projectName={name} view="today">
+          <span className="w-liveline w-desk-flex" role="status">
+            <span aria-hidden="true" className={`w-livedot${live ? "" : " off"}`} />
+            {!live ? "Offline" : liveRows.length === 0 ? "Live · no agents working" : `Live · ${plural(liveRows.length, "agent")} · ${plural(livePeople, "person", "people")}`}
           </span>
-          {viewer.admin && <Link href={`/project/${enc}/lead`} className="pj-leadlink">Lead console</Link>}
-          <UserMenu />
-        </div>
-      </header>
+          {needCount > 0 && <a href="#needs" className="w-pill pink w-desk-flex">{needCount} need{needCount === 1 ? "s" : ""} you</a>}
+        </WorkHeader>
 
-      {missing ? (
-        <main className="pj-msg">No project “{id}”. <Link href="/dashboard">Back to projects</Link></main>
-      ) : !proj ? (
-        <main className="pj-msg">
-          {loadErr ? (
-            <>Could not load “{id}”: {loadErr} <button type="button" className="rz-btn ghost small" onClick={load}>Retry</button></>
-          ) : "Loading…"}
-        </main>
-      ) : (
-        <>
-          <GoalBand proj={proj} goals={goals} proposals={proposals} onSaved={load} />
-          <div className="pj-body">
-            <main className="pj-main">
-              {(loadErr || actErr) && (
-                <p className="pj-err" role="alert">{actErr || `Could not refresh the board: ${loadErr}`}</p>
-              )}
-              <div className="pj-m-only"><Attention proj={proj} admin={viewer.admin} now={now} compact="overlaps" /></div>
-              <Board proj={proj} viewer={viewer} now={now} />
-            </main>
-            <aside className="pj-rail" aria-label="Right now">
-              <div className="pj-d-only"><Attention proj={proj} admin={viewer.admin} now={now} /></div>
-              <div className="pj-m-only"><Attention proj={proj} admin={viewer.admin} now={now} compact="rest" /></div>
-              <FromLead proj={proj} admin={viewer.admin} />
-              <UpForGrabs proj={proj} viewer={viewer} onChange={onChange} />
-              <Handoffs proj={proj} act={act} />
-              <Summary proj={proj} act={act} />
-            </aside>
+        <div className="w-hero">
+          <span className="w-eyebrow">{dayLine(at)}</span>
+          <h1>
+            <span className="w-desk-inline">{total === 0 ? moving : `${moving}: ${kindPhrase(t.counts)}.`} {waitLine}</span>
+            <span className="w-phone-inline">{total === 0 ? moving : `${moving}.`} {waitLine}</span>
+          </h1>
+          <p>
+            <span className="w-phone-inline">{total > 0 ? `${kindPhrase(t.counts).replace(/^./, (c) => c.toUpperCase())}. ` : ""}{liveRows.length ? `${plural(liveRows.length, "agent")} live.` : ""}</span>
+            <span className="w-desk-inline">{sinceParts.length ? `Today so far: ${sinceParts.join(", ")}.` : "Quiet so far today."}</span>
+          </p>
+          <div className="w-hero-acts">
+            <button type="button" className="w-btn small" onClick={() => setNewItem(true)}>New item</button>
+            <button type="button" className="w-btn small" onClick={() => setWrite(true)}>Write to the team</button>
+            {lead && !t.release && <button type="button" className="w-btn small ghost" onClick={() => setRelease(true)}>Plan a release</button>}
           </div>
-        </>
-      )}
+        </div>
 
-      <footer className="pj-foot">project · {id} · <Link href="/privacy">privacy</Link></footer>
+        {t.release && (
+          <section aria-label="Release" className="w-release">
+            <span className="w-release-name">
+              <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 21V4" /><path d="M5 4h11l-2 4 2 4H5" /></svg>
+              Release {t.release.title}{t.release.dueAt ? ` · ${shortDate(t.release.dueAt)}` : ""}
+            </span>
+            <span className="w-release-items w-desk-inline">
+              {t.release.items.length === 0 ? "No items in it yet." : t.release.items.map((it, i) => (
+                <span key={it.id}>
+                  {i > 0 && " · "}
+                  <Link href={itemHref(id, it.id)} className="w-ink-link">{it.title}</Link>{" "}
+                  <b className={`tone-${it.tone}`}>{it.stateText}</b>
+                </span>
+              ))}
+            </span>
+            <span className="w-release-items w-phone-inline">{releaseSummary(t.release.items)}</span>
+            {lead && <button type="button" className="w-link w-push" onClick={() => setRelease(true)}>Edit</button>}
+          </section>
+        )}
 
-      <ProjectTabs projectId={id} me={meInProject ? viewer.me : null} current="lanes" lead={viewer.admin} />
+        <section aria-labelledby="own-h" className="w-owned w-desk">
+          <h2 id="own-h" className="w-sr">Who owns what</h2>
+          {!anyItems && t.untracked.length === 0 ? (
+            <div className="w-owned-empty">
+              <p className="w-strong">Nothing is tracked yet.</p>
+              <p className="w-quiet">Create an item someone owns, or connect an agent: its work shows up here as soon as it starts.</p>
+              <div className="w-hero-acts">
+                <button type="button" className="w-btn strong small" onClick={() => setNewItem(true)}>New item</button>
+                <Link href={`/project/${encodeURIComponent(id)}/connect`} className="w-btn small">Connect an agent</Link>
+              </div>
+            </div>
+          ) : (
+            <>
+              {t.groups.filter((g) => g.items.length > 0).map((g) => (
+                <div key={g.kind} className="w-group">
+                  <div className="w-group-h">
+                    <h3>{GROUP_TITLE[g.kind]}</h3>
+                    <span className="w-meta">{g.items.length}</span>
+                  </div>
+                  {g.items.map((l) => <LaneRow key={l.id} projectId={id} lane={l} />)}
+                </div>
+              ))}
+              {t.untracked.map((u) => <Untracked key={u.sessionId} u={u} onDone={load} />)}
+            </>
+          )}
+        </section>
+      </div>
+
+      <main className="w-body">
+        <StaleNote err={err} retry={load} />
+
+        {/* Phone: needs first, then a compact owned list and the agents right now. */}
+        <section aria-labelledby="needs-ph" className="w-phone w-stack">
+          <SectionHead id="needs-ph" title="Needs you">{needCount > 0 && <span className="w-count pink">{needCount}</span>}</SectionHead>
+          <NeedsPanel projectId={id} needs={t.needs} overlaps={t.tracks.overlaps} now={at} onDone={load} onHandover={setHandover} compact />
+        </section>
+        <section aria-labelledby="own-ph" className="w-phone w-stack">
+          <SectionHead id="own-ph" title="Who owns what" />
+          {allLanes.length === 0 && t.untracked.length === 0 ? (
+            <div className="w-card w-calm-empty">
+              <p>Nothing is tracked yet.</p>
+              <div className="w-hero-acts">
+                <button type="button" className="w-btn strong" onClick={() => setNewItem(true)}>New item</button>
+                <Link href={`/project/${encodeURIComponent(id)}/connect`} className="w-btn">Connect an agent</Link>
+              </div>
+            </div>
+          ) : (
+            <div className="w-card w-list">
+              {allLanes.map((l) => <LaneCompact key={l.id} projectId={id} lane={l} />)}
+              {t.untracked.map((u) => <Untracked key={u.sessionId} u={u} onDone={load} compact />)}
+            </div>
+          )}
+        </section>
+        <section aria-labelledby="ag-ph" className="w-phone w-stack">
+          <SectionHead id="ag-ph" title="Agents right now" />
+          {liveRows.length === 0 ? (
+            <p className="w-card w-calm-empty">No agent is working right now.</p>
+          ) : (
+            <div className="w-card w-list">
+              {liveRows.map((r) => {
+                const c = r.clips.find((x) => x.to == null)!;
+                const state = c.kind === "wait" ? "waiting" : c.kind === "block" ? "blocked" : "working";
+                return (
+                  <div key={r.sessionId} className="w-agentrow">
+                    <AgentTile source={r.source} />
+                    <span className="w-agentrow-t">
+                      <span>{voice(r.who, r.source)} · {c.label}</span>
+                      <span className="w-mono w-meta w-ellipsis">{r.branch || "no branch"}</span>
+                    </span>
+                    <span className={`w-dot w-dot-${state}`} aria-label={state} role="img" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Desktop and tablet: the day by agent, with Needs you beside it. */}
+        <div className="w-row w-desk">
+          <section aria-labelledby="tr-h" className="w-col-main w-stack">
+            <SectionHead id="tr-h" title="Today, by agent" note="each block is a task, tinted by the kind of work" />
+            {t.tracks.rows.length === 0 ? (
+              <div className="w-card w-calm-empty">
+                <p>No agent has worked here today yet.</p>
+                <p className="w-quiet">When a teammate’s agent starts, its day draws here: one row per agent, one block per task.</p>
+                <Link href={`/project/${encodeURIComponent(id)}/connect`} className="w-btn small">Connect an agent</Link>
+              </div>
+            ) : (
+              <>
+                <Tracks projectId={id} tracks={t.tracks} needs={t.needs} now={at} />
+                <Legend />
+              </>
+            )}
+          </section>
+          <aside id="needs" aria-labelledby="needs-h" className="w-col-side w-stack">
+            <SectionHead id="needs-h" title="Needs you">
+              {needCount > 0 && <span className="w-count pink">{needCount}</span>}
+              {needCount > 1 && <span className="w-meta w-push">oldest first</span>}
+            </SectionHead>
+            <NeedsPanel projectId={id} needs={t.needs} overlaps={t.tracks.overlaps} now={at} onDone={load} onHandover={setHandover} />
+          </aside>
+        </div>
+
+        <div className="w-row">
+          <section aria-labelledby="tp-h" className="w-col-main w-stack w-desk">
+            <SectionHead id="tp-h" title="The tape" note="handovers, questions, answers, finishes, findings" />
+            {t.tape.length === 0 ? (
+              <p className="w-quiet">Nothing on the tape yet today.</p>
+            ) : (
+              <ol className="w-tape">
+                {t.tape.map((e, i) => (
+                  <li key={i} className={`tape-${e.kind.replace(/\s+/g, "").toLowerCase()}`}>
+                    <span aria-hidden="true" className="w-tape-dot" />
+                    <time className="w-mono w-meta" dateTime={new Date(e.at).toISOString()}>{clock(e.at)}</time>
+                    <span className="w-tape-k">{e.kind}</span>
+                    <span className="w-tape-t">{e.text}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+          <section id="people" aria-labelledby="pp-h" className="w-col-side w-stack w-people">
+            <SectionHead id="pp-h" title="People this week" note="counted, not scored" />
+            {t.people.length === 0 ? (
+              <div className="w-card w-calm-empty">
+                <p>Nobody has connected an agent yet.</p>
+                <p className="w-quiet">Each person runs one command; their agents start showing up here.</p>
+              </div>
+            ) : (
+              <div className="w-card w-list">
+                {t.people.map((p) => (
+                  <Link key={p.who.member} href={`/project/${encodeURIComponent(id)}/people/${encodeURIComponent(p.who.member)}`} className="w-person">
+                    <Avatar who={p.who} size={34} />
+                    <span className="w-person-t">
+                      <span className="w-strong">{p.who.displayName}{p.who.member === viewerId ? " (you)" : ""} <span className="w-meta">· {ownsPhrase(p.owns)}</span></span>
+                      {p.style && <span className="w-small w-ink2">{p.style}</span>}
+                    </span>
+                    <span className="w-person-n"><span>{p.done7d}</span><span className="w-meta">done</span></span>
+                  </Link>
+                ))}
+              </div>
+            )}
+            <div className="w-foot-acts">
+              <Link href={`/project/${encodeURIComponent(id)}/connect`} className="w-link">Connect an agent</Link>
+              <Invite projectId={id} />
+            </div>
+          </section>
+        </div>
+        {quiet && <p className="w-quiet w-center">This page updates live as agents work. Nothing here is made up.</p>}
+      </main>
+
+      <NewItemDialog projectId={id} open={newItem} onClose={() => setNewItem(false)} onDone={load} me={viewerId} release={t.release ? { id: t.release.id, title: t.release.title } : null} />
+      <ReleaseDialog projectId={id} open={release} onClose={() => setRelease(false)} onDone={load} release={t.release ? { id: t.release.id, title: t.release.title, dueAt: t.release.dueAt } : null} />
+      <WriteDialog projectId={id} open={write} onClose={() => setWrite(false)} onDone={load} me={viewerId} />
+      <HandoverDialog projectId={id} open={!!handover} onClose={() => setHandover(null)} onDone={load} item={handover} />
+      <PhoneTabs projectId={id} current="today" />
     </div>
   );
 }
 
-/** The slim sky band: the project goal (editable, as before) and team-goal progress. */
-function GoalBand({ proj, goals, proposals, onSaved }: { proj: Project; goals: Goal[]; proposals: GoalProposal[]; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(proj.goal);
-  const [err, setErr] = useState("");
-  useEffect(() => setDraft(proj.goal), [proj.goal]);
-
-  const save = async () => {
-    setErr("");
-    try {
-      await api.setGoal(proj.id, draft.trim());
-    } catch (e) {
-      if (!handleAuth(e)) setErr(errorMessage(e));
-      return;
-    }
-    setEditing(false);
-    onSaved();
-  };
-
-  const team = goals.filter((g) => g.scope === "team" && !g.parentId);
-  const steps = team.reduce((a, g) => ({ done: a.done + g.rollup.done, total: a.total + g.rollup.total }), { done: 0, total: 0 });
-  const prog = steps.total > 0 ? steps : { done: team.filter((g) => g.status === "done").length, total: team.length };
-  const pct = prog.total ? Math.round((prog.done / prog.total) * 100) : 0;
-
-  return (
-    <section aria-label="Goal" className="rz-field pj-band">
-      <span className="rz-blob pj-band-blob" aria-hidden="true" />
-      <div className="pj-band-in">
-        {editing ? (
-          <form className="pj-goal-edit" onSubmit={(e) => { e.preventDefault(); save(); }}>
-            <label htmlFor="pj-goal" className="pj-band-k">Goal</label>
-            <input id="pj-goal" value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus placeholder="The goal this whole team is steering toward" />
-            <button type="submit" className="rz-btn light small">Save goal</button>
-            <button type="button" className="rz-btn small pj-band-ghost" onClick={() => { setEditing(false); setErr(""); setDraft(proj.goal); }}>Cancel</button>
-            {err && <span className="pj-band-err" role="alert">{err}</span>}
-          </form>
-        ) : (
-          <div className="pj-goal">
-            <span className="pj-band-k">Goal</span>
-            <span className="pj-goal-t">{proj.goal || "No goal yet. Set the one this whole team is steering toward."}</span>
-            <button type="button" className="pj-goal-btn" onClick={() => setEditing(true)} aria-label={proj.goal ? "Edit the project goal" : "Set the project goal"}>
-              {proj.goal ? "Edit" : "Set goal"}
-            </button>
-            {proj.goalSetBy && <span className="pj-band-by">set by {proj.goalSetBy}</span>}
-          </div>
-        )}
-        <Link href={`/project/${encodeURIComponent(proj.id)}/lead`} className="pj-prog" aria-label={prog.total ? `Team goals: ${prog.done} of ${prog.total} done. Open goals` : "No team goals yet. Open goals"}>
-          {prog.total ? (
-            <>
-              <span>{prog.done} of {prog.total} done</span>
-              <span className="pj-prog-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
-            </>
-          ) : <span>No team goals yet</span>}
-          {proposals.length > 0 && <span className="pj-pill">{proposals.length} to review</span>}
-          <span aria-hidden="true">›</span>
-        </Link>
-      </div>
-    </section>
-  );
+function releaseSummary(items: { tone: string }[]): string {
+  if (items.length === 0) return "no items yet";
+  const ok = items.filter((i) => i.tone === "good" || i.tone === "calm").length;
+  const wait = items.filter((i) => i.tone === "needs").length;
+  const risk = items.filter((i) => i.tone === "block").length;
+  return [ok ? `${ok} on track` : "", wait ? `${wait} waiting` : "", risk ? `${risk} at risk` : ""].filter(Boolean).join(", ");
 }
 
-function Board({ proj, viewer, now }: { proj: Project; viewer: Viewer; now: number }) {
-  const rows = rowsOf(proj, now, viewer.me);
-  const anyLive = proj.members.some((m) => m.live);
-  const enc = encodeURIComponent(proj.id);
+/** Agent work not on any item yet, with "Track it" to turn it into an owned item. */
+function Untracked({ u, onDone, compact }: { u: TodayData["untracked"][number]; onDone: () => void; compact?: boolean }) {
+  const uid = useId();
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<ItemKind>("chore");
+  const { busy, err, run } = useAction(onDone);
+  const who = `${u.member.displayName}’s ${agentName(u.source) || "agent"}`;
+
+  const track = async () => {
+    if (await run(() => api.trackSession(u.sessionId, { kind, ...(title.trim() ? { title: title.trim() } : {}) }))) setOpen(false);
+  };
+
   return (
-    <>
-      <div className="pj-h">
-        <h1>Who is on what</h1>
-        <span className="pj-quiet">
-          <span className="pj-d-inline">last {WINDOW_MS / 60_000} minutes · </span>
-          <span className="pj-m-inline">last hour · </span>
-          {proj.members.length === 0 ? "waiting for the first agent" : anyLive ? "updates as agents work" : "nobody is live right now"}
+    <div className={compact ? "w-untracked compact" : "w-untracked"}>
+      <div className="w-lane-who">
+        {compact ? <AgentTile source={u.source} /> : null}
+        <span className="w-lane-name">
+          <span className="w-small w-strong w-ink2">{compact ? who : "Untracked"}</span>
+          <span className="w-meta">{compact ? `untracked · ${u.minutes} min` : "agent work not on any item yet"}</span>
         </span>
       </div>
-      {proj.members.length === 0 ? (
-        <div className="pj-empty">
-          <p className="pj-empty-t">No agents connected yet.</p>
-          <p className="pj-quiet">Lanes fill in as soon as a teammate’s agent sends its first edit.</p>
-          <Link href={`/project/${enc}/connect`} className="rz-btn primary small">Connect an agent</Link>
-        </div>
+      <span className="w-untracked-t">
+        {!compact && <><b className="w-strong">{who}</b> · {u.minutes} min. </>}{u.text}
+      </span>
+      {!open ? (
+        <button type="button" className="w-btn sky small" onClick={() => setOpen(true)} aria-label={`Track ${who}’s work as an item`}>Track it</button>
       ) : (
-        <>
-          <div className="pj-d-only"><Legend /></div>
-          <div className="pj-d-only"><Lanes rows={rows} collisions={proj.collisions} members={proj.members} now={now} /></div>
-          <div className="pj-m-only"><PeopleList rows={rows} now={now} /></div>
-          <HotFiles members={proj.members} collisions={proj.collisions} now={now} />
-        </>
+        <form className="w-track-form" onSubmit={(e) => { e.preventDefault(); track(); }}>
+          <label htmlFor={`${uid}-t`} className="w-sr">Name it</label>
+          <input id={`${uid}-t`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Name it (optional)" maxLength={200} autoFocus />
+          <label htmlFor={`${uid}-k`} className="w-sr">Kind</label>
+          <select id={`${uid}-k`} value={kind} onChange={(e) => setKind(e.target.value as ItemKind)}>
+            {KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+          </select>
+          <button type="submit" className="w-btn strong small" disabled={busy}>Track</button>
+          <button type="button" className="w-btn small ghost" onClick={() => setOpen(false)}>Cancel</button>
+          {err && <p className="w-err" role="alert">{err}</p>}
+        </form>
       )}
-    </>
-  );
-}
-
-const assignHref = (projectId: string, area: string, suggest: string[] = []) =>
-  `/project/${encodeURIComponent(projectId)}/lead?assign=${encodeURIComponent(area.slice(0, 200))}${suggest.length ? `&suggest=${encodeURIComponent(suggest.join(","))}` : ""}#assign`;
-const andList = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
-
-/** Overlaps (pink), blocked teammates (amber) and synthesized risks. On phones it splits:
- *  `compact="overlaps"` sits above the people list, `compact="rest"` in the rail below it. */
-function Attention({ proj, admin, now, compact }: { proj: Project; admin: boolean; now: number; compact?: "overlaps" | "rest" }) {
-  const collisions = compact === "rest" ? [] : proj.rollup ? proj.rollup.collisions : proj.collisions;
-  const blocked = compact === "overlaps" ? [] : proj.members.filter((m) => m.displayStatus === "blocked");
-  const risks = compact === "overlaps" ? [] : proj.rollup?.risks ?? [];
-  const enc = encodeURIComponent(proj.id);
-  if (compact && collisions.length === 0 && blocked.length === 0 && risks.length === 0) return null;
-
-  return (
-    <section className="pj-sec" aria-labelledby={compact ? `pj-att-${compact}` : "pj-att"}>
-      <h2 id={compact ? `pj-att-${compact}` : "pj-att"} className={`rz-section-h${compact === "overlaps" ? " pj-sr" : ""}`}>Needs attention</h2>
-      {collisions.length === 0 && blocked.length === 0 && risks.length === 0 && (
-        <p className="pj-quiet">Nothing needs you. No overlaps, nobody blocked.</p>
-      )}
-      {collisions.map((c, i) => {
-        const caught = c.computed ? caughtAt(c, proj.members) : null;
-        const branch = isBranchArea(c.area);
-        return (
-          <article key={`c${i}`} className="pj-att ov">
-            <span className="pj-att-k"><span className="pj-pip" aria-hidden="true" />
-              {c.computed ? (caught?.sent ? `Heads-up sent · ${clock(caught.at)}` : "Overlap · live") : "Possible overlap"}
-            </span>
-            <span className="pj-att-t">
-              {c.computed ? (
-                branch
-                  ? <>{andList(c.members)} are both on <span className="pj-mono">{c.area.replace(/^branch /, "")}</span>.</>
-                  : <>{andList(c.members)} both reached for <span className="pj-mono">{c.area}</span>.</>
-              ) : (
-                <><span className="pj-mono">{c.area}</span> · {andList(c.members)}{c.note ? `: ${c.note}` : ""}</>
-              )}
-            </span>
-            {admin && (
-              <Link className="rz-btn ghost small pj-att-a" href={assignHref(proj.id, c.area.replace(/^branch /, ""), collisionIds(c, proj.members))}>
-                Assign an owner
-              </Link>
-            )}
-          </article>
-        );
-      })}
-      {blocked.map((m) => {
-        const b = blockedSince(m);
-        const why = b?.why || m.headline;
-        return (
-          <article key={m.member} className="pj-att bl">
-            <span className="pj-att-k"><span className="pj-pip" aria-hidden="true" />Blocked{b ? ` · ${span(Math.min(b.at, now))}` : ""}</span>
-            <span className="pj-att-t">{m.displayName} is blocked{why ? `: ${why}` : "."}</span>
-            <Link className="rz-btn ghost small pj-att-a" href={`/project/${enc}/${encodeURIComponent(m.member)}`}>Open {m.displayName}’s brief</Link>
-          </article>
-        );
-      })}
-      {risks.map((r, i) => (
-        <article key={`r${i}`} className="pj-att">
-          <span className="pj-att-k">Risk</span>
-          <span className="pj-att-t">{r}</span>
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function untilLabel(ts: number): string {
-  const h = Math.max(0, (ts - Date.now()) / 3_600_000);
-  return h < 1 ? `${Math.max(1, Math.round(h * 60))}m left` : h < 48 ? `${Math.round(h)}h left` : `${Math.round(h / 24)}d left`;
-}
-
-/** Active directives and assignments, read-only here; leads post and clear them in the console. */
-function FromLead({ proj, admin }: { proj: Project; admin: boolean }) {
-  const nameOf = (id: string) => proj.members.find((m) => m.member === id)?.displayName || id;
-  const empty = proj.directives.length === 0 && proj.assignments.length === 0;
-  return (
-    <section className="pj-sec" aria-labelledby="pj-lead">
-      <h2 id="pj-lead" className="rz-section-h">From the lead</h2>
-      {empty && (
-        <p className="pj-quiet">
-          Nothing from the lead right now.
-          {admin && <> <Link href={`/project/${encodeURIComponent(proj.id)}/lead`} className="pj-a">Post a directive</Link></>}
-        </p>
-      )}
-      {proj.directives.map((d) => (
-        <div key={d.id} className="pj-dir">
-          <p className="pj-dir-t">“{d.text}”</p>
-          <span className="pj-quiet">
-            to {d.targets.length ? d.targets.map(nameOf).join(", ") : "the whole team"} · {untilLabel(d.expiresAt)}{d.by ? ` · ${d.by}` : ""}
-          </span>
-        </div>
-      ))}
-      {proj.assignments.map((a) => (
-        <div key={a.id} className="pj-asg">
-          <span><span className="pj-mono">{a.area}</span> → <b>{nameOf(a.member)}</b></span>
-          <span className="pj-quiet">assigned {timeAgo(a.createdAt)}{a.by ? ` by ${a.by}` : ""}{a.note ? ` · ${a.note}` : ""}</span>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function UpForGrabs({ proj, viewer, onChange }: { proj: Project; viewer: Viewer; onChange: () => void }) {
-  const [local, setLocal] = useState("");
-  const [err, setErr] = useState("");
-  // Claim as the signed-in account. Only the auth-off local instance (no
-  // accounts) asks for a name, remembered in localStorage.
-  const who = (): string | null => {
-    if (viewer.me) return viewer.me;
-    if (viewer.auth) return null;
-    let v = local;
-    if (!v) { v = prompt("Your name (so peers know who claimed it):") || "someone"; localStorage.setItem("reins-me", v); setLocal(v); }
-    return v;
-  };
-  // A failure (e.g. 409: someone else got there first) shows the server's reason
-  // and refreshes so the board reflects what actually happened.
-  const run = (p: Promise<unknown>) => {
-    setErr("");
-    p.then(onChange, (e) => { if (!handleAuth(e)) { setErr(errorMessage(e)); onChange(); } });
-  };
-  const claim = (id: string) => {
-    const by = who();
-    if (!by) { setErr("Log in with your account to claim items."); return; }
-    run(api.claim(id, proj.id, by));
-  };
-  const open = proj.pending.filter((p) => p.status !== "done");
-
-  return (
-    <section className="pj-sec" aria-labelledby="pj-grabs">
-      <h2 id="pj-grabs" className="rz-section-h">Up for grabs</h2>
-      {err && <p className="pj-err" role="alert">{err}</p>}
-      {open.length === 0 ? (
-        <p className="pj-quiet">Nothing waiting. Clean board.</p>
-      ) : (
-        open.map((p) => (
-          <div className="pj-grab" key={p.id}>
-            <div className="pj-grab-t">
-              <span>{p.text}</span>
-              <span className="pj-quiet">from {p.member}{p.status === "claimed" && p.claimedBy ? ` · ${p.claimedBy} on it` : ""}</span>
-            </div>
-            <div className="pj-grab-a">
-              {p.status === "open"
-                ? <button type="button" className="pj-btn sky" onClick={() => claim(p.id)}>Claim</button>
-                : <span className="pj-claimed">Claimed</span>}
-              <button type="button" className="pj-btn" onClick={() => run(api.done(p.id, proj.id))} aria-label={`Mark done: ${p.text}`}>Done</button>
-            </div>
-          </div>
-        ))
-      )}
-    </section>
-  );
-}
-
-const HKIND: Record<string, string> = { mention: "@mention", collision: "Overlap", blocker: "Blocker", fyi: "FYI", assignment: "Assignment" };
-const SHOW = 4;
-
-/** Every open handoff on the team, with ack/resolve, then the ones Reins closed itself (reopen). */
-function Handoffs({ proj, act }: { proj: Project; act: Act }) {
-  const [all, setAll] = useState(false);
-  const nameOf = (id: string) => proj.members.find((m) => m.member === id)?.displayName || id;
-  const open: { h: Handoff; to: Member }[] = proj.members.flatMap((m) => m.handoffs.map((h) => ({ h, to: m })));
-  const closed: { h: Handoff; to: Member }[] = proj.members.flatMap((m) => m.autoClosed.map((h) => ({ h, to: m })));
-  open.sort((a, b) => b.h.createdAt - a.h.createdAt);
-  const shown = all ? open : open.slice(0, SHOW);
-
-  return (
-    <section className="pj-sec" aria-labelledby="pj-hand">
-      <h2 id="pj-hand" className="rz-section-h">Handoffs{open.length > 0 ? ` · ${open.length} open` : ""}</h2>
-      {open.length === 0 && closed.length === 0 && <p className="pj-quiet">No open handoffs.</p>}
-      {shown.map(({ h, to }) => (
-        <div key={h.id} className={`pj-ho${h.kind === "collision" ? " ov" : h.kind === "blocker" ? " bl" : ""}`}>
-          <span className="pj-ho-k">
-            {HKIND[h.kind] || h.kind}
-            <span className="pj-ho-route">
-              {h.from ? nameOf(h.from) : "Reins"}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-label="to"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-              {to.displayName}
-            </span>
-            {h.status === "ack" && <span className="pj-quiet">ack’d</span>}
-          </span>
-          <span className="pj-ho-t">{h.text}</span>
-          {!!h.conventions?.length && <span className="pj-quiet">their conventions: {h.conventions.join("; ")}</span>}
-          <span className="pj-ho-a">
-            {h.status === "open" && <button type="button" className="pj-btn" onClick={() => act(api.handoff(h.id, proj.id, "ack"))}>Ack</button>}
-            <button type="button" className="pj-btn" onClick={() => act(api.handoff(h.id, proj.id, "resolve"))}>Resolve</button>
-          </span>
-        </div>
-      ))}
-      {open.length > SHOW && (
-        <button type="button" className="pj-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
-          {all ? "Show fewer" : `Show all ${open.length}`}
-        </button>
-      )}
-      {closed.length > 0 && (
-        <div className="pj-closed">
-          <span className="pj-quiet">Closed on their own</span>
-          {closed.map(({ h, to }) => (
-            <div key={h.id} className="pj-closed-r" title={h.text}>
-              <span>
-                <span className="pj-mono">{HKIND[h.kind] || h.kind} · {h.from ? `${nameOf(h.from)} → ` : ""}{to.displayName}</span>
-                <span className="pj-quiet">{h.autoClosed?.reason || "no longer applies"}</span>
-              </span>
-              <button type="button" className="pj-btn" onClick={() => act(api.handoff(h.id, proj.id, "reopen"))}>Reopen</button>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-/** The synthesized team status, a manual resync, and the team tools (invite, tokens) for admins. */
-function Summary({ proj, act }: { proj: Project; act: Act }) {
-  const r = proj.rollup;
-  return (
-    <section className="pj-sec" aria-labelledby="pj-sum">
-      <h2 id="pj-sum" className="rz-section-h">Team summary</h2>
-      {r ? (
-        <>
-          <p className="pj-sum-t">{r.summary}</p>
-          {r.alignment && <p className="pj-quiet"><b>Goal alignment:</b> {r.alignment}</p>}
-          <span className="pj-quiet">synthesized {timeAgo(r.updatedAt)}</span>
-        </>
-      ) : (
-        <p className="pj-quiet">No summary yet. It synthesizes after the team logs a bit of activity.</p>
-      )}
-      <div className="pj-tools">
-        <button type="button" className="rz-btn ghost small" onClick={() => act(api.refreshRollup(proj.id))}>Resync</button>
-        <Invite projectId={proj.id} />
-        <ManageTokens />
-      </div>
-    </section>
+    </div>
   );
 }

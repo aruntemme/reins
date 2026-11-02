@@ -7,7 +7,7 @@
 }
 .um-btn:hover { background: var(--sky-soft); border-color: var(--sky-tint); }
 .um-btn[aria-expanded="true"] { background: var(--sky-soft); border-color: var(--sky); }
-.um-btn:focus-visible, .um-item:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.um-btn:focus-visible, .um-item:focus-visible, .um-theme-opt:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
 .um-av { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--navy); color: var(--white); font-size: 13px; font-weight: 500; }
 .um-email { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .um-caret { flex: none; color: var(--ink-3); transition: transform .15s; }
@@ -16,7 +16,7 @@
 .um-panel {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; width: 280px; max-width: calc(100vw - 32px);
   padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
-  box-shadow: 0 1px 0 rgba(11,37,64,.03), 0 18px 40px -16px rgba(11,37,64,.3);
+  box-shadow: var(--shadow-pop);
 }
 .um-head { display: flex; align-items: center; gap: 12px; padding: 8px 10px 12px; min-width: 0; }
 .um-head .um-av { width: 40px; height: 40px; font-size: 14px; }
@@ -36,6 +36,15 @@
 .um-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .um-item-meta { font-family: var(--font-mono), monospace; font-size: 11.5px; color: var(--ink-3); flex: none; }
 .um-item.current .um-item-meta { color: var(--sky-text); }
+
+/* theme switch (components/theme-toggle.tsx): a three-way segmented control */
+.um-theme { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; margin: 0 2px 4px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.um-theme-opt {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 44px; padding: 4px 0;
+  border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.um-theme-opt:hover { color: var(--ink); }
+.um-theme-opt[aria-checked="true"] { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px light-dark(rgba(11,37,64,.08), rgba(0,0,0,.3)); }
 
 @media (max-width: 640px) {
   .um-email, .um-caret { display: none; }

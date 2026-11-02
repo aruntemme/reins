@@ -7,7 +7,7 @@
  *   npx reins-hook install --agent codex --url <url> --project <id> --token <tok>   (CI)
  *   npx reins-hook status
  *   npx reins-hook uninstall [--all]
- *   npx reins-hook mcp --url <url> --token <access-token>
+ *   npx reins-hook mcp [--url <url> --token <token> --project <id> --member <name>]
  *
  * Commands written into agent configs point at a stable copy under ~/.reins and
  * carry only REINS_SOURCE; the server, token, member and project resolve at
@@ -20,6 +20,7 @@ import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runMcp } from "./reins-mcp.mjs";
 import { createUI } from "./lib/tui.mjs";
+import { mainRootOf } from "./lib/git.mjs";
 import { runSetup, http, normalizeInputUrl, parseAgentList } from "./lib/setup.mjs";
 import {
   loadConfig, rememberSetup, forgetSetup, repoEntry, configPath, normalizeUrl, resolveRuntime, HOSTED_URL,
@@ -60,8 +61,15 @@ function git(args, cwd) {
     return null;
   }
 }
-/** The key this folder has in the repos map: its git root, else the folder itself. */
-const repoKey = (cwd) => git(["rev-parse", "--show-toplevel"], cwd) || resolve(cwd);
+/** This folder's git toplevel (the worktree), else the folder itself. */
+const toplevel = (cwd) => git(["rev-parse", "--show-toplevel"], cwd) || resolve(cwd);
+/** The key this folder has in the repos map: the MAIN repo root (so every worktree
+ *  shares one entry), else the folder itself. */
+const repoKey = (cwd) => {
+  const top = git(["rev-parse", "--show-toplevel"], cwd);
+  const common = top && git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd);
+  return top ? mainRootOf(common, top) : resolve(cwd);
+};
 
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
@@ -80,8 +88,10 @@ async function install(args) {
     return 1;
   }
   const cwd = process.cwd();
-  const root = git(["rev-parse", "--show-toplevel"], cwd);
-  const key = root || resolve(cwd);
+  const top = git(["rev-parse", "--show-toplevel"], cwd);
+  const dir = top || resolve(cwd); // where a repo-scoped Claude install writes (this worktree)
+  const key = repoKey(cwd);
+  const root = top ? key : null; // in a worktree: the main repo, so all worktrees share one mapping
   const cfg = loadConfig();
   const saved = repoEntry(cfg, cwd);
   const servers = Object.keys(cfg.servers);
@@ -105,13 +115,17 @@ async function install(args) {
   for (const id of agents) {
     let r;
     try {
-      r = installAgent(id, { cwd, dir: key, scope, source: str(args.source) });
+      r = installAgent(id, { cwd, dir, scope, source: str(args.source) });
     } catch (e) {
       ui.err(`${AGENTS[id]?.label || id}: ${e.message}`);
       failed++;
       continue;
     }
-    if (r.conflict) { ui.warn(`${AGENTS[id].label}: not wired — ${r.conflict}`); failed++; continue; }
+    const tools = () => {
+      if (r.tools) ui.ok(`${AGENTS[id].label}: Reins tools connected`);
+      else if (r.toolsNote) (id === "aider" ? ui.hint : ui.warn)(r.toolsNote);
+    };
+    if (r.conflict) { ui.warn(`${AGENTS[id].label}: not wired — ${r.conflict}`); tools(); failed++; continue; }
     if (r.manual) {
       ui.ok(`${AGENTS[id].label}: run this from your agent's prompt/stop hook (pipe it a JSON object):`);
       ui.info(c.cyan(r.manual));
@@ -119,6 +133,7 @@ async function install(args) {
     }
     for (const w of r.wrote) ui.ok(`${AGENTS[id].label} ${c.dim("→")} ${w.path} ${c.dim(`(${w.note})`)}`);
     for (const n of r.notes || []) ui.warn(n);
+    tools();
     if (r.next) ui.hint(id === "claude-code" ? "Last step: in Claude Code run /hooks to approve the new hooks (or restart)." : r.next);
   }
   ui.kv("server", url);
@@ -162,7 +177,7 @@ async function status(args) {
     : `${tildify(key)} ${c.yellow("not set up")} ${c.dim(`— run npx reins-hook (events would go to project "${rt.project}")`)}`);
   ui.write("");
   ui.write(`  ${c.b("agents")}`);
-  const o = { cwd, dir: key };
+  const o = { cwd, dir: toplevel(cwd) };
   for (const id of WIZARD_AGENTS) {
     const rows = agentStatus(id, o);
     if (!rows.length) { ui.write(`     ${c.dim("·")} ${AGENTS[id].label.padEnd(12)} ${c.dim("not wired")}`); continue; }
@@ -186,7 +201,7 @@ function uninstall(args) {
   const { c } = ui;
   const cwd = process.cwd();
   const key = repoKey(cwd);
-  const o = { cwd, dir: key };
+  const o = { cwd, dir: toplevel(cwd) };
   ui.write("");
   let any = false;
   for (const id of WIZARD_AGENTS) {
@@ -218,7 +233,7 @@ function help() {
     npx reins-hook install [options]     non-interactive, for CI and scripts
     npx reins-hook status                server, who you are, repo → project, wired agents
     npx reins-hook uninstall [--all]     remove all agent wiring we added
-    npx reins-hook mcp --url <url> --token <access-token> [--ingest-token <tok>]
+    npx reins-hook mcp [--url <url> --token <ingest token> --project <id> --member <name>]
 
   ${c.b("setup")} — detects the repo, checks the server, signs you in in the browser
   (no tokens to copy), wires the agents you pick and puts you on the board.
@@ -242,12 +257,16 @@ function help() {
     Claude Code  .claude/settings.local.json (this repo) or ~/.claude/settings.json
     Codex CLI    notify in ~/.codex/config.toml
     OpenCode     ~/.config/opencode/plugins/reins.js
-    Aider        notifications-command in ~/.aider.conf.yml
+    Aider        notifications-command in ~/.aider.conf.yml (no MCP support)
+    Reins tools  Claude Code ~/.claude.json · Codex ~/.codex/config.toml · OpenCode ~/.config/opencode/opencode.json
     Sign-in      ~/.reins/config.json (servers + repo → project), read at runtime
 
-  ${c.b("mcp")} — give your agent read/write access to the shared board over MCP
-      claude mcp add reins -- npx reins-hook mcp --url https://your-reins --token rk_access_…
-    Add --ingest-token rk_ingest_… to also let the agent post notes.
+  ${c.b("mcp")} — Reins tools for your agent (items, steps, ask a teammate, hand over)
+    Setup registers it for Claude Code, Codex and OpenCode (no token in the command: it reads
+    ~/.reins/config.json for the folder the agent runs in). Other MCP clients can run
+      npx reins-hook mcp
+    Flags override the saved connection. Old setups keep working: --ingest-token, or an
+    rk_access_… --token, selects the previous tool set.
 `);
   return 0;
 }
@@ -272,7 +291,11 @@ if (isMain) (async () => {
     else if (cmd === "mcp") {
       // Long-lived stdio server, launched by the agent. stdout is reserved for the
       // protocol, so it must stay silent here.
-      await runMcp({ url: args.url, token: args.token || args.key, ingestToken: args["ingest-token"] || args.ingest });
+      const v = (k) => (typeof args[k] === "string" ? args[k] : undefined);
+      await runMcp({
+        url: v("url"), token: v("token") || v("key"), ingestToken: v("ingest-token") || v("ingest"),
+        project: v("project"), member: v("member"),
+      });
       return;
     } else {
       console.error(`Unknown command "${cmd}".`);

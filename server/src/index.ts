@@ -9,6 +9,8 @@ import { auth } from "./routes/auth.js";
 import { stream } from "./routes/stream.js";
 import { hook } from "./routes/hook.js";
 import { cli } from "./routes/cli.js";
+import { work } from "./routes/work.js";
+import { agent } from "./routes/agent.js";
 import { projectsWithOpenCoordination } from "./db.js";
 import { reconcileCollisions } from "./collisions.js";
 import { recoverUndistilled, drainPipeline } from "./pipeline/index.js";
@@ -48,6 +50,8 @@ app.use("/api", api);
 app.use("/api", stream);
 app.use("/api", hook);
 app.use("/api", cli);
+app.use("/api", work);
+app.use("/api", agent);
 
 // Errors from any route (incl. async ones via asyncHandler): log, answer JSON.
 app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

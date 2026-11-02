@@ -76,7 +76,7 @@ export function Invite({ projectId }: { projectId: string }) {
                   Create a single-use join link. Your teammate signs up, lands on this project&rsquo;s connect page and
                   runs one command in their repo. You don&rsquo;t send any tokens.
                 </p>
-                {err && <div className="mono" style={{ color: "var(--blocked)", marginTop: 10 }} role="alert">{err}</div>}
+                {err && <div className="mono" style={{ color: "var(--amber-text)", marginTop: 10 }} role="alert">{err}</div>}
                 <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
                   <button className="rz-btn primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create join link"}</button>
                   <button className="rz-btn ghost" onClick={reset}>Cancel</button>

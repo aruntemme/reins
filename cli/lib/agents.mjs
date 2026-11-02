@@ -7,6 +7,12 @@
  *   opencode     plugin file ~/.config/opencode/plugins/reins.js ($XDG_CONFIG_HOME honoured)
  *   aider        `notifications` + `notifications-command` in ~/.aider.conf.yml
  *
+ * Besides capture, Claude Code, Codex and OpenCode also get the Reins MCP server
+ * (their agent can read the board, mark steps, ask teammates): Claude Code in
+ * ~/.claude.json (user scope, so no project file is created or committed), Codex as
+ * [mcp_servers.reins] in config.toml, OpenCode as `mcp.reins` in opencode.json.
+ * Aider has no MCP. The command is `node ~/.reins/reins-mcp.mjs` with no token.
+ *
  * Rules every writer follows:
  *   • idempotent — re-running replaces ours in place, never duplicates it;
  *   • never clobbers foreign config — a conflicting setting is left exactly as it
@@ -22,7 +28,7 @@
  * Every function takes { home, cwd, dir, env } so tests can point it at temp dirs.
  */
 import {
-  readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, unlinkSync, statSync, realpathSync,
+  readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, unlinkSync, statSync, realpathSync, renameSync,
 } from "node:fs";
 import { dirname, join, resolve, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,6 +85,15 @@ export const opencodePluginPath = (o = {}) => join(xdgConfig(o), "opencode", "pl
 // Older opencode releases (and some docs) used the singular directory.
 const opencodeLegacyPluginPath = (o = {}) => join(xdgConfig(o), "opencode", "plugin", "reins.js");
 export const aiderConfigPath = (o = {}) => join(homeOf(o), ".aider.conf.yml");
+export const claudeMcpPath = (o = {}) => join(homeOf(o), ".claude.json");
+/** opencode.json, or the opencode.jsonc that is already there. */
+export const opencodeConfigPath = (o = {}) => {
+  const dir = join(xdgConfig(o), "opencode");
+  return existsSync(join(dir, "opencode.json")) || !existsSync(join(dir, "opencode.jsonc")) ? join(dir, "opencode.json") : join(dir, "opencode.jsonc");
+};
+/** The MCP server script under ~/.reins (forward slashes, as it appears in our entries). */
+export const mcpScript = (o) => `${marker(o)}/reins-mcp.mjs`;
+const MCP_NAME = "reins";
 
 function sameFile(a, b) {
   const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
@@ -103,13 +118,14 @@ function copyDir(src, dest) {
   }
 }
 
-/** Copy the hook, the shared lib and the adapters to ~/.reins, where every
+/** Copy the hook, the MCP server, the shared lib and the adapters to ~/.reins, where every
  *  command we write points (a stable path that outlives the npx cache). */
 export function installRuntime(o = {}) {
   const dest = installDir(o);
   mkdirSync(dest, { recursive: true });
-  const hook = join(CLI_ROOT, "reins-hook.mjs");
-  if (resolve(hook) !== resolve(join(dest, "reins-hook.mjs"))) copyFileSync(hook, join(dest, "reins-hook.mjs"));
+  for (const f of ["reins-hook.mjs", "reins-mcp.mjs"]) {
+    if (resolve(join(CLI_ROOT, f)) !== resolve(join(dest, f))) copyFileSync(join(CLI_ROOT, f), join(dest, f));
+  }
   copyDir(join(CLI_ROOT, "lib"), join(dest, "lib"));
   copyDir(join(CLI_ROOT, "adapters"), join(dest, "adapters"));
   return dest;
@@ -610,6 +626,143 @@ function statusAider(o) {
     : [];
 }
 
+// ---------------------------------------------------------------- MCP registration
+
+/** True when an MCP entry (any agent's shape) runs our script. */
+const isOurMcp = (entry, o) => JSON.stringify(entry ?? null).includes(mcpScript(o));
+
+/** Write JSON atomically, keeping the file's mode (~/.claude.json is rewritten by Claude Code itself). */
+function writeJsonAtomic(path, v) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  let mode = 0o600;
+  try { mode = statSync(path).mode & 0o777; } catch { /* new file */ }
+  writeFileSync(tmp, JSON.stringify(v, null, 2) + "\n", { mode });
+  renameSync(tmp, path);
+}
+
+/** Add/replace/remove `reins` in a JSON config's server map (`mcpServers` or `mcp`). Returns what happened. */
+function editJsonMcp(path, key, entry, o, { remove = false } = {}) {
+  if (remove && !existsSync(path)) return { removed: false };
+  const cfg = readJsonStrict(path);
+  const map = cfg[key];
+  if (map !== undefined && (typeof map !== "object" || map === null || Array.isArray(map))) {
+    throw new Error(`${path} has a "${key}" value that is not an object; fix it, then run again.`);
+  }
+  const have = map?.[MCP_NAME];
+  if (have !== undefined && !isOurMcp(have, o)) {
+    if (remove) return { removed: false };
+    return { conflict: `${path} already defines an MCP server named "${MCP_NAME}" — left as is. Rename it, or point it at: node "${mcpScript(o)}"` };
+  }
+  if (remove) {
+    if (have === undefined) return { removed: false };
+    delete map[MCP_NAME];
+    if (!Object.keys(map).length) delete cfg[key];
+    // An opencode.json that only ever held our entry (plus the $schema we add) goes away with it.
+    if (key === "mcp" && Object.keys(cfg).every((k) => k === "$schema")) { unlinkSync(path); return { removed: true }; }
+    writeJsonAtomic(path, cfg);
+    return { removed: true };
+  }
+  if (JSON.stringify(have) !== JSON.stringify(entry)) {
+    cfg[key] = { ...(map || {}), [MCP_NAME]: entry };
+    if (key === "mcp" && !existsSync(path)) cfg.$schema = "https://opencode.ai/config.json";
+    writeJsonAtomic(path, cfg);
+  }
+  return { wrote: { path, note: "Reins tools (MCP)" } };
+}
+
+const claudeMcpEntry = (o) => ({ type: "stdio", command: "node", args: [mcpScript(o)], env: {} });
+const opencodeMcpEntry = (o) => ({ type: "local", command: ["node", mcpScript(o)], enabled: true });
+
+// Codex: a [mcp_servers.reins] table appended to config.toml, its header tagged.
+const CODEX_MCP_HEADER = /^\s*\[\s*mcp_servers\s*\.\s*(?:reins|"reins")\s*\]/;
+const codexMcpLines = (o) => [`[mcp_servers.${MCP_NAME}] # ${TAG}`, `command = "node"`, `args = [${tomlStr(mcpScript(o))}]`];
+
+/** The [mcp_servers.reins] table: its line range, and whether it is ours. */
+function findCodexMcp(lines, o) {
+  const start = lines.findIndex((l) => CODEX_MCP_HEADER.test(l));
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length && !/^\s*\[/.test(lines[end])) end++;
+  const body = lines.slice(start, end).join("\n");
+  return { start, end, ours: lines[start].includes(TAG) || body.includes(mcpScript(o)) };
+}
+
+/** Insert/replace our MCP table in a config.toml text. Pure. */
+export function upsertCodexMcp(text, o) {
+  const lines = text.split("\n");
+  const found = findCodexMcp(lines, o);
+  if (found && !found.ours) return { text, conflict: lines.slice(found.start, found.end).join("\n").trimEnd() };
+  if (found) {
+    let trailing = 0;
+    while (lines[found.end - 1 - trailing] === "" && found.end - 1 - trailing > found.start) trailing++;
+    lines.splice(found.start, found.end - found.start, ...codexMcpLines(o), ...Array(trailing).fill(""));
+  } else {
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    if (lines.length) lines.push("");
+    lines.push(...codexMcpLines(o), "");
+  }
+  const out = lines.join("\n");
+  return { text: out, changed: out !== text };
+}
+
+/** Remove our MCP table from a config.toml text. Pure. */
+export function removeCodexMcp(text, o) {
+  const lines = text.split("\n");
+  const found = findCodexMcp(lines, o);
+  if (!found || !found.ours) return { text, removed: 0 };
+  let last = found.end; // keep the blank lines that follow the table
+  while (last > found.start + 1 && lines[last - 1] === "") last--;
+  lines.splice(found.start, last - found.start);
+  if (found.start > 0 && lines[found.start - 1] === "" && lines[found.start] === "") lines.splice(found.start, 1);
+  while (lines.length > 1 && lines[lines.length - 1] === "" && lines[lines.length - 2] === "") lines.pop();
+  return { text: lines.join("\n"), removed: 1 };
+}
+
+/** Register (or, with `remove`, drop) the Reins MCP server for an agent. Never throws:
+ *  { wrote } | { conflict } | { removed } | { skipped }. */
+function mcpFor(id, o, remove = false) {
+  try {
+    if (id === "claude-code") return editJsonMcp(claudeMcpPath(o), "mcpServers", claudeMcpEntry(o), o, { remove });
+    if (id === "opencode") return editJsonMcp(opencodeConfigPath(o), "mcp", opencodeMcpEntry(o), o, { remove });
+    if (id === "codex") {
+      const path = codexConfigPath(o);
+      if (remove && !existsSync(path)) return { removed: false };
+      const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+      if (remove) {
+        const r = removeCodexMcp(before, o);
+        if (r.removed) writeFileSync(path, r.text);
+        return { removed: !!r.removed };
+      }
+      const r = upsertCodexMcp(before, o);
+      if (r.conflict) return { conflict: `${path} already defines [mcp_servers.${MCP_NAME}] — left as is:\n    ${r.conflict.split("\n").join("\n    ")}` };
+      if (r.changed) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, r.text); }
+      return { wrote: { path, note: "Reins tools (MCP)" } };
+    }
+  } catch (e) {
+    return { conflict: e.message };
+  }
+  return { skipped: true };
+}
+
+function statusMcp(id, o) {
+  try {
+    if (id === "codex") {
+      const path = codexConfigPath(o);
+      if (!existsSync(path)) return [];
+      const f = findCodexMcp(readFileSync(path, "utf8").split("\n"), o);
+      return f ? [f.ours ? { path, note: "Reins tools (MCP)" } : { path, note: "Reins tools (MCP)", warn: "a different [mcp_servers.reins] is there — Reins tools are not wired", foreign: true }] : [];
+    }
+    const [path, key] = id === "claude-code" ? [claudeMcpPath(o), "mcpServers"] : id === "opencode" ? [opencodeConfigPath(o), "mcp"] : [];
+    if (!path || !existsSync(path)) return [];
+    const have = readJsonStrict(path)[key]?.[MCP_NAME];
+    if (have === undefined) return [];
+    return [isOurMcp(have, o) ? { path, note: "Reins tools (MCP)" } : { path, note: "Reins tools (MCP)", warn: "a different \"reins\" MCP server is there — Reins tools are not wired", foreign: true }];
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------- public API
 
 /**
@@ -626,23 +779,30 @@ export function installAgent(id, o = {}) {
   }
   const r = fns[id](o);
   const notes = [...(r.notes || [])];
+  const mcp = mcpFor(id, o);
+  const wrote = [...(r.wrote || []), ...(mcp.wrote ? [mcp.wrote] : [])];
   if (id !== "claude-code") {
     const swept = scrubLegacyAdapterHooks(o);
     for (const p of swept) notes.push(`removed an old Reins adapter hook from ${p} (Claude Code no longer runs other agents' adapters)`);
   }
-  return { id, wrote: r.wrote || [], notes, conflict: r.conflict, next: r.next };
+  // tools: the Reins MCP server is registered; toolsNote says why not (Aider has no MCP).
+  const toolsNote = id === "aider" ? "Aider has no MCP support, so it gets capture only, not the Reins tools." : mcp.conflict;
+  return { id, wrote, notes, conflict: r.conflict, next: r.next, tools: !!mcp.wrote, toolsNote };
 }
 
-/** Remove one agent's wiring. Returns the files changed. */
+/** Remove one agent's wiring (capture and Reins tools). Returns the files changed. */
 export function uninstallAgent(id, o = {}) {
   const fns = { "claude-code": uninstallClaude, codex: uninstallCodex, opencode: uninstallOpencode, aider: uninstallAider };
-  return fns[id] ? fns[id](o) : [];
+  const files = fns[id] ? fns[id](o) : [];
+  const m = mcpFor(id, o, true);
+  if (m.removed) files.push(id === "claude-code" ? claudeMcpPath(o) : id === "codex" ? codexConfigPath(o) : opencodeConfigPath(o));
+  return [...new Set(files)];
 }
 
 /** Where an agent is wired: [{path, note, command?, warn?, foreign?}] (empty = not wired). */
 export function agentStatus(id, o = {}) {
   const fns = { "claude-code": statusClaude, codex: statusCodex, opencode: statusOpencode, aider: statusAider };
-  try { return fns[id] ? fns[id](o) : []; } catch { return []; }
+  try { return fns[id] ? [...fns[id](o), ...statusMcp(id, o)] : []; } catch { return []; }
 }
 
 /** Hide an ingest token in a displayed command (legacy installs embedded REINS_KEY). */

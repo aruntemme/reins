@@ -364,6 +364,95 @@ addColumn("handoffs", "conventions", "TEXT");
 // Taste-profile opt-in, per account per workspace. Off by default.
 addColumn("memberships", "share_traits", "INTEGER NOT NULL DEFAULT 0");
 
+// ── Owned work (calm workspace) ──────────────────────────────
+// Items and releases reuse goals: an ITEM is scope 'individual' (member = owner),
+// a RELEASE is scope 'team'. kind is NULL for releases; status_at is when status
+// last changed (so "blocked today" counts real changes, not later edits).
+addColumn("goals", "kind", "TEXT");
+addColumn("goals", "status", "TEXT NOT NULL DEFAULT 'open'");
+addColumn("goals", "status_at", "INTEGER");
+addColumn("goals", "due_at", "INTEGER");
+addColumn("goals", "branch", "TEXT");
+addColumn("goals", "done_at", "INTEGER");
+addColumn("goals", "summary", "TEXT");
+// Steps (goal_items) remember who ticked them, from which agent, and when.
+addColumn("goal_items", "done_by", "TEXT");
+addColumn("goal_items", "done_source", "TEXT");
+addColumn("goal_items", "done_at", "INTEGER");
+
+db.exec(`
+-- One row per agent session (hook session id; adapters without one use
+-- source:member:worktree). state: working | waiting | blocked | idle | ended.
+-- worktree and repo_root hold folder NAMES only, never a local absolute path.
+CREATE TABLE IF NOT EXISTS sessions (
+  id          TEXT PRIMARY KEY,
+  project     TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  source      TEXT NOT NULL DEFAULT 'claude-code',
+  branch      TEXT,
+  worktree    TEXT,
+  repo_root   TEXT,
+  item_id     TEXT,
+  state       TEXT NOT NULL DEFAULT 'idle',
+  state_since INTEGER NOT NULL,
+  last_line   TEXT,
+  started_at  INTEGER NOT NULL,
+  last_seen   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project, last_seen);
+
+-- One row per session state change (or item change), so active / blocked time is
+-- counted from what really happened.
+CREATE TABLE IF NOT EXISTS session_states (
+  session_id  TEXT NOT NULL,
+  project     TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  state       TEXT NOT NULL,
+  item_id     TEXT,
+  at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_states ON session_states(project, at);
+CREATE INDEX IF NOT EXISTS idx_session_states_sess ON session_states(session_id, at);
+
+-- Real per-session marks (an edit the hook saw), with the item the session was on.
+CREATE TABLE IF NOT EXISTS session_marks (
+  session_id  TEXT NOT NULL,
+  project     TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  item_id     TEXT,
+  kind        TEXT NOT NULL,
+  path        TEXT,
+  at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_marks ON session_marks(project, at);
+CREATE INDEX IF NOT EXISTS idx_session_marks_sess ON session_marks(session_id, at);
+
+-- What people and agents say to each other about work: handover | update |
+-- question | answer | note | review | decision | finding. to_member NULL on a
+-- question/decision means "the leads". delegate = the addressee lets their own
+-- agent answer from its context.
+CREATE TABLE IF NOT EXISTS posts (
+  id           TEXT PRIMARY KEY,
+  project      TEXT NOT NULL,
+  item_id      TEXT,
+  kind         TEXT NOT NULL,
+  author       TEXT NOT NULL,
+  source       TEXT NOT NULL DEFAULT 'web',
+  session_id   TEXT,
+  to_member    TEXT,
+  reply_to     TEXT,
+  status       TEXT,
+  delegate     INTEGER NOT NULL DEFAULT 0,
+  delegated_at INTEGER,
+  text         TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_posts_project ON posts(project, created_at);
+CREATE INDEX IF NOT EXISTS idx_posts_open ON posts(project, status);
+CREATE INDEX IF NOT EXISTS idx_posts_item ON posts(item_id);
+`);
+
 // Migrate pre-auth databases: add projects.workspace_id if missing.
 const projCols = db.prepare("PRAGMA table_info(projects)").all() as { name: string }[];
 if (!projCols.some((c) => c.name === "workspace_id")) {
@@ -523,11 +612,23 @@ export function resolveMember(project: string, name: string): string | null {
   const want = name.trim().replace(/^@/, "").toLowerCase();
   if (!want) return null;
   const members = listMembers(project);
-  for (const m of members) {
-    if (m.member.toLowerCase() === want || (m.display_name || "").toLowerCase() === want) return m.member;
-  }
+  const byId = members.find((m) => m.member.toLowerCase() === want);
+  if (byId) return byId.member;
+  // Display names aren't unique (two people can share a git user.name), so a name only
+  // resolves when exactly one member carries it — never to whoever happens to come first.
+  const byName = members.filter((m) => (m.display_name || "").toLowerCase() === want);
+  if (byName.length) return byName.length === 1 ? byName[0].member : null;
   const byFirst = members.filter((m) => firstName(m.display_name) === want);
   return byFirst.length === 1 ? byFirst[0].member : null;
+}
+
+/** Members a name could mean (id, display name or first name) — for "which one?" errors. */
+export function memberCandidates(project: string, name: string): string[] {
+  const want = name.trim().replace(/^@/, "").toLowerCase();
+  if (!want) return [];
+  return listMembers(project)
+    .filter((m) => m.member.toLowerCase() === want || (m.display_name || "").toLowerCase() === want || firstName(m.display_name) === want)
+    .map((m) => m.member);
 }
 
 const firstName = (displayName?: string | null) => (displayName || "").trim().toLowerCase().split(/\s+/)[0] || "";
@@ -1255,7 +1356,11 @@ export function updateGoalItem(id: string, patch: { text?: string; done?: boolea
   const sets: string[] = [];
   const args: Record<string, unknown> = { id, updated_at: now() };
   if (patch.text !== undefined) { sets.push("text = @text"); args.text = patch.text; }
-  if (patch.done !== undefined) { sets.push("done = @done"); args.done = patch.done ? 1 : 0; }
+  if (patch.done !== undefined) {
+    sets.push("done = @done", "done_at = @done_at");
+    args.done = patch.done ? 1 : 0;
+    args.done_at = patch.done ? now() : null;
+  }
   if (patch.evidence !== undefined) { sets.push("evidence = @evidence"); args.evidence = patch.evidence; }
   if (!sets.length) return false;
   sets.push("updated_at = @updated_at");
@@ -1514,8 +1619,8 @@ export function acceptGoalProposal(id: string): GoalRow | null {
   if (!goal) { db.prepare("UPDATE goal_proposals SET status='dismissed', updated_at=? WHERE id=?").run(now(), id); return null; }
   const tx = db.transaction(() => {
     if (p.kind === "check_item" && p.item_id) {
-      db.prepare("UPDATE goal_items SET done = 1, origin = 'auto', evidence = ?, updated_at = ? WHERE id = ?")
-        .run(p.evidence ?? null, now(), p.item_id);
+      db.prepare("UPDATE goal_items SET done = 1, origin = 'auto', evidence = ?, done_by = ?, done_at = ?, updated_at = ? WHERE id = ?")
+        .run(p.evidence ?? null, p.member ?? null, now(), now(), p.item_id);
       db.prepare("UPDATE goals SET updated_at = ? WHERE id = ?").run(now(), p.goal_id);
     } else if (p.kind === "add_item" && p.text) {
       addGoalItem({ goalId: p.goal_id, text: p.text, origin: "auto", evidence: p.evidence });
@@ -1807,6 +1912,8 @@ export function pruneStale(
   const cliLogins = db.prepare("DELETE FROM cli_logins WHERE expires_at < ?").run(at - 60 * 60_000).changes;
   // File touches only matter within a short window; keep a week for the board.
   const touches = db.prepare("DELETE FROM file_touches WHERE created_at < ?").run(at - 7 * 24 * 60 * 60 * 1000).changes;
+  // Per-session edit marks feed the day/week views; a month is plenty.
+  db.prepare("DELETE FROM session_marks WHERE at < ?").run(at - 31 * 24 * 60 * 60 * 1000);
   const resets = db.prepare("DELETE FROM password_resets WHERE used_at IS NOT NULL OR expires_at < ?").run(at).changes;
   let events = 0;
   if (retentionDays > 0) {

@@ -1,6 +1,6 @@
 /* Onboarding: connect your agent. Left: agent picker + install command. Right: the live "listening" panel.
    Prefix: cn-. Sky = live/primary. No pink: it is reserved for overlap. */
-.cn { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: repeat(5, auto) 1fr; min-height: 100vh; background: var(--panel); color: var(--ink); }
+.cn { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: repeat(5, auto) 1fr; min-height: 100vh; background: var(--surface); color: var(--ink); }
 .cn > :not(.cn-right) { grid-column: 1; margin-left: clamp(24px, 4.5vw, 56px); margin-right: clamp(24px, 4.5vw, 56px); min-width: 0; }
 .cn-head { grid-row: 1; padding-top: 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .cn-brand { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-size: 18px; font-weight: 500; }
@@ -11,9 +11,9 @@
 .cn-intro h1 { font-size: clamp(34px, 4.2vw, 52px); font-weight: 300; line-height: 1.02; letter-spacing: -0.04em; }
 .cn-intro p:last-child { max-width: 500px; font-size: 15px; line-height: 1.6; color: var(--ink-3); }
 
-.cn-term { grid-row: 3; margin-top: 30px; border-radius: 18px; background: var(--navy); color: var(--white); overflow: hidden; }
-.cn-term-head { padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08); font-family: var(--font-mono), monospace; font-size: 11px; color: rgba(252,255,255,.7); }
-.cn-term-wait { padding: 18px 20px 20px; font-family: var(--font-mono), monospace; font-size: 13px; color: rgba(252,255,255,.7); }
+.cn-term { grid-row: 3; margin-top: 30px; border-radius: 18px; background: var(--terminal-bg); color: var(--terminal-ink); overflow: hidden; }
+.cn-term-head { padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08); font-family: var(--font-mono), monospace; font-size: 11px; color: var(--terminal-dim); }
+.cn-term-wait { padding: 18px 20px 20px; font-family: var(--font-mono), monospace; font-size: 13px; color: var(--terminal-dim); }
 .cn-term .copycmd.block { border: 0; border-radius: 0; background: transparent; padding: 18px 20px 20px; font-size: 13.5px; line-height: 1.8; }
 .cn-term .copycmd.block:hover { background: rgba(255,255,255,.03); }
 .cn-term .copycmd.block:focus-visible { outline-offset: -3px; }
@@ -29,7 +29,7 @@
 .cn-notes p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-3); }
 .cn-notes code { font-family: var(--font-mono), monospace; font-size: 12px; background: var(--sky-soft); color: var(--sky-text); padding: 1px 6px; border-radius: 6px; }
 .cn-notes a { color: var(--sky-text); text-decoration: underline; text-underline-offset: 3px; }
-.cn-notes a:hover { color: #035E84; }
+.cn-notes a:hover { color: var(--ink); }
 .cn-ci { border: 1px solid var(--line); border-radius: 14px; padding: 0 14px; }
 .cn-ci[open] { padding-bottom: 14px; display: flex; flex-direction: column; gap: 10px; }
 .cn-ci summary { display: flex; align-items: center; min-height: 44px; font-size: 13.5px; font-weight: 500; color: var(--ink); cursor: pointer; }
@@ -46,7 +46,7 @@
 .cn-steps li.cur { color: var(--ink); font-weight: 500; }
 .cn-steps a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .cn-num { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line-2); font-size: 12px; }
-.cn-steps .done .cn-num { background: var(--sky-text); border-color: var(--sky-text); color: var(--white); }
+.cn-steps .done .cn-num { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .cn-steps .cur .cn-num { border: 2px solid var(--sky); color: var(--sky-text); }
 .cn-go { flex: none; display: flex; align-items: center; gap: 16px; }
 .cn-skip { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 13px; color: var(--ink-3); }
@@ -73,7 +73,7 @@
 .cn-chip-t { font-size: 13px; font-weight: 500; }
 .cn-chip-s { font-family: var(--font-mono), monospace; font-size: 11px; }
 .cn-chip.on { background: rgba(255,255,255,.22); border: 1px solid rgba(255,255,255,.45); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); animation: cn-pop .6s ease-out both; }
-.cn-chip.on .cn-chip-ic { background: var(--white); color: var(--sky-text); }
+.cn-chip.on .cn-chip-ic { background: var(--white); color: var(--sky-field); }
 .cn-chip.wait { background: rgba(255,255,255,.08); border: 1px dashed rgba(255,255,255,.5); }
 .cn-chip.wait .cn-chip-ic { border: 1px dashed rgba(255,255,255,.7); }
 .cn-chip.wait .cn-chip-t { font-size: 12px; font-weight: 400; }
@@ -131,7 +131,7 @@
   .cn-status-t { font-size: 16px; }
   .cn-log { display: none; }
 
-  .cn > .cn-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; margin: 0; padding: 12px 20px 20px; flex-wrap: nowrap; justify-content: space-between; gap: 12px; background: rgba(252,255,255,.94); border-top: 1px solid var(--line); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  .cn > .cn-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; margin: 0; padding: 12px 20px 20px; flex-wrap: nowrap; justify-content: space-between; gap: 12px; background: color-mix(in srgb, var(--surface) 94%, transparent); border-top: 1px solid var(--line); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
   .cn-steps { flex: none; flex-wrap: nowrap; align-items: center; gap: 6px; }
   .cn-steps li { flex: none; }
   .cn-num { width: 8px; height: 8px; border: 0; background: var(--line-2); font-size: 0; }
