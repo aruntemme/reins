@@ -153,7 +153,7 @@ function CliApprove() {
       <AuthShell
         eyebrow="Connected"
         title={heading("Terminal connected.")}
-        lede={<>Go back to your terminal. It will finish setting up your agents for <b>{phase.project.name}</b> on its own.</>}
+        lede={<>Your terminal is finishing the setup for <b>{phase.project.name}</b> now. You will show up on the board in a few seconds.</>}
         panel={PANEL}
       >
         <div className="au-actions">
