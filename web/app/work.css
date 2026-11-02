@@ -161,6 +161,11 @@ b.tone-calm, b.tone-needs, b.tone-block, b.tone-good { font-weight: 500; }
 .w-lane-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .w-lane-name > a { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .w-lane-state { flex: 0 0 auto; min-width: 170px; text-align: right; font-size: 12.5px; }
+/* Wider than a phone: fixed columns, so every row's rail starts and ends in the same place
+   and a long state ("blocked · …") wraps in its own column instead of shrinking the rail. */
+@media (min-width: 721px) {
+  .w-lane { display: grid; grid-template-columns: minmax(0, 290px) minmax(120px, 1fr) minmax(0, 200px); }
+}
 
 .w-track { flex: 1 1 380px; position: relative; height: 36px; min-width: 0; }
 .w-rail { position: absolute; left: 0; right: 0; top: 17px; height: 2px; border-radius: 1px; background: var(--line); }
@@ -341,12 +346,12 @@ a.w-clip:hover { filter: brightness(0.97); }
 .w-tape-dot { position: absolute; left: -4px; top: 14px; width: 7px; height: 7px; border-radius: 50%; background: var(--sky); }
 .w-tape-k { font-size: 12px; font-weight: 500; min-width: 80px; color: var(--sky-text); padding-top: 1px; }
 .w-tape-t { flex: 1 1 360px; min-width: 0; }
-.tape-asked .w-tape-k { color: var(--pink-text); }
-.tape-asked .w-tape-dot { background: var(--pink); }
+.tape-asked .w-tape-k, .tape-decision .w-tape-k { color: var(--pink-text); }
+.tape-asked .w-tape-dot, .tape-decision .w-tape-dot { background: var(--pink); }
 .tape-blocked .w-tape-k { color: var(--amber-text); }
 .tape-blocked .w-tape-dot { background: var(--amber); }
-.tape-done .w-tape-k { color: var(--ink); }
-.tape-done .w-tape-dot { background: var(--ink); }
+.tape-done .w-tape-k, .tape-approved .w-tape-k { color: var(--ink); }
+.tape-done .w-tape-dot, .tape-approved .w-tape-dot { background: var(--ink); }
 .w-person { display: flex; align-items: center; gap: 12px; padding: 12px 14px; color: var(--ink); }
 .w-person:hover { background: var(--surface-2); }
 .w-person-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -381,6 +386,7 @@ a.w-clip:hover { filter: brightness(0.97); }
 .w-mini-clip.live { border-right: 3px solid var(--sky); }
 .w-mini-step { position: absolute; top: 34px; width: 2px; height: 6px; border-radius: 1px; background: var(--line-2); }
 .w-mini-step.s-test { background: var(--sky); }
+.w-mini-step.s-test_fail { background: var(--amber); }
 .w-mini-step.s-ask { background: var(--pink); height: 10px; }
 .w-mini-now { position: absolute; top: -4px; bottom: 14px; width: 1px; background: var(--sky); }
 .w-mini-l { position: absolute; bottom: 0; left: 0; font-size: 11px; color: var(--ink-3); }
@@ -413,6 +419,7 @@ a.w-clip:hover { filter: brightness(0.97); }
 .w-term-rail { position: absolute; left: 0; right: 0; top: 8px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--terminal-ink) 14%, transparent); }
 .w-term-step { position: absolute; top: 4px; width: 3px; height: 10px; border-radius: 2px; background: var(--terminal-dim); opacity: 0.7; }
 .w-term-step.s-test { background: var(--sky); opacity: 1; }
+.w-term-step.s-test_fail { background: var(--amber); opacity: 1; }
 .w-term-step.s-ask { background: var(--pink); opacity: 1; top: 2px; height: 14px; }
 .w-term-line { margin: 0; padding: 8px 14px 12px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .w-term-body { padding: 10px 14px; font-size: 12px; line-height: 1.65; display: flex; flex-direction: column; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -517,6 +524,10 @@ a.w-chip.plain:hover { border-color: var(--line-2); }
 }
 .w-perday li.on { background: var(--sky-tint); color: var(--ink); border-color: transparent; }
 .w-wrow-delta { flex: 0 0 auto; min-width: 90px; text-align: right; font-size: 13px; color: var(--ink-2); }
+/* Same as the lanes: fixed columns wider than a phone, so the day squares stay under their labels. */
+@media (min-width: 721px) {
+  .w-wrow { display: grid; grid-template-columns: minmax(0, 240px) minmax(80px, 1fr) auto 90px; }
+}
 .w-perday-labels { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 0 10px; font-family: var(--font-mono), monospace; font-size: 11px; color: var(--ink-3); }
 .w-perday-labels span { width: 26px; text-align: center; }
 .w-perday-labels .w-perday-pad { width: auto; min-width: 114px; }
@@ -549,6 +560,7 @@ a.w-chip.plain:hover { border-color: var(--line-2); }
 
 /* ── a person ────────────────────────────────────────── */
 .w-personhead { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 22px; }
+.w-personhead > .w-ok { flex-basis: 100%; margin: 0; }
 .w-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); overflow: hidden; }
 .w-stat {
   padding: 14px 18px; display: flex; flex-direction: column; gap: 1px;

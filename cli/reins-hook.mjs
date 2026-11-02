@@ -10,6 +10,7 @@
  *   PreToolUse (edits) → warns the model (never blocks) when a present teammate is
  *                        on the same file or it's assigned to someone else
  *   PostToolUse (edits)→ records the touched path
+ *   PostToolUse(Failure) (Bash running tests) → records a passed/failed test run
  *   Stop / SubagentStop→ ships the last assistant turn as a summary
  *
  * It NEVER blocks or noticeably slows your agent: writes go out from a detached
@@ -34,7 +35,7 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
-  lastAssistantText, sendEvent, sendEventDetached, sendTouchDetached, postJson, isNoisePrompt,
+  lastAssistantText, sendEvent, sendEventDetached, sendTouchDetached, sendRunDetached, postJson, isNoisePrompt, isTestCommand,
 } from "./lib/capture.mjs";
 import { repoPath, gitIdentity } from "./lib/git.mjs";
 import { resolveRuntime } from "./lib/config.mjs";
@@ -91,9 +92,20 @@ if (isMain) {
   main().catch(() => process.exit(0));
 }
 
+/** A finished foreground test run (PostToolUse = exit 0, PostToolUseFailure = non-zero exit). */
+export function testRun(hook) {
+  const evt = hook.hook_event_name || "";
+  if ((evt !== "PostToolUse" && evt !== "PostToolUseFailure") || hook.tool_name !== "Bash") return null;
+  const ti = hook.tool_input || {};
+  if (ti.run_in_background || hook.is_interrupt || !isTestCommand(ti.command)) return null;
+  return { command: ti.command, ok: evt === "PostToolUse" };
+}
+
 async function main() {
   const hook = readStdin();
   const evt = hook.hook_event_name || "";
+  // Every Bash call lands here: leave at once unless it ran tests, before any config or git work.
+  if (hook.tool_name === "Bash" && !testRun(hook)) return process.exit(0);
   const rt = resolveRuntime({ cwd: hook.cwd || process.cwd() });
   const { project, member } = rt;
   const conn = { url: rt.url, key: rt.key };
@@ -171,7 +183,13 @@ async function main() {
     });
   }
 
-  if (evt === "PostToolUse") {
+  const run = testRun(hook);
+  if (run) {
+    sendRunDetached({ ...conn, project, member, ...run, cwd: hook.cwd, session: hook.session_id, source });
+    return process.exit(0);
+  }
+
+  if (evt === "PostToolUse" || evt === "PostToolUseFailure") {
     if (!EDIT_TOOLS.has(hook.tool_name)) return process.exit(0);
     const file = editedFile(hook);
     if (file) sendTouchDetached({ ...conn, project, member, file, cwd: hook.cwd, tool: hook.tool_name, session: hook.session_id, source });

@@ -37,13 +37,24 @@ export function Dialog({ open, onClose, title, children }: { open: boolean; onCl
   );
 }
 
+/** Two people can share a display name: label those "Dev (alice)", as the board does. */
+function distinctNames(list: Who[]): Who[] {
+  const count = new Map<string, number>();
+  for (const w of list) count.set(w.displayName.toLowerCase(), (count.get(w.displayName.toLowerCase()) ?? 0) + 1);
+  return list.map((w) =>
+    (count.get(w.displayName.toLowerCase()) ?? 0) > 1 && w.displayName !== w.member
+      ? { ...w, displayName: `${w.displayName} (${w.member.split("@")[0]})` }
+      : w,
+  );
+}
+
 /** The project's people (anyone whose agent has checked in), loaded when a dialog opens. */
 function useMembers(projectId: string, open: boolean, ensure: (string | undefined | null)[] = []): Who[] | null {
   const [list, setList] = useState<Who[] | null>(null);
   useEffect(() => {
     if (!open || list) return;
     api.project(projectId)
-      .then((p) => setList(p.members.map((m) => ({ member: m.member, displayName: m.displayName || m.member }))))
+      .then((p) => setList(distinctNames(p.members.map((m) => ({ member: m.member, displayName: m.displayName || m.member })))))
       .catch(() => setList([]));
   }, [open, projectId, list]);
   if (!list) return null;
@@ -232,9 +243,12 @@ export function ReleaseDialog({
 
 /** A note to the whole team or one person; their agents read it at the next prompt. */
 export function WriteDialog({
-  projectId, open, onClose, onDone, to, me,
+  projectId, open, onClose, onDone, onSent, to, me,
 }: {
-  projectId: string; open: boolean; onClose: () => void; onDone: () => void; to?: string | null; me?: string | null;
+  projectId: string; open: boolean; onClose: () => void; onDone: () => void;
+  /** Called with who it went to ("the team" or a name), for a confirmation on the page. */
+  onSent?: (to: string) => void;
+  to?: string | null; me?: string | null;
 }) {
   const uid = useId();
   const people = useMembers(projectId, open, [to]);
@@ -246,7 +260,10 @@ export function WriteDialog({
   const submit = async () => {
     if (!text.trim()) { setErr("Write something first."); return; }
     const ok = await run(() => api.createPost(projectId, { kind: "note", text: text.trim(), ...(who ? { toMember: who } : {}) }));
-    if (ok) onClose();
+    if (ok) {
+      onSent?.(who ? people?.find((p) => p.member === who)?.displayName || who : "the team");
+      onClose();
+    }
   };
   return (
     <Dialog open={open} onClose={onClose} title="Write to the team">

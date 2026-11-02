@@ -404,9 +404,15 @@ export function getInvite(code: string): { workspaceId: string; role: Role; labe
 /** Consume an invite, adding the user to the workspace. Returns the membership or null. */
 export function acceptInvite(code: string, userId: string): { workspaceId: string; role: Role } | null {
   const row = db
-    .prepare("SELECT id, workspace_id, role, expires_at, accepted_at FROM invites WHERE code_hash = ?")
+    .prepare("SELECT id, workspace_id, role, expires_at, accepted_at, accepted_by FROM invites WHERE code_hash = ?")
     .get(sha256(code)) as any;
-  if (!row || row.accepted_at || row.expires_at <= now()) return null;
+  if (!row) return null;
+  // The person who spent it opening the link again (a refresh, or signup then /join) is already in.
+  if (row.accepted_at && row.accepted_by === userId) {
+    const m = getMembership(userId, row.workspace_id);
+    return m ? { workspaceId: row.workspace_id, role: m.role } : null;
+  }
+  if (row.accepted_at || row.expires_at <= now()) return null;
   // Already a member: never let an invite rewrite an existing role (an owner
   // opening a member link to their own workspace must not demote themselves),
   // and leave the invite unspent for the person it was meant for.

@@ -111,6 +111,9 @@ test("teammate names: a shared display name never resolves to whoever comes firs
   assert.equal(resolveMember(P, "bob@shop.test"), "bob@shop.test", "the member id always resolves");
   assert.equal(resolveMember(P, "@Ravi Kumar"), "ravi@shop.test", "a unique display name still resolves");
   assert.equal(resolveMember(P, "ravi"), "ravi@shop.test", "a unique first name still resolves");
+  // The handle before the @, and the board's own "Dev (bob)" label, name one person.
+  assert.equal(resolveMember(P, "@bob"), "bob@shop.test", "a member's handle resolves");
+  assert.equal(resolveMember(P, "Dev (alice)"), "alice@shop.test", "the board's disambiguated label resolves");
 });
 
 test("calm workspace: sessions, items, releases, posts, pack delivery, views, agent API, isolation", async () => {
@@ -133,7 +136,9 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     const signup = async (c: ReturnType<typeof makeClient>, email: string, workspaceName?: string) => {
       const r = await c.call("/api/auth/signup", post({ email, password: "supersecret-1", workspaceName }));
       assert.equal(r.status, 200, JSON.stringify(r.body));
-      return r.body as { workspace: { id: string }; tokens: { ingest: string; access: string; admin: string } };
+      // Signup mints no machine tokens; the owner mints the ones the test uses.
+      const mint = async (kind: string) => (await c.call("/api/admin/tokens", post({ kind }))).body.token as string;
+      return { ...r.body, tokens: { ingest: await mint("ingest"), access: await mint("access"), admin: await mint("admin") } } as { workspace: { id: string }; tokens: { ingest: string; access: string; admin: string } };
     };
     const asha = makeClient(url, "10.2.0.1");
     const A = await signup(asha, `asha-${uid}@acme.test`, "Acme");
@@ -200,6 +205,13 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     assert.equal((db.prepare("SELECT status FROM goals WHERE id = ?").get(item.id) as any).status, "doing");
     // Edits after attaching count as the item's files (the earlier one predates it).
     assert.equal((await asha.call("/api/hook/touch", { ...post({ project: P, member: "ravi", path: "billing/ledger.ts", tool: "Edit", ...RAVI }), key })).status, 200);
+    // Test runs are marks too, passed or failed; they never count as the item's files.
+    assert.equal((await asha.call("/api/hook/run", { ...post({ project: P, member: "ravi", command: "npm test", ok: true, ...RAVI }), key })).status, 200);
+    assert.equal((await asha.call("/api/hook/run", { ...post({ project: P, member: "ravi", command: "npm test -- refund", ok: false, ...RAVI }), key })).status, 200);
+    assert.deepEqual(
+      db.prepare("SELECT kind, path FROM session_marks WHERE session_id = 'S-ravi-1' AND kind LIKE 'test%' ORDER BY at, rowid").all(),
+      [{ kind: "test", path: "npm test" }, { kind: "test_fail", path: "npm test -- refund" }],
+    );
     assert.equal((await other.call(`/api/projects/${P}/today`)).status, 404, "another workspace can't read");
     assert.equal((await other.call(`/api/items/${item.id}`, patch({ title: "x" }))).status, 404, "or write an item");
     assert.equal((await other.call(`/api/projects/${P}/items`, post({ title: "x", kind: "bug" }))).status, 404);
@@ -215,6 +227,8 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     assert.equal(extra.status, 200);
 
     // ── posts: an agent asks, the pack delivers, delegate, agent answers, delivered back ──
+    // The agent parks its item while it waits on the answer.
+    assert.equal((await agentPost(`/items/${item.id}/status`, { member: "ravi", ...RAVI, status: "waiting" })).status, 200);
     const q = await agentPost("/posts", { member: "ravi", ...RAVI, kind: "question", toMember: "asha", text: "Partial refund: credit note or a negative invoice line?" });
     assert.equal(q.status, 200, JSON.stringify(q.body));
     const qid = q.body.id;
@@ -248,6 +262,7 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     assert.equal(ans.status, 200, JSON.stringify(ans.body));
     assert.equal((db.prepare("SELECT status FROM posts WHERE id = ?").get(qid) as any).status, "answered");
     assert.equal(session("S-ravi-1").state, "idle", "the answer releases the waiting session");
+    assert.equal((db.prepare("SELECT status FROM goals WHERE id = ?").get(item.id) as any).status, "doing", "…and puts its item back in progress");
     assert.equal((await agentPost("/posts", { member: "asha", kind: "answer", replyTo: qid, text: "again" })).status, 409);
     const r1 = await pack("ravi", RAVI, "delta", []);
     assert.match(r1.body.text, /asha's Claude Code answered your question/);
@@ -328,7 +343,7 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     assert.ok(row.clips.some((c: any) => c.kind === "none" || c.kind === "feature"));
     assert.ok(T.needs.some((n: any) => n.type === "blocked" && n.sessionId === "S-asha-1" && n.item.id === bug.body.item.id));
     const tapeKinds = new Set(T.tape.map((e: any) => e.kind));
-    for (const k of ["Asked", "Answered", "Delegated", "Handed over", "Blocked"]) assert.ok(tapeKinds.has(k), `tape has ${k}`);
+    for (const k of ["Asked", "Answered", "Delegated", "Handed over", "Blocked", "Decision", "Approved"]) assert.ok(tapeKinds.has(k), `tape has ${k}`);
     assert.ok(T.people.some((p: any) => p.who.member === "asha" && p.owns.feature === 1 && p.owns.bug === 1));
 
     const me = await ravi.call(`/api/projects/${P}/me?since=${since}`);
@@ -338,7 +353,7 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     const ag = me.body.agents.find((a: any) => a.sessionId === "S-ravi-1");
     assert.equal(ag.item.id, item.id);
     assert.equal(ag.lastLine, "Asked Asha about partial refunds.");
-    assert.ok(ag.steps.some((x: any) => x.kind === "edit") && ag.steps.some((x: any) => x.kind === "ask"));
+    assert.ok(["edit", "ask", "test", "test_fail"].every((k) => ag.steps.some((x: any) => x.kind === k)), "edits, asks and test runs are marks");
     assert.ok(Array.isArray(me.body.around) && Array.isArray(me.body.owned) && Array.isArray(me.body.traits));
 
     const week = await asha.call(`/api/projects/${P}/week?days=7`);
@@ -369,6 +384,12 @@ test("calm workspace: sessions, items, releases, posts, pack delivery, views, ag
     assert.equal(pa.body.stats.helped, 1);
     assert.equal(pa.body.owns, "1 feature, 1 bug");
     assert.equal((await asha.call(`/api/projects/${P}/people/nobody`)).status, 404);
+
+    // ── unblocking from the board: the item is back in progress and leaves "Needs you" ──
+    assert.equal((await asha.call(`/api/items/${bug.body.item.id}`, patch({ status: "doing" }))).status, 200);
+    assert.equal(session("S-asha-1").state, "idle", "the blocked session waits for its next prompt");
+    const unblocked = (await asha.call(`/api/projects/${P}/today?since=${since}`)).body;
+    assert.ok(!unblocked.needs.some((n: any) => n.type === "blocked"), "nothing blocked is left in Needs you");
 
     // ── finishing work and tracking untracked work ──
     assert.equal((await asha.call(`/api/items/${item.id}`, patch({ status: "done" }))).status, 200);

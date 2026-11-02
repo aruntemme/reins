@@ -79,6 +79,26 @@ hook.post("/hook/touch", requireHook, (req, res) => {
   res.json({ ok: true });
 });
 
+// PostToolUse / PostToolUseFailure on a Bash call that ran tests: a passed or failed
+// test run becomes a mark on the session's timeline. Detached from the agent, no LLM.
+hook.post("/hook/run", requireHook, (req, res) => {
+  if (!accepting()) return res.status(503).json({ error: "server is shutting down" });
+  const body = z.object({ ...Base, command: z.string().trim().min(1).max(500), ok: z.boolean() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const { project, member, command, ok } = body.data;
+  if (!hookProject(req, res, project, true)) return;
+  const ws = req.workspaceId ?? "default";
+  if (overLimit(touchHits, ws, TOUCH_MAX_PER_MIN, 60_000)) return res.status(429).json({ error: "touch rate limit reached" });
+  const cap = captureFrom(req.body);
+  if (!cap.session && !cap.worktree) return res.json({ ok: true }); // nothing to attribute it to
+  ensureProject(project, undefined, ws);
+  ensureMember(project, member);
+  touchMember(project, member);
+  recordMark(recordSession(project, member, cap, "working").session, ok ? "test" : "test_fail", redactSecrets(command).slice(0, 200));
+  bus.emitChange({ type: "work.changed", project });
+  res.json({ ok: true });
+});
+
 // The setup wizard's last step: prove the credentials and project work, and put
 // the member on the board right away (the connect page is watching for them).
 // Only presence is recorded: no event, no activity, no LLM.

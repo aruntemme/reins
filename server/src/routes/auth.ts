@@ -133,7 +133,10 @@ auth.post("/auth/signup", (req, res) => {
   }
 
   const body = z
-    .object({ email: EMAIL, password: PASSWORD, workspaceName: z.string().trim().min(1).max(60).optional() })
+    .object({
+      email: EMAIL, password: PASSWORD, workspaceName: z.string().trim().min(1).max(60).optional(),
+      invite: z.string().min(1).max(200).optional(), // signing up from an invite link
+    })
     .safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.issues });
 
@@ -144,22 +147,26 @@ auth.post("/auth/signup", (req, res) => {
   if (getUserByEmail(email)) {
     return res.status(409).json({ error: "an account with that email already exists" });
   }
+  // Checked before the account exists, so a dead link never leaves a half-made account.
+  if (body.data.invite && !getInvite(body.data.invite)?.valid) {
+    return res.status(400).json({ error: "invalid or expired invite" });
+  }
 
   const user = createUser(email, body.data.password);
-  const localPart = email.split("@")[0] || "my";
-  const ws = createWorkspace(body.data.workspaceName || `${localPart}'s workspace`);
-  addMembership(user.id, ws.id, "owner");
-
-  // Machine credentials for hooks/agents/MCP; shown once.
-  const tokens = {
-    ingest: mintToken(ws.id, "ingest", "default"),
-    access: mintToken(ws.id, "access", "default"),
-    admin: mintToken(ws.id, "admin", "default"),
-  };
-
+  // An invitee lands in the inviter's workspace and gets no empty one of their own.
+  // (Only if the invite was spent in between does the account fall back to its own.)
+  let joined = body.data.invite ? acceptInvite(body.data.invite, user.id) : null;
+  if (!joined) {
+    const localPart = email.split("@")[0] || "my";
+    const ws = createWorkspace(body.data.workspaceName || `${localPart}'s workspace`);
+    addMembership(user.id, ws.id, "owner");
+    joined = { workspaceId: ws.id, role: "owner" };
+  }
+  // No machine tokens here: nobody would see them. A terminal gets its own token when
+  // it is approved in the browser (`npx reins-hook`), and an admin can mint more.
   touchUserLogin(user.id);
-  setSessionCookie(res, signUserSession(user.id, ws.id, "owner"));
-  res.json({ ok: true, user: { email: user.email }, workspace: getWorkspace(ws.id), tokens });
+  setSessionCookie(res, signUserSession(user.id, joined.workspaceId, joined.role));
+  res.json({ ok: true, user: { email: user.email }, workspace: getWorkspace(joined.workspaceId), role: joined.role });
 });
 
 // Log in. Generic 401 on any failure so we never reveal whether an email exists.

@@ -609,7 +609,7 @@ export function listMembers(project: string): any[] {
  *  exact id/display-name match wins; a first-name match is used only when exactly
  *  one teammate has that first name — an ambiguous one resolves to null, not a guess. */
 export function resolveMember(project: string, name: string): string | null {
-  const want = name.trim().replace(/^@/, "").toLowerCase();
+  const want = wanted(name);
   if (!want) return null;
   const members = listMembers(project);
   const byId = members.find((m) => m.member.toLowerCase() === want);
@@ -619,19 +619,25 @@ export function resolveMember(project: string, name: string): string | null {
   const byName = members.filter((m) => (m.display_name || "").toLowerCase() === want);
   if (byName.length) return byName.length === 1 ? byName[0].member : null;
   const byFirst = members.filter((m) => firstName(m.display_name) === want);
-  return byFirst.length === 1 ? byFirst[0].member : null;
+  if (byFirst.length) return byFirst.length === 1 ? byFirst[0].member : null;
+  // "bob" for bob@shop.test, or the board's "Dev (bob)" label.
+  const handle = /\(([^()]+)\)$/.exec(want)?.[1]?.trim() ?? want;
+  const byHandle = members.filter((m) => localPart(m.member) === handle);
+  return byHandle.length === 1 ? byHandle[0].member : null;
 }
 
-/** Members a name could mean (id, display name or first name) — for "which one?" errors. */
+/** Members a name could mean (id, display name, first name or handle) — for "which one?" errors. */
 export function memberCandidates(project: string, name: string): string[] {
-  const want = name.trim().replace(/^@/, "").toLowerCase();
+  const want = wanted(name);
   if (!want) return [];
   return listMembers(project)
-    .filter((m) => m.member.toLowerCase() === want || (m.display_name || "").toLowerCase() === want || firstName(m.display_name) === want)
+    .filter((m) => m.member.toLowerCase() === want || (m.display_name || "").toLowerCase() === want || firstName(m.display_name) === want || localPart(m.member) === want)
     .map((m) => m.member);
 }
 
+const wanted = (name: string) => name.trim().replace(/^@/, "").toLowerCase();
 const firstName = (displayName?: string | null) => (displayName || "").trim().toLowerCase().split(/\s+/)[0] || "";
+const localPart = (member: string) => member.toLowerCase().split("@")[0] || "";
 
 /** True only if `member` is actually NAMED in `text` (id, display name, first name, or @handle),
  *  matched on a word boundary. This grounds @mention handoffs: the distiller works off one
@@ -1523,6 +1529,22 @@ export function openGoalsForMatch(project: string, member: string): { id: string
     .all(project, member) as any;
 }
 
+const STOP = new Set(["a", "an", "the", "to", "of", "for", "in", "on", "and", "or", "with", "from", "by", "into", "it", "its", "is", "be"]);
+const words = (t: string) => new Set(t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1 && !STOP.has(w)));
+
+/** True when a suggested step mostly repeats existing ones: nearly all its words are already
+ *  in the steps, and it shares at least half of them with one step (so a long list of steps
+ *  can't swallow a genuinely new one). */
+export function restatesSteps(text: string, steps: string[]): boolean {
+  const mine = [...words(text)];
+  if (mine.length === 0 || steps.length === 0) return false;
+  const sets = steps.map(words);
+  const all = new Set(sets.flatMap((s) => [...s]));
+  const covered = mine.filter((w) => all.has(w)).length / mine.length;
+  const best = Math.max(...sets.map((s) => mine.filter((w) => s.has(w)).length / mine.length));
+  return covered >= 0.8 && best >= 0.5;
+}
+
 /** File a proposal, de-duping against an identical still-pending one. Returns the
  *  id, or null if a matching pending proposal already exists (or the target is gone). */
 export function createGoalProposal(p: {
@@ -1541,6 +1563,16 @@ export function createGoalProposal(p: {
   if (p.kind === "check_item") {
     const it = db.prepare("SELECT done FROM goal_items WHERE id = ?").get(p.itemId) as { done: number } | undefined;
     if (!it || it.done) return null; // already gone or already done
+  }
+  if (p.kind === "add_item" && p.text) {
+    // The model often restates a step the item already has (or a pending suggestion) in other words.
+    const known = db
+      .prepare(
+        `SELECT text FROM goal_items WHERE goal_id = ?
+         UNION ALL SELECT text FROM goal_proposals WHERE goal_id = ? AND kind = 'add_item' AND status = 'pending' AND text IS NOT NULL`
+      )
+      .all(p.goalId, p.goalId) as { text: string }[];
+    if (restatesSteps(p.text, known.map((k) => k.text))) return null;
   }
   const dupe = db
     .prepare(

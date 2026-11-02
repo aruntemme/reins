@@ -97,7 +97,7 @@ export default function Dashboard() {
                 <h3 className="db-name">
                   <Link href={`/project/${encodeURIComponent(p.id)}`} className="db-card-link">{p.name}</Link>
                 </h3>
-                <p className="db-goal">{p.goal || "No goal set yet."}</p>
+                <p className="db-goal">{p.goal || (p.open ? `${p.open} open item${p.open === 1 ? "" : "s"}` : "Nothing tracked yet.")}</p>
                 <div className="db-foot">
                   <span>Updated {timeAgo(p.updatedAt)}</span>
                   {p.members === 0 && (

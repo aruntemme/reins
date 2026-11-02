@@ -96,7 +96,7 @@ test("account routes: full signup/login/invite/join/switch/projects/reset flow",
     const owner = makeClient(url);
     const ownerEmail = `owner-${randomUUID().slice(0, 8)}@acme.test`;
 
-    // 1) Signup -> owner of a fresh workspace, tokens minted, session set.
+    // 1) Signup -> owner of a fresh workspace, session set, and no machine tokens (nobody would see them).
     const signup = await owner.call("/api/auth/signup", {
       method: "POST",
       body: JSON.stringify({ email: ownerEmail, password: "supersecret-1", workspaceName: "Acme" }),
@@ -105,7 +105,8 @@ test("account routes: full signup/login/invite/join/switch/projects/reset flow",
     assert.equal(signup.body.ok, true);
     assert.equal(signup.body.user.email, ownerEmail.toLowerCase());
     assert.equal(signup.body.workspace.name, "Acme");
-    assert.ok(signup.body.tokens.ingest && signup.body.tokens.access && signup.body.tokens.admin);
+    assert.equal(signup.body.role, "owner");
+    assert.equal(signup.body.tokens, undefined, "signup returns no raw tokens");
     const wsId = signup.body.workspace.id as string;
 
     // me shows owner + workspace + role
@@ -190,6 +191,33 @@ test("account routes: full signup/login/invite/join/switch/projects/reset flow",
     const members = await owner.call(`/api/workspaces/${wsId}/members`);
     assert.equal(members.status, 200);
     assert.equal(members.body.members.length, 2);
+
+    // 6b) Signing up FROM an invite link joins that workspace directly: no empty
+    //     workspace of one's own, and opening the link again afterwards still works.
+    const invite2 = await owner.call(`/api/workspaces/${wsId}/invites`, { method: "POST", body: JSON.stringify({ role: "member" }) });
+    assert.equal(invite2.status, 200, JSON.stringify(invite2.body));
+    const invitee = makeClient(url);
+    const inviteeEmail = `new-${randomUUID().slice(0, 8)}@acme.test`;
+    const badInvite = await invitee.call("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ email: inviteeEmail, password: "invitee-pw-123", invite: "inv_not-a-real-code" }),
+    });
+    assert.equal(badInvite.status, 400, "a dead invite link is refused…");
+    assert.equal(authLib.getUserByEmail(inviteeEmail), undefined, "…before any account is made");
+    const viaInvite = await invitee.call("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ email: inviteeEmail, password: "invitee-pw-123", invite: invite2.body.code }),
+    });
+    assert.equal(viaInvite.status, 200, JSON.stringify(viaInvite.body));
+    assert.equal(viaInvite.body.workspace.id, wsId);
+    assert.equal(viaInvite.body.role, "member");
+    const inviteeMe = await invitee.call("/api/auth/me");
+    assert.equal(inviteeMe.body.workspace.id, wsId, "the session is in the inviter's workspace");
+    assert.equal(inviteeMe.body.workspaces.length, 1, "and there is no stray personal workspace");
+    const rejoin = await invitee.call("/api/auth/join", { method: "POST", body: JSON.stringify({ code: invite2.body.code }) });
+    assert.equal(rejoin.status, 200, "the join page after signup finds them already in");
+    assert.equal(rejoin.body.role, "member");
+    assert.equal((await member.call("/api/auth/join", { method: "POST", body: JSON.stringify({ code: invite2.body.code }) })).status, 400, "a spent invite stays spent for anyone else");
 
     // 7) Switch workspace changes the active ws (owner switches to nothing else;
     //    member switches back to their own home workspace).

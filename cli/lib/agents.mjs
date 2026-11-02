@@ -38,13 +38,15 @@ const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const TAG = "added by reins-hook";
 
-/** Claude Code hook events we register (edit-tool matcher on Pre/PostToolUse). */
+/** Claude Code hook events we register (edit-tool matcher on PreToolUse; edits and
+ *  Bash on PostToolUse, where a test run becomes a mark; failed Bash runs for a failing test). */
 const EDIT_MATCHER = "Edit|Write|MultiEdit|NotebookEdit";
 export const CLAUDE_EVENTS = [
   { event: "SessionStart" },
   { event: "UserPromptSubmit" },
   { event: "PreToolUse", matcher: EDIT_MATCHER },
-  { event: "PostToolUse", matcher: EDIT_MATCHER },
+  { event: "PostToolUse", matcher: `${EDIT_MATCHER}|Bash` },
+  { event: "PostToolUseFailure", matcher: "Bash" },
   { event: "Stop" },
 ];
 const EVENTS = CLAUDE_EVENTS.map((e) => e.event);

@@ -17,7 +17,7 @@ import type { GoalRow } from "./db.js";
 import { redactSecrets } from "./redact.js";
 import { computeOverlaps } from "./collisions.js";
 import {
-  effectiveState, effectiveSince, sessionSegments, settleWaiting, firstLine, dayStart, isoDate, DAY, IDLE_MS,
+  effectiveState, effectiveSince, sessionSegments, settleWaiting, settleBlocked, firstLine, dayStart, isoDate, DAY, IDLE_MS,
 } from "./sessions.js";
 import type { SessionRow, Segment } from "./sessions.js";
 
@@ -126,6 +126,8 @@ export function updateItem(
     args.done_at = patch.status === "done" ? t : null;
   }
   db.prepare(`UPDATE goals SET ${sets.join(", ")} WHERE id = @id`).run(args);
+  // Unblocked: sessions still marked blocked on it would keep it under "Needs you".
+  if (patch.status !== undefined && patch.status !== "blocked" && itemStatus(it) === "blocked") settleBlocked(it.id, t);
 }
 
 export function tickStep(stepId: string, done: boolean, by: { member: string; source: string }): void {
@@ -186,7 +188,16 @@ export function answerQuestion(q: PostRow, a: { author: string; source: string; 
     return row;
   })();
   settleWaiting(q.session_id);
+  resumeItem(q.item_id);
   return answer;
+}
+
+/** An item its agent parked as "waiting" goes back to doing once nothing it asked is still open. */
+function resumeItem(itemId: string | null): void {
+  const it = itemId ? getItem(itemId) : undefined;
+  if (!it || itemStatus(it) !== "waiting") return;
+  const open = db.prepare("SELECT 1 FROM posts WHERE item_id = ? AND kind IN ('question','decision') AND status = 'open' LIMIT 1").get(it.id);
+  if (!open) updateItem(it, { status: "doing" });
 }
 
 /** Settle a decision (or question) as approved / changed / dismissed, optionally with words for the asker. */
@@ -196,6 +207,7 @@ export function resolvePost(q: PostRow, status: "approved" | "changed" | "dismis
     if (text) insertPost({ project: q.project, itemId: q.item_id, kind: "answer", author: by.author, source: by.source, toMember: q.author, replyTo: q.id, text });
   })();
   settleWaiting(q.session_id);
+  resumeItem(q.item_id);
 }
 
 /** The addressee lets their own agent answer; it is delivered to their sessions' next prompt. */
@@ -336,7 +348,7 @@ function load(project: string, at = now()): Snap {
 
 /** Display names, made unique: two people who share one (say, a repo's git user.name) get
  *  their member id's local part added, so the board never shows two indistinguishable "Dev"s. */
-function displayNames(members: { member: string; display_name: string | null }[]): Map<string, string> {
+export function displayNames(members: { member: string; display_name: string | null }[]): Map<string, string> {
   const count = new Map<string, number>();
   for (const m of members) {
     const n = (m.display_name || m.member).toLowerCase();
@@ -408,7 +420,8 @@ function itemState(S: Snap, it: ItemRow, v: Viewer | null): { text: string; tone
   if (working) return { text: clip(it.summary || working.last_line || "working", 80), tone: "calm" };
   if (it.summary) return { text: clip(it.summary, 80), tone: "calm" };
   if (done === 0 && sessions.length === 0) return { text: "not started", tone: "calm" };
-  return { text: `${done} of ${total} steps`, tone: "calm" };
+  // Progress is on the row already ("1 of 3 steps"); say what the item is doing instead.
+  return { text: sessions.length ? "idle" : "no agent on it", tone: "calm" };
 }
 
 function lane(S: Snap, it: ItemRow, v: Viewer | null) {
@@ -531,6 +544,12 @@ function overlapsOut(S: Snap) {
     });
 }
 
+/** The branch a need is about: the item's own, else the asking session's (the title is shown apart). */
+function whereOf(S: Snap, itemId: string | null, s?: SessionRow) {
+  const it = itemId ? S.byId.get(itemId) : undefined;
+  return (S.hide ? null : it?.branch) || (s ? branchOf(S, s) : null) || "";
+}
+
 function needsFor(S: Snap, v: Viewer | null) {
   const needs: any[] = [];
   const sess = new Map(S.sessions.map((s) => [s.id, s]));
@@ -542,7 +561,7 @@ function needsFor(S: Snap, v: Viewer | null) {
     const s = p.session_id ? sess.get(p.session_id) : undefined;
     needs.push({
       id: p.id, type: p.kind, text: p.text,
-      meta: [itemRef(p.item_id)?.title, s ? branchOf(S, s) : null].filter(Boolean).join(" · "),
+      meta: whereOf(S, p.item_id, s),
       item: itemRef(p.item_id), from: { ...who(S, p.author), source: p.source }, at: p.created_at, postId: p.id, sessionId: p.session_id,
     });
   }
@@ -554,14 +573,14 @@ function needsFor(S: Snap, v: Viewer | null) {
     needs.push({
       id: `blocked:${s.id}`, type: "blocked",
       text: it?.summary || s.last_line || `${byLabel(S, s.member, s.source)} is blocked`,
-      meta: [it?.title, branchOf(S, s)].filter(Boolean).join(" · "),
+      meta: whereOf(S, s.item_id, s),
       item: itemRef(s.item_id), from: { ...who(S, s.member), source: s.source }, at: s.state_since, postId: null, sessionId: s.id,
     });
   }
   for (const it of openItems(S)) {
     if (itemStatus(it) !== "blocked" || blockedItems.has(it.id)) continue;
     needs.push({
-      id: `blocked:${it.id}`, type: "blocked", text: it.summary || `${it.title} is blocked`, meta: it.title,
+      id: `blocked:${it.id}`, type: "blocked", text: it.summary || `${it.title} is blocked`, meta: whereOf(S, it.id),
       item: { id: it.id, title: it.title }, from: { ...who(S, it.member ?? ""), source: "web" }, at: it.status_at ?? it.updated_at, postId: null, sessionId: null,
     });
   }
@@ -579,8 +598,8 @@ function needsFor(S: Snap, v: Viewer | null) {
 function tapeSince(S: Snap, since: number) {
   const tape: { at: number; kind: string; text: string }[] = [];
   const posts = db
-    .prepare("SELECT * FROM posts WHERE project = ? AND (created_at >= ? OR delegated_at >= ?) ORDER BY created_at DESC LIMIT 200")
-    .all(S.project, since, since) as PostRow[];
+    .prepare("SELECT * FROM posts WHERE project = ? AND (created_at >= ? OR delegated_at >= ? OR (kind = 'decision' AND updated_at >= ?)) ORDER BY created_at DESC LIMIT 200")
+    .all(S.project, since, since, since) as PostRow[];
   const byPost = new Map(posts.map((p) => [p.id, p]));
   const askerOf = (p: PostRow) => {
     const q = p.reply_to ? byPost.get(p.reply_to) ?? getPost(p.reply_to) : undefined;
@@ -590,13 +609,17 @@ function tapeSince(S: Snap, since: number) {
     if (p.created_at >= since) {
       const by = byLabel(S, p.author, p.source);
       const t = clip(p.text, 140);
-      if (p.kind === "question" || p.kind === "decision") tape.push({ at: p.created_at, kind: "Asked", text: `${by} asked ${p.to_member ? who(S, p.to_member).displayName : "the leads"}: ${t}` });
+      if (p.kind === "question") tape.push({ at: p.created_at, kind: "Asked", text: `${by} asked ${p.to_member ? who(S, p.to_member).displayName : "the leads"}: ${t}` });
+      else if (p.kind === "decision") tape.push({ at: p.created_at, kind: "Decision", text: `${by} asked ${p.to_member ? who(S, p.to_member).displayName : "the leads"} to decide: ${t}` });
       else if (p.kind === "answer") tape.push({ at: p.created_at, kind: "Answered", text: `${by} answered ${askerOf(p)}: ${t}` });
       else if (p.kind === "finding") tape.push({ at: p.created_at, kind: "Finding", text: `${by}: ${t}` });
       else if (p.kind === "handover") {
         const title = p.item_id ? S.byId.get(p.item_id)?.title : null;
         tape.push({ at: p.created_at, kind: "Handed over", text: `${by} handed ${title ? `${title} ` : ""}to ${p.to_member ? who(S, p.to_member).displayName : "a teammate"}` });
       }
+    }
+    if (p.kind === "decision" && (p.status === "approved" || p.status === "changed") && p.updated_at >= since) {
+      tape.push({ at: p.updated_at, kind: p.status === "approved" ? "Approved" : "Changed", text: `${who(S, p.author).displayName}'s decision ${p.status === "approved" ? "was approved" : "was sent back with a change"}: ${clip(p.text, 100)}` });
     }
     if (p.delegate && p.delegated_at && p.delegated_at >= since) {
       tape.push({ at: p.delegated_at, kind: "Delegated", text: `${who(S, p.to_member ?? "").displayName} let their agent answer ${who(S, p.author).displayName}: ${clip(p.text, 100)}` });
@@ -660,8 +683,9 @@ export function todayView(project: string, viewer: { member: string; role?: stri
     .filter((s) => !s.item_id && effectiveState(s, at) !== "ended" && at - s.last_seen <= 2 * IDLE_MS)
     .map((s) => {
       const ms = (bySession.get(s.id) ?? []).filter((g) => g.state === "working" && !g.itemId).reduce((n, g) => n + g.to - g.from, 0);
-      const headline = (db.prepare("SELECT headline FROM members WHERE project = ? AND member = ?").get(project, s.member) as { headline?: string } | undefined)?.headline;
-      return { sessionId: s.id, member: who(S, s.member), source: s.source, text: s.last_line || headline || "", minutes: Math.round(ms / MIN) };
+      // The session's own words, else where it works: the member's headline may be about another session.
+      const where = branchOf(S, s) ? `on ${branchOf(S, s)}` : s.worktree ? `in ${s.worktree}` : "";
+      return { sessionId: s.id, member: who(S, s.member), source: s.source, text: s.last_line || where, minutes: Math.round(ms / MIN) };
     })
     .filter((u) => u.minutes >= 1);
 
@@ -899,7 +923,7 @@ export function itemView(project: string, itemId: string, viewer: { member: stri
   const rel = it.parent_id ? S.releases.get(it.parent_id) : undefined;
   const thread = db.prepare("SELECT * FROM posts WHERE item_id = ? ORDER BY created_at ASC LIMIT 300").all(it.id) as PostRow[];
   const fileRows = db
-    .prepare("SELECT path, MAX(at) AS t FROM session_marks WHERE item_id = ? AND path IS NOT NULL GROUP BY path ORDER BY t DESC LIMIT 50")
+    .prepare("SELECT path, MAX(at) AS t FROM session_marks WHERE item_id = ? AND kind = 'edit' AND path IS NOT NULL GROUP BY path ORDER BY t DESC LIMIT 50")
     .all(it.id) as { path: string }[];
   const files = fileRows.map((f) => f.path);
 
@@ -909,7 +933,7 @@ export function itemView(project: string, itemId: string, viewer: { member: stri
     const myDirs = new Set(files.map(dirOf).filter(Boolean));
     const mine = new Set(files);
     const others = db
-      .prepare("SELECT DISTINCT item_id, path FROM session_marks WHERE project = ? AND item_id IS NOT NULL AND item_id != ? AND path IS NOT NULL AND at >= ?")
+      .prepare("SELECT DISTINCT item_id, path FROM session_marks WHERE project = ? AND kind = 'edit' AND item_id IS NOT NULL AND item_id != ? AND path IS NOT NULL AND at >= ?")
       .all(project, it.id, at - 14 * DAY) as { item_id: string; path: string }[];
     const byItem = new Map<string, string[]>();
     for (const o of others) (byItem.get(o.item_id) ?? byItem.set(o.item_id, []).get(o.item_id)!).push(o.path);

@@ -68,7 +68,9 @@ test("member brief: the hook's session-start text, tenant-scoped", async () => {
     const signup = async (c: ReturnType<typeof makeClient>, email: string, name: string) => {
       const r = await c.call("/api/auth/signup", post({ email, password: "supersecret-1", workspaceName: name }));
       assert.equal(r.status, 200, JSON.stringify(r.body));
-      return r.body as { tokens: { ingest: string; access: string } };
+      // Signup mints no machine tokens; the owner mints the ones the test uses.
+      const mint = async (kind: string) => (await c.call("/api/admin/tokens", post({ kind }))).body.token as string;
+      return { ...r.body, tokens: { ingest: await mint("ingest"), access: await mint("access"), admin: await mint("admin") } } as { tokens: { ingest: string; access: string } };
     };
     const owner = makeClient(url, "10.2.0.1");
     const A = await signup(owner, `lead-${uid}@acme.test`, "Acme");

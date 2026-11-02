@@ -104,3 +104,21 @@ test("openGoalItemsForMatch sees a member's own + team items, not other members'
   const seen = db.openGoalItemsForMatch("p7", "asha").map((i) => i.text).sort();
   assert.deepEqual(seen, ["asha-only", "shared"], "rui's item is hidden from asha's matcher");
 });
+
+test("an added step that restates existing steps is not suggested again", () => {
+  db.ensureProject("p9", "P9", "w1");
+  const g = db.createGoal({ project: "p9", scope: "individual", member: "alice", title: "Shopping cart" });
+  for (const t of ["Write cart.js with add, remove, list", "Use checkout total() for cart sum", "Smoke-test cart.js"]) db.addGoalItem({ goalId: g, text: t });
+
+  // Seen live: the model merged two existing steps into one "new" one.
+  const dup = db.createGoalProposal({ project: "p9", goalId: g, kind: "add_item", text: "Implement cart.js (add, remove, list; use total() from checkout.js)", reason: "x" });
+  assert.equal(dup, null, "a paraphrase of existing steps is dropped");
+
+  // Genuinely new work still gets through, even though it shares a few words.
+  const fresh = db.createGoalProposal({ project: "p9", goalId: g, kind: "add_item", text: "Add an empty-cart total test case to checkout.test.js", reason: "y" });
+  assert.ok(fresh, "new work is suggested");
+
+  // And a rewording of that pending suggestion is not filed twice.
+  const again = db.createGoalProposal({ project: "p9", goalId: g, kind: "add_item", text: "Add a test case for an empty cart total in checkout.test.js", reason: "z" });
+  assert.equal(again, null, "a rewording of a pending suggestion is dropped");
+});

@@ -244,6 +244,15 @@ export function settleWaiting(sessionId: string | null, at = now()): void {
   }
 }
 
+/** An item unblocked from the board: its sessions stuck as blocked go idle until their next prompt. */
+export function settleBlocked(itemId: string, at = now()): void {
+  const rows = db.prepare("SELECT * FROM sessions WHERE item_id = ? AND state = 'blocked'").all(itemId) as SessionRow[];
+  for (const s of rows) {
+    db.prepare("UPDATE sessions SET state = 'idle', state_since = ? WHERE id = ?").run(at, s.id);
+    logState({ ...s, state: "idle" }, at);
+  }
+}
+
 /** The session an agent call means: an explicit id (must be this member's), else the
  *  member's most recently seen session in the project — in the same worktree and
  *  from the same agent when those are known — within the last day. */
@@ -271,7 +280,8 @@ export function resolveAgentSession(
 }
 
 /** Record a real edit mark for a session (from the hook's touch). */
-export function recordMark(s: SessionRow, kind: "edit", path: string | null, at = now()): void {
+/** A step on the session's timeline: an edit (path = file) or a test run (path = the command). */
+export function recordMark(s: SessionRow, kind: "edit" | "test" | "test_fail", path: string | null, at = now()): void {
   db.prepare("INSERT INTO session_marks (session_id, project, member, item_id, kind, path, at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(s.id, s.project, s.member, s.item_id, kind, path, at);
 }

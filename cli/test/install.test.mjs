@@ -133,7 +133,7 @@ test("project install sweeps a stale Reins hook out of the committed shared sett
 test("installing several agents wires each in its own config; Claude hooks are untouched by the others", () => {
   const home = mkdtempSync(join(tmpdir(), "reins-install-"));
   runInstall(home, ["--agent", "claude-code,codex,opencode,aider"]);
-  assert.equal(allCommands(settingsFor(home)).filter((c) => c.includes("reins-hook.mjs")).length, 5);
+  assert.equal(allCommands(settingsFor(home)).filter((c) => c.includes("reins-hook.mjs")).length, 6);
   assert.match(readFileSync(join(home, ".codex", "config.toml"), "utf8"), /adapters\/codex\.mjs/);
   assert.match(readFileSync(join(home, ".config", "opencode", "plugins", "reins.js"), "utf8"), /adapters\/opencode\.mjs/);
   assert.match(readFileSync(join(home, ".aider.conf.yml"), "utf8"), /^notifications-command: 'node "[^"]+\/adapters\/aider\.mjs"'/m);
@@ -158,12 +158,15 @@ test("status masks a token embedded by an older install instead of printing it",
   assert.match(out, /Claude Code/);
 });
 
-test("install registers the context, pre-edit and touch hooks with edit-tool matchers", () => {
+test("install registers the context, pre-edit, touch and test-run hooks with their tool matchers", () => {
   const home = mkdtempSync(join(tmpdir(), "reins-install-"));
   runInstall(home, ["--me", "asha"]);
   const s = settingsFor(home);
-  assert.deepEqual(Object.keys(s.hooks).sort(), ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
-  for (const evt of ["PreToolUse", "PostToolUse"]) assert.equal(s.hooks[evt][0].matcher, "Edit|Write|MultiEdit|NotebookEdit");
+  assert.deepEqual(Object.keys(s.hooks).sort(), ["PostToolUse", "PostToolUseFailure", "PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
+  assert.equal(s.hooks.PreToolUse[0].matcher, "Edit|Write|MultiEdit|NotebookEdit");
+  // Bash after the fact only: a passing test run fires PostToolUse, a failing one PostToolUseFailure.
+  assert.equal(s.hooks.PostToolUse[0].matcher, "Edit|Write|MultiEdit|NotebookEdit|Bash");
+  assert.equal(s.hooks.PostToolUseFailure[0].matcher, "Bash");
   assert.equal(s.hooks.SessionStart[0].matcher, undefined);
   assert.ok(allHooks(s).every((h) => h.timeout === 10 && h.shell === "bash"));
 });
@@ -191,7 +194,7 @@ test("re-running install upgrades an old install in place; uninstall removes eve
   runInstall(home, ["--me", "asha"]);
   runInstall(home, ["--me", "asha"]);
   const s = settingsFor(home);
-  for (const evt of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]) {
+  for (const evt of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]) {
     const ours = s.hooks[evt].flatMap((g) => g.hooks).filter((h) => h.command.includes("reins-hook.mjs"));
     assert.equal(ours.length, 1, `${evt}: one Reins hook`);
     assert.ok(!ours[0].command.includes("REINS_MEMBER"), `${evt}: the old env-carrying command was replaced`);
