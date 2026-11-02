@@ -14,9 +14,12 @@ export default function Dashboard() {
   const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [workspace, setWorkspace] = useState("");
+  const [welcome, setWelcome] = useState(false);
 
   // Gate: if auth is on and there's no session, bounce to /login (the account
   // entry). The token-paste /signin page is reachable via "Try the demo".
+  useEffect(() => { setWelcome(new URLSearchParams(window.location.search).has("welcome")); }, []);
+
   useEffect(() => {
     api.me().then((m) => {
       if (m.auth && !m.workspace) toLogin();
@@ -59,7 +62,7 @@ export default function Dashboard() {
 
         <div className="db-bar">
           <h2 className="rz-section-h">Projects{loaded && projects.length > 0 ? ` · ${projects.length}` : ""}</h2>
-          <ProjectCreate onCreated={load} />
+          <ProjectCreate onCreated={load} startOpen={welcome} />
         </div>
 
         {!loaded ? (

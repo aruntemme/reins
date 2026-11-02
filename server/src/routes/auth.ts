@@ -73,7 +73,7 @@ const loginIpHits = counterMap();
 const LOGIN_FAIL_MAX = 8; // failed attempts per (IP, email) before temporary lockout
 const loginFails = counterMap();
 
-function clientIp(req: Request): string {
+export function clientIp(req: Request): string {
   return (req.ip || req.socket.remoteAddress || "unknown").toString();
 }
 

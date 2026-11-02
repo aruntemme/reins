@@ -15,12 +15,12 @@
  *   kind  <- --kind / REINS_KIND  or  payload.kind  (default "progress")
  *   source<- --source / REINS_SOURCE  (default "agent")
  *
- * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER, REINS_SOURCE,
- *      REINS_KIND, REINS_TEXT_FIELDS (comma list of dot-paths).
+ * Env: REINS_SOURCE, REINS_KIND, REINS_TEXT_FIELDS (comma list of dot-paths).
+ * Connection: REINS_URL/KEY/PROJECT/MEMBER, else ~/.reins/config.json (see _shared).
  */
 import { pathToFileURL } from "node:url";
-import { resolveMember, sendEvent } from "../lib/capture.mjs";
-import { readStdinJson, pick, resolveProject, parseFlags } from "./_shared.mjs";
+import { sendEvent } from "../lib/capture.mjs";
+import { readStdinJson, pick, parseFlags, connection } from "./_shared.mjs";
 
 const DEFAULT_TEXT_FIELDS = ["text", "prompt", "message", "content", "input", "output"];
 const VALID_KINDS = new Set(["intent", "progress", "summary"]);
@@ -62,13 +62,14 @@ if (isMain) {
 
   if (!text) process.exit(0);
 
+  const conn = connection(payload, "agent");
   sendEvent({
-    url: process.env.REINS_URL,
+    url: conn.url,
     // Git state (branch, dirty files) rides along from the repo the agent runs in.
-    cwd: (payload && payload.cwd) || process.cwd(),
-    key: process.env.REINS_KEY,
-    project: resolveProject(payload),
-    member: process.env.REINS_MEMBER || resolveMember(),
+    cwd: conn.cwd,
+    key: conn.key,
+    project: conn.project,
+    member: conn.member,
     kind,
     text,
     session: payload.session_id || payload.session,

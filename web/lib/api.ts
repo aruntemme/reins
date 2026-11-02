@@ -234,6 +234,20 @@ export interface ProviderInput {
 }
 export interface ActiveModel { model: string; fastModel: string; label: string }
 
+// ── CLI device login (the terminal's "approve this machine" page) ──
+export type CliLoginStatus = "pending" | "approved" | "denied" | "consumed" | "expired";
+export interface CliLogin {
+  userCode: string;
+  host: string;
+  repo: string;
+  status: CliLoginStatus;
+  expiresAt: number;
+  workspace: Workspace;
+  projects: { id: string; name: string }[];
+  suggestedProject: string;
+}
+export type CliApproveInput = { project: string } | { newProject: { name: string } };
+
 export const api = {
   me: () => j<Me>("/api/auth/me"),
   signin: (token: string) => j<{ ok: boolean; workspace: Workspace }>("/api/auth/session", { method: "POST", body: JSON.stringify({ token }) }),
@@ -354,6 +368,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ id, name }),
     }),
+
+  // ── CLI device login ──────────────────────────────────────
+  cliLogin: (code: string) => j<CliLogin>(`/api/cli/login/${encodeURIComponent(code)}`),
+  cliApprove: (code: string, choice: CliApproveInput) =>
+    j<{ ok: boolean; project: { id: string; name: string } }>(`/api/cli/login/${encodeURIComponent(code)}/approve`, {
+      method: "POST",
+      body: JSON.stringify(choice),
+    }),
+  cliDeny: (code: string) =>
+    j<{ ok: boolean }>(`/api/cli/login/${encodeURIComponent(code)}/deny`, { method: "POST" }),
 
   // ── Short-term goals ──────────────────────────────────────
   goals: (id: string) => j<{ goals: Goal[] }>(`/api/projects/${encodeURIComponent(id)}/goals`),

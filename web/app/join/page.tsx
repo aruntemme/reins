@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { safeNext } from "@/lib/guard";
 import { AuthShell } from "../auth-shell";
 
 type State =
@@ -16,6 +17,8 @@ function JoinFlow() {
   const router = useRouter();
   const params = useSearchParams();
   const code = params.get("code") || "";
+  // Where to land after joining (e.g. a project's connect page): same-origin paths only.
+  const next = safeNext(params.get("next"));
   const [state, setState] = useState<State>({ phase: "loading" });
 
   useEffect(() => {
@@ -43,7 +46,7 @@ function JoinFlow() {
           // join already succeeded (and consumed the invite), so a failed switch
           // must not report the invite as broken: the account menu can switch.
           await api.switchWorkspace(joined.workspace.id).catch(() => {});
-          if (!cancelled) router.replace("/dashboard");
+          if (!cancelled) router.replace(next);
         } else {
           setState({ phase: "needAuth", workspace: preview.workspace, role: preview.role, code });
         }
@@ -52,10 +55,11 @@ function JoinFlow() {
       }
     })();
     return () => { cancelled = true; };
-  }, [code, router]);
+  }, [code, next, router]);
 
   // Both signup and login resume the join by sending the user back here after auth.
-  const nextPath = `/join?code=${encodeURIComponent(code)}`;
+  // The destination rides along so it survives the detour through signup or login.
+  const nextPath = `/join?code=${encodeURIComponent(code)}${next === "/dashboard" ? "" : `&next=${encodeURIComponent(next)}`}`;
   const signupHref = `/signup?next=${encodeURIComponent(nextPath)}`;
   const loginHref = `/login?next=${encodeURIComponent(nextPath)}`;
 

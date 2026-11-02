@@ -40,11 +40,6 @@
 .au-foot a:hover { color: var(--ink); }
 
 /* token list on the account-ready screen */
-.au-tokens { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.au-tokens .au-tk { margin-top: 10px; font-size: 13px; font-weight: 500; }
-.au-tokens .au-tk span { display: block; margin-top: 2px; font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
-.au-tokens .copycmd.block { width: 100%; }
-.au-tokens .cc-text { overflow-wrap: anywhere; word-break: break-all; font-size: 12px; line-height: 1.55; }
 
 /* self-host steps on the token sign-in page */
 .au-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 22px; }

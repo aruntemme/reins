@@ -1,398 +1,255 @@
 #!/usr/bin/env node
 /**
- * reins-hook — one-command installer for the Reins capture hook (Claude Code).
+ * reins-hook — connect your repo and coding agents to a Reins board.
  *
- *   npx reins-hook install --url https://reins.yourco.com --me asha
- *   npx reins-hook install --global --me asha --project web-app
+ *   npx reins-hook                         interactive setup (sign in, pick agents)
+ *   npx reins-hook --url <url> --project <id>
+ *   npx reins-hook install --agent codex --url <url> --project <id> --token <tok>   (CI)
  *   npx reins-hook status
- *   npx reins-hook uninstall [--global]
+ *   npx reins-hook uninstall [--all]
+ *   npx reins-hook mcp --url <url> --token <access-token>
  *
- * It copies the hook to a stable location (~/.reins/reins-hook.mjs) and MERGES
- * the hook config into the chosen settings.json without clobbering other hooks.
- * Dependency-free: only Node built-ins, so `npx` has nothing to install.
+ * Commands written into agent configs point at a stable copy under ~/.reins and
+ * carry only REINS_SOURCE; the server, token, member and project resolve at
+ * runtime from ~/.reins/config.json (mode 0600). Dependency-free: only Node
+ * built-ins, so `npx` has nothing to install.
  */
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import os from "node:os";
+import { realpathSync, existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { basename, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { runMcp } from "./reins-mcp.mjs";
+import { createUI } from "./lib/tui.mjs";
+import { runSetup, http, normalizeInputUrl, parseAgentList } from "./lib/setup.mjs";
+import {
+  loadConfig, rememberSetup, forgetSetup, repoEntry, configPath, normalizeUrl, resolveRuntime, HOSTED_URL,
+} from "./lib/config.mjs";
+import {
+  AGENTS, WIZARD_AGENTS, installAgent, uninstallAgent, agentStatus, installDir, tildify,
+  buildCommand, shQuote, maskKey,
+} from "./lib/agents.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const HOOK_SRC = join(HERE, "reins-hook.mjs");
-const LIB_SRC = join(HERE, "lib");
-const ADAPTERS_SRC = join(HERE, "adapters");
-const INSTALL_DIR = join(os.homedir(), ".reins");
-const INSTALLED_HOOK = join(INSTALL_DIR, "reins-hook.mjs");
-const INSTALLED_LIB = join(INSTALL_DIR, "lib");
-const INSTALLED_ADAPTERS = join(INSTALL_DIR, "adapters");
-// Which Claude Code hook events we register, per harness. The Claude hook also
-// injects team context (SessionStart, UserPromptSubmit), warns before edits
-// (PreToolUse) and records real file touches (PostToolUse) — both limited to the
-// file-editing tools by matcher. Adapters only capture prompts and turns.
-const EDIT_MATCHER = "Edit|Write|MultiEdit|NotebookEdit";
-const CLAUDE_EVENTS = [
-  { event: "SessionStart" },
-  { event: "UserPromptSubmit" },
-  { event: "PreToolUse", matcher: EDIT_MATCHER },
-  { event: "PostToolUse", matcher: EDIT_MATCHER },
-  { event: "Stop" },
-];
-const ADAPTER_EVENTS = [{ event: "UserPromptSubmit" }, { event: "Stop" }];
-// Every event we have ever registered, so upgrades and uninstall find all of ours.
-const EVENTS = CLAUDE_EVENTS.map((e) => e.event);
-// Backstop only (seconds): the hook itself gives up after ≤ 2s.
-const HOOK_TIMEOUT_S = 10;
-const eventsFor = (agent) => (agent === "claude-code" ? CLAUDE_EVENTS : ADAPTER_EVENTS);
-// Our hook commands all run a file under ~/.reins, so the install path is the
-// reliable marker for "this is ours" when merging (covers both the Claude hook
-// and every adapter, without clobbering foreign hooks).
-// Hook commands embed a forward-slashed path (see buildCommand — valid for node
-// on every OS and survives bash, which strips Windows backslashes), so match on
-// the same normalized form.
-const MARKER = INSTALL_DIR.replace(/\\/g, "/");
+export { buildCommand, shQuote, maskKey };
 
-/**
- * Concrete, tested adapters. Each maps to a file under ~/.reins/adapters and the
- * `source` label its events carry. "claude-code" is special: it is the native
- * hook, not an adapter, and stays the default when --agent is absent.
- */
-const AGENTS = {
-  "claude-code": { source: "claude-code", file: INSTALLED_HOOK },
-  codex: { source: "codex", file: join(INSTALLED_ADAPTERS, "codex.mjs") },
-  opencode: { source: "opencode", file: join(INSTALLED_ADAPTERS, "opencode.mjs") },
-  aider: { source: "aider", file: join(INSTALLED_ADAPTERS, "aider.mjs") },
-  generic: { source: "agent", file: join(INSTALLED_ADAPTERS, "generic.mjs") },
-};
+// Flags that never take a value (so `--yes setup` doesn't read "setup" as the value).
+const BOOLEAN_FLAGS = new Set(["yes", "no-open", "global", "all", "help", "version"]);
 
-const c = {
-  b: (s) => `\x1b[1m${s}\x1b[0m`,
-  dim: (s) => `\x1b[2m${s}\x1b[0m`,
-  green: (s) => `\x1b[32m${s}\x1b[0m`,
-  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-  red: (s) => `\x1b[31m${s}\x1b[0m`,
-  cyan: (s) => `\x1b[36m${s}\x1b[0m`,
-};
-
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a.startsWith("--")) {
+    if (a === "-y") args.yes = true;
+    else if (a === "-h") args.help = true;
+    else if (a === "-v") args.version = true;
+    else if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      if (eq > 2) { args[a.slice(2, eq)] = a.slice(eq + 1); continue; }
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (!next || next.startsWith("--")) args[key] = true;
+      if (BOOLEAN_FLAGS.has(key) || next === undefined || next.startsWith("--")) args[key] = true;
       else { args[key] = next; i++; }
     } else args._.push(a);
   }
   return args;
 }
 
-// Where the hook config is written.
-//  • global  → ~/.claude/settings.json (already personal — lives in your home)
-//  • project → ./.claude/settings.local.json — Claude Code's PER-USER, auto
-//    git-ignored file. Critical: the hook command embeds a machine-specific
-//    absolute path (~/.reins/reins-hook.mjs). Writing that into the *shared*
-//    ./.claude/settings.json gets it committed, and every teammate who pulls the
-//    repo then runs a path that doesn't exist on their machine — Claude Code
-//    reports "node:internal/modules/cjs/loader … Cannot find module". settings
-//    .local.json keeps each person's path on their own machine.
-function globalSettingsPath() {
-  return join(os.homedir(), ".claude", "settings.json");
-}
-function localSettingsPath() {
-  return resolve(process.cwd(), ".claude", "settings.local.json");
-}
-function sharedSettingsPath() {
-  return resolve(process.cwd(), ".claude", "settings.json");
-}
-function settingsPath(global) {
-  return global ? globalSettingsPath() : localSettingsPath();
-}
-
-function readJson(path) {
-  if (!existsSync(path)) return {};
-  try { return JSON.parse(readFileSync(path, "utf8")); }
-  catch { console.error(c.red(`! ${path} is not valid JSON — refusing to overwrite. Fix or remove it.`)); process.exit(1); }
-}
-
-/**
- * POSIX-quote a value for the `VAR=value` prefix. The command always runs under
- * bash (shell: "bash" is pinned, including on Windows), so single quotes are
- * right everywhere. Plain values stay unquoted so commands remain readable.
- */
-export function shQuote(v) {
-  const s = String(v);
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-export function buildCommand(opts) {
-  const agent = AGENTS[opts.agent || "claude-code"];
-  const env = [];
-  const set = (k, v) => env.push(`${k}=${shQuote(v)}`);
-  if (opts.url) set("REINS_URL", opts.url);
-  if (opts.me) set("REINS_MEMBER", opts.me);
-  if (opts.project) set("REINS_PROJECT", opts.project);
-  if (opts.key) set("REINS_KEY", opts.key);
-  // The source label rides as an env var so the adapter (and the Claude hook,
-  // which already reads REINS_SOURCE) stamps every event with the right origin.
-  set("REINS_SOURCE", opts.source || agent.source);
-  // Quote AND forward-slash the path. Claude Code runs hooks through bash, which
-  // strips the backslashes in a Windows path (C:\Users\… → C:Users…) and would
-  // also mishandle a path containing spaces. Forward slashes are valid for node
-  // on every platform, and the quotes keep spaces intact.
-  const file = agent.file.replace(/\\/g, "/");
-  return `${env.join(" ")} node "${file}"`.trim();
-}
-
-/** Recursively copy a directory of .mjs sources into the install dir. */
-function copyDir(src, dest) {
-  mkdirSync(dest, { recursive: true });
-  for (const name of readdirSync(src, { withFileTypes: true })) {
-    const from = join(src, name.name);
-    const to = join(dest, name.name);
-    if (name.isDirectory()) copyDir(from, to);
-    else copyFileSync(from, to);
-  }
-}
-
-/**
- * Remove our hook (matched by the ~/.reins MARKER) from a settings file, leaving
- * foreign hooks intact. Writes back only if something changed. Returns the count
- * removed. Used by uninstall and by install's cleanup of a stale, committed
- * entry in the shared settings.json.
- */
-function scrubOurHooks(path) {
-  if (!existsSync(path)) return 0;
-  const settings = readJson(path);
-  if (!settings.hooks) return 0;
-  let removed = 0;
-  for (const evt of EVENTS) {
-    const r = withoutOurs(settings.hooks[evt]);
-    removed += r.removed;
-    if (r.list) settings.hooks[evt] = r.list;
-    else delete settings.hooks[evt];
-  }
-  if (removed) writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
-  return removed;
-}
-
-const isOurs = (h) => typeof h?.command === "string" && h.command.includes(MARKER);
-
-/** An event's hook groups with our hook taken out. A group that also holds
- *  foreign hooks keeps them; a group left empty is dropped. `list` is undefined
- *  when nothing remains (so the event key can be deleted). */
-function withoutOurs(list) {
-  if (!Array.isArray(list)) return { list, removed: 0 };
-  let removed = 0;
-  const out = [];
-  for (const group of list) {
-    const hooks = Array.isArray(group?.hooks) ? group.hooks : [];
-    const foreign = hooks.filter((h) => !isOurs(h));
-    removed += hooks.length - foreign.length;
-    if (foreign.length === hooks.length) out.push(group);
-    else if (foreign.length) out.push({ ...group, hooks: foreign });
-  }
-  return { list: out.length ? out : undefined, removed };
-}
-
-/** Insert/replace our hook entry in one event array, leaving foreign hooks intact. */
-function mergeEvent(list, command, matcher) {
-  const kept = withoutOurs(list).list || [];
-  // shell: "bash" pins the interpreter so the POSIX `VAR=val node "…"` form runs
-  // identically on Windows (whose default hook shell would otherwise be cmd or
-  // PowerShell, which don't understand the env-prefix syntax).
-  kept.push({
-    ...(matcher ? { matcher } : {}),
-    hooks: [{ type: "command", command, shell: "bash", timeout: HOOK_TIMEOUT_S }],
-  });
-  return kept;
-}
-
-async function checkServer(url) {
-  const base = (url || "http://localhost:4319").replace(/\/$/, "");
+function git(args, cwd) {
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 2500);
-    const res = await fetch(`${base}/health`, { signal: ctrl.signal });
-    clearTimeout(t);
-    if (res.ok) {
-      const j = await res.json().catch(() => ({}));
-      return { ok: true, llm: j.llm, model: j.model };
-    }
-    return { ok: false, status: res.status };
+    return execFileSync("git", args, { cwd, encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
-    return { ok: false, unreachable: true };
+    return null;
   }
 }
+/** The key this folder has in the repos map: its git root, else the folder itself. */
+const repoKey = (cwd) => git(["rev-parse", "--show-toplevel"], cwd) || resolve(cwd);
+
+const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+// ---------------------------------------------------------------- install (flags, CI)
 
 async function install(args) {
-  const agent = (args.agent && String(args.agent)) || "claude-code";
-  if (!AGENTS[agent]) {
-    console.error(c.red(`! unknown --agent "${agent}". Known: ${Object.keys(AGENTS).join(", ")}`));
-    process.exit(1);
+  const ui = createUI();
+  const { c } = ui;
+  let agents;
+  try {
+    const raw = str(args.agent) || str(args.agents) || "claude-code";
+    agents = raw.split(",").map((s) => s.trim()).filter(Boolean)
+      .flatMap((a) => (a === "generic" ? ["generic"] : parseAgentList(a)));
+  } catch (e) {
+    console.error(c.red(`! ${e.message}, generic`));
+    return 1;
   }
-  const opts = {
-    url: args.url || "http://localhost:4319",
-    me: args.me || args.member,
-    project: args.project,
-    // --token is the ingest token from the dashboard invite / new-project flow;
-    // --key is the legacy single shared secret. Either becomes REINS_KEY, which
-    // the hook sends as x-reins-key (accepted as a bearer credential server-side).
-    key: args.token || args.key,
-    agent,
-    source: args.source && String(args.source),
-  };
-  const global = !!args.global;
-  const path = settingsPath(global);
+  const cwd = process.cwd();
+  const root = git(["rev-parse", "--show-toplevel"], cwd);
+  const key = root || resolve(cwd);
+  const cfg = loadConfig();
+  const saved = repoEntry(cfg, cwd);
+  const servers = Object.keys(cfg.servers);
+  const url = normalizeInputUrl(str(args.url) || "") || saved?.url || servers[servers.length - 1] || HOSTED_URL;
+  if (str(args.url) && !normalizeInputUrl(args.url)) { console.error(c.red(`! --url ${args.url} isn't a valid URL`)); return 1; }
+  const token = str(args.token) || str(args.key);
+  const member = str(args.me) || str(args.member);
+  // In a repo the mapping names its project. Outside one (e.g. a --global install
+  // from your home folder) it maps every folder below to the server, and each
+  // repo keeps its folder name as the project unless --project pins one.
+  const project = str(args.project) ||
+    (saved && saved.root === key && normalizeUrl(saved.url) === url ? saved.project : undefined) ||
+    (root ? basename(root) : undefined);
+  const scope = args.global || args.scope === "global" ? "global" : "repo";
 
-  // 1) copy the hook + shared lib + adapters to a stable location so the
-  //    installed command resolves its relative imports (../lib, ./_shared).
-  mkdirSync(INSTALL_DIR, { recursive: true });
-  copyFileSync(HOOK_SRC, INSTALLED_HOOK);
-  copyDir(LIB_SRC, INSTALLED_LIB);
-  if (existsSync(ADAPTERS_SRC)) copyDir(ADAPTERS_SRC, INSTALLED_ADAPTERS);
+  // The connection lives in ~/.reins/config.json, so no command we write holds a token.
+  rememberSetup({ server: { url, token, member }, repo: { root: key, url, project } });
 
-  // 2) merge into settings.json
-  mkdirSync(dirname(path), { recursive: true });
-  const settings = readJson(path);
-  settings.hooks = settings.hooks || {};
-  const command = buildCommand(opts);
-  // Re-running install upgrades in place: ours is replaced (never duplicated) on
-  // every event this harness uses, removed from events it doesn't (e.g. switching
-  // to an adapter), and foreign hooks are left exactly as they were.
-  const wanted = eventsFor(agent);
-  for (const evt of EVENTS) {
-    const spec = wanted.find((w) => w.event === evt);
-    if (spec) settings.hooks[evt] = mergeEvent(settings.hooks[evt], command, spec.matcher);
-    else {
-      const r = withoutOurs(settings.hooks[evt]);
-      if (r.list) settings.hooks[evt] = r.list;
-      else delete settings.hooks[evt];
+  ui.write("");
+  let failed = 0;
+  for (const id of agents) {
+    let r;
+    try {
+      r = installAgent(id, { cwd, dir: key, scope, source: str(args.source) });
+    } catch (e) {
+      ui.err(`${AGENTS[id]?.label || id}: ${e.message}`);
+      failed++;
+      continue;
     }
+    if (r.conflict) { ui.warn(`${AGENTS[id].label}: not wired — ${r.conflict}`); failed++; continue; }
+    if (r.manual) {
+      ui.ok(`${AGENTS[id].label}: run this from your agent's prompt/stop hook (pipe it a JSON object):`);
+      ui.info(c.cyan(r.manual));
+      continue;
+    }
+    for (const w of r.wrote) ui.ok(`${AGENTS[id].label} ${c.dim("→")} ${w.path} ${c.dim(`(${w.note})`)}`);
+    for (const n of r.notes || []) ui.warn(n);
+    if (r.next) ui.hint(id === "claude-code" ? "Last step: in Claude Code run /hooks to approve the new hooks (or restart)." : r.next);
   }
-  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+  ui.kv("server", url);
+  ui.kv("project", project || c.dim("(each repo's folder name)"));
+  ui.kv("as", member || c.dim("(from the server sign-in, else git email → $USER)"));
+  ui.kv("config", `${configPath()} ${c.dim(token ? "(token stored here, not in agent settings)" : "")}`);
 
-  // For a project install, sweep our hook out of the SHARED ./.claude/settings
-  // .json if a previous version put it there (its absolute path was machine
-  // specific and breaks teammates who pull the repo). It belongs in the personal
-  // settings.local.json we just wrote.
-  let sweptShared = 0;
-  if (!global) sweptShared = scrubOurHooks(sharedSettingsPath());
-
-  // 3) report
-  console.log(`\n  ${c.green("✓")} Reins hook installed`);
-  console.log(`  ${c.dim("agent")}     ${agent} ${c.dim(`(source: ${opts.source || AGENTS[agent].source})`)}`);
-  console.log(`  ${c.dim("command")}   ${AGENTS[agent].file}`);
-  console.log(`  ${c.dim("settings")}  ${path} ${c.dim(global ? "(global — all repos)" : "(this repo, personal — not committed)")}`);
-  if (sweptShared) console.log(`  ${c.yellow("!")} removed a stale Reins hook from the shared settings.json ${c.dim("(commit that change so teammates stop seeing a missing-path error)")}`);
-  console.log(`  ${c.dim("events")}    ${eventsFor(agent).map((e) => e.event).join(", ")}`);
-  console.log(`  ${c.dim("as")}        ${opts.me || c.yellow("(auto: git email → $USER)")}`);
-  console.log(`  ${c.dim("project")}   ${opts.project || c.yellow("(auto: folder name)")}`);
-  console.log(`  ${c.dim("server")}    ${opts.url}`);
-
-  const health = await checkServer(opts.url);
-  if (health.ok) console.log(`  ${c.green("✓")} server reachable ${c.dim(`(llm: ${health.llm ? health.model : "off"})`)}`);
-  else if (health.unreachable) console.log(`  ${c.yellow("!")} couldn't reach ${opts.url} — start the Reins server, or pass the right --url`);
-  else console.log(`  ${c.yellow("!")} server returned ${health.status} at ${opts.url}`);
-
-  if (agent === "claude-code") {
-    console.log(`\n  ${c.b("Last step:")} in Claude Code run ${c.cyan("/hooks")} to approve the new hook (or restart).`);
-  } else {
-    // The settings.json entry is the unified record of the wiring; the actual
-    // trigger for a non-Claude agent lives in that agent's own config. Tell the
-    // truth about where to point it.
-    console.log(`\n  ${c.b("Last step:")} point ${agent}'s notify/plugin at the command above. See ${c.cyan("hooks/README.md")} for the exact line.`);
+  const h = await http(url, "/health", { timeoutMs: 2500 });
+  if (h.ok && h.json?.ok) ui.ok(`server reachable ${c.dim(`(llm: ${h.json.llm ? h.json.model || "on" : "off"}, sign-in: ${h.json.auth ? "required" : "off"})`)}`);
+  else ui.warn(h.unreachable ? `couldn't reach ${url} — start the Reins server, or pass the right --url` : `server returned ${h.status} at ${url}`);
+  if (h.json?.auth && !token && !loadConfig().servers[url]?.token) {
+    ui.warn(`this server requires sign-in — run ${c.cyan("npx reins-hook")} to sign in, or pass --token`);
   }
-  console.log(`  ${c.dim(agent === "claude-code"
-    ? "Then just work — your prompts, turns and edits flow to the board, and team context flows back into your agent."
-    : "Then just work — your prompts and turns flow to the Reins board.")}\n`);
+  ui.write("");
+  return failed ? 1 : 0;
 }
 
-function uninstall(args) {
-  const global = !!args.global;
-  // Project uninstall also sweeps the shared settings.json, in case an older
-  // version (or a committed file) left our machine-specific hook there.
-  const paths = global ? [globalSettingsPath()] : [localSettingsPath(), sharedSettingsPath()];
-  let any = false;
-  for (const path of paths) {
-    if (!existsSync(path)) continue;
-    const removed = scrubOurHooks(path);
-    if (removed) { any = true; console.log(c.green(`✓ Removed Reins hook from ${path}`)); }
-    else console.log(c.dim(`· no Reins hook in ${path}`));
-  }
-  if (!any) console.log(c.yellow(`Nothing to remove.`));
-}
-
-/** Hide the ingest token in a displayed command: keep a short prefix to tell tokens apart. */
-export function maskKey(cmd) {
-  return cmd.replace(/(REINS_KEY=)('[^']*'|\S+)/, (_m, k, v) => {
-    const raw = v.startsWith("'") ? v.slice(1, -1) : v;
-    return `${k}${raw.slice(0, Math.min(12, Math.floor(raw.length / 2)))}…`;
-  });
-}
+// ---------------------------------------------------------------- status
 
 async function status(args) {
-  const rows = [
-    ["global", globalSettingsPath()],
-    ["this repo (personal)", localSettingsPath()],
-    ["this repo (shared)", sharedSettingsPath()],
-  ];
-  for (const [label, path] of rows) {
-    const settings = readJson(path);
-    const cmds = EVENTS.flatMap((e) => (settings.hooks?.[e] || []).flatMap((g) => (g.hooks || []).map((h) => h.command)))
-      .filter((cmd) => typeof cmd === "string" && cmd.includes(MARKER));
-    if (cmds.length) {
-      const shared = label.includes("shared");
-      console.log(`  ${shared ? c.yellow("!") : c.green("✓")} installed ${c.dim(`(${label}: ${path})`)}`);
-      console.log(`    ${c.dim(maskKey(cmds[0]))}`);
-      if (shared) console.log(`    ${c.yellow("this is committed — reinstall to move it to settings.local.json")}`);
-    } else {
-      console.log(`  ${c.dim("·")} not installed ${c.dim(`(${label}: ${path})`)}`);
+  const ui = createUI();
+  const { c } = ui;
+  const cwd = process.cwd();
+  const key = repoKey(cwd);
+  const cfg = loadConfig();
+  const entry = repoEntry(cfg, cwd);
+  const rt = resolveRuntime({ cwd, config: cfg });
+  const url = normalizeInputUrl(str(args.url) || "") || rt.url;
+  const server = cfg.servers[url] || {};
+
+  ui.banner("Reins status");
+  ui.write("");
+  const h = await http(url, "/health", { timeoutMs: 2500 });
+  ui.kv("server", h.ok && h.json?.ok
+    ? `${url} ${c.green("✓")} ${c.dim(`reachable · llm ${h.json.llm ? "on" : "off"} · sign-in ${h.json.auth ? "required" : "off"}`)}`
+    : `${url} ${c.yellow("!")} ${h.unreachable ? "unreachable" : `HTTP ${h.status}`}`);
+  ui.kv("you", `${rt.member}${server.workspace?.name ? c.dim(` · workspace ${server.workspace.name}`) : ""} ${
+    server.token ? c.dim("(signed in)") : process.env.REINS_KEY ? c.dim("(token from REINS_KEY)") : c.dim("(not signed in)")}`);
+  ui.kv("repo", entry
+    ? `${tildify(entry.root)} → project ${c.b(entry.project || rt.project)}${entry.project ? "" : c.dim(" (folder name)")}${entry.root !== key ? c.dim(" (inherited from a parent folder)") : ""}`
+    : `${tildify(key)} ${c.yellow("not set up")} ${c.dim(`— run npx reins-hook (events would go to project "${rt.project}")`)}`);
+  ui.write("");
+  ui.write(`  ${c.b("agents")}`);
+  const o = { cwd, dir: key };
+  for (const id of WIZARD_AGENTS) {
+    const rows = agentStatus(id, o);
+    if (!rows.length) { ui.write(`     ${c.dim("·")} ${AGENTS[id].label.padEnd(12)} ${c.dim("not wired")}`); continue; }
+    for (const r of rows) {
+      const mark = r.warn ? c.yellow("!") : c.green("✓");
+      ui.write(`     ${mark} ${AGENTS[id].label.padEnd(12)} ${tildify(r.path)} ${c.dim(`(${r.note})`)}`);
+      if (r.command && /REINS_(KEY|URL|PROJECT|MEMBER)=/.test(r.command)) ui.write(`         ${c.dim(maskKey(r.command))}`);
+      if (r.warn) ui.write(`         ${c.yellow(r.warn)}`);
     }
   }
-  const url = args.url || "http://localhost:4319";
-  const health = await checkServer(url);
-  console.log(health.ok
-    ? `  ${c.green("✓")} server ${url} ${c.dim(`(llm: ${health.llm ? health.model : "off"})`)}`
-    : `  ${c.yellow("!")} server ${url} ${health.unreachable ? "unreachable" : health.status}`);
+  ui.write("");
+  ui.hint(`config: ${tildify(configPath())}${existsSync(configPath()) ? "" : " (not created yet)"}`);
+  ui.write("");
+  return 0;
 }
 
+// ---------------------------------------------------------------- uninstall
+
+function uninstall(args) {
+  const ui = createUI();
+  const { c } = ui;
+  const cwd = process.cwd();
+  const key = repoKey(cwd);
+  const o = { cwd, dir: key };
+  ui.write("");
+  let any = false;
+  for (const id of WIZARD_AGENTS) {
+    for (const path of uninstallAgent(id, o)) {
+      any = true;
+      ui.ok(`${AGENTS[id].label}: removed Reins from ${tildify(path)}`);
+    }
+  }
+  const f = forgetSetup({ root: key, credentials: !!args.all });
+  if (f.removed) {
+    any = true;
+    ui.ok(args.all ? `Forgot every saved sign-in and repo in ${tildify(configPath())}` : `Forgot this repo's project mapping in ${tildify(configPath())}`);
+  }
+  if (!any) ui.info(c.dim("Nothing to remove."));
+  if (!args.all) ui.hint(`Saved sign-ins are kept (npx reins-hook uninstall --all forgets them too). Hook files stay in ${tildify(installDir())}.`);
+  ui.write("");
+  return 0;
+}
+
+// ---------------------------------------------------------------- help
+
 function help() {
+  const { c } = createUI();
   console.log(`
-  ${c.b("reins-hook")} — install the Reins capture hook for Claude Code
+  ${c.b("reins-hook")} — connect your repo and coding agents to a Reins board
 
   ${c.b("Usage")}
-    npx reins-hook install [options]
-    npx reins-hook status [--url <url>]
-    npx reins-hook uninstall [--global]
+    npx reins-hook [setup] [options]     interactive setup (the default)
+    npx reins-hook install [options]     non-interactive, for CI and scripts
+    npx reins-hook status                server, who you are, repo → project, wired agents
+    npx reins-hook uninstall [--all]     remove all agent wiring we added
     npx reins-hook mcp --url <url> --token <access-token> [--ingest-token <tok>]
 
-  ${c.b("install options")}
-    --agent <name>     which agent harness (default claude-code)
-                       known: ${Object.keys(AGENTS).join(", ")}
-    --source <id>      override the source label events carry
-    --url <url>        Reins server (default http://localhost:4319)
-    --me <name>        who you are (default: git email → $USER)
-    --project <id>     project scope (default: folder name)
-    --token <token>    ingest token from the dashboard invite / new-project flow
-    --key <secret>     legacy single shared ingest secret (alias of --token)
-    --global           install for ALL repos (~/.claude/settings.json)
-                       (default: this repo's ./.claude/settings.local.json,
-                        which is personal and git-ignored — never committed)
+  ${c.b("setup")} — detects the repo, checks the server, signs you in in the browser
+  (no tokens to copy), wires the agents you pick and puts you on the board.
+    --url <url>          Reins server (default: this repo's, else last used, else ${HOSTED_URL})
+    --project <id>       project this repo reports to (preselects / validates)
+    --agents <list>      claude-code,codex,opencode,aider (default: pick from detected)
+    --scope repo|global  Claude Code: this repo (.claude/settings.local.json) or all repos
+    --no-open            don't open the browser
+    --yes, -y            accept defaults; runs without a terminal (all prompts answered)
 
-  ${c.b("Examples")}
-    npx reins-hook install --url https://reins.yourco.com --me asha
-    npx reins-hook install --global --me asha --project web-app
-    npx reins-hook install --agent codex --me asha
-    npx reins-hook install --agent generic --source my-bot --me asha
+  ${c.b("install")} — writes the same agent configs without prompts
+    --agent <list>       ${Object.keys(AGENTS).join(", ")} (default claude-code)
+    --url <url>          Reins server
+    --project <id>       project scope (default: repo folder name)
+    --token <token>      ingest token (stored in ~/.reins/config.json, mode 0600)
+    --me <name>          who you are (default: server sign-in, else git email → $USER)
+    --global             Claude Code: all repos (~/.claude/settings.json)
+    --source <id>        override the source label events carry
+
+  ${c.b("Where things go")}
+    Claude Code  .claude/settings.local.json (this repo) or ~/.claude/settings.json
+    Codex CLI    notify in ~/.codex/config.toml
+    OpenCode     ~/.config/opencode/plugins/reins.js
+    Aider        notifications-command in ~/.aider.conf.yml
+    Sign-in      ~/.reins/config.json (servers + repo → project), read at runtime
 
   ${c.b("mcp")} — give your agent read/write access to the shared board over MCP
-    Add it to Claude Code (run once):
       claude mcp add reins -- npx reins-hook mcp --url https://your-reins --token rk_access_…
     Add --ingest-token rk_ingest_… to also let the agent post notes.
-    Tools: reins_context, reins_member, reins_pending, reins_handoffs,
-           reins_goals, reins_profile, reins_claim/resolve, reins_goal_add/check, reins_note
 `);
+  return 0;
 }
 
 // Only run the CLI when executed, not when imported (tests import the helpers).
@@ -400,16 +257,30 @@ const isMain = (() => {
   try { return !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; }
   catch { return false; }
 })();
-const args = parseArgs(process.argv.slice(2));
-const cmd = args._[0] || "help";
+
 if (isMain) (async () => {
-  if (cmd === "install") await install(args);
-  else if (cmd === "uninstall") uninstall(args);
-  else if (cmd === "status") await status(args);
-  else if (cmd === "mcp") {
-    // Long-lived stdio server, launched by the agent. stdout is reserved for the
-    // protocol, so it must stay silent here.
-    await runMcp({ url: args.url, token: args.token || args.key, ingestToken: args["ingest-token"] || args.ingest });
+  const args = parseArgs(process.argv.slice(2));
+  const cmd = args._[0] || "setup";
+  let code = 0;
+  try {
+    if (args.help || cmd === "help") code = help();
+    else if (args.version) console.log(JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version);
+    else if (cmd === "setup") code = await runSetup(args);
+    else if (cmd === "install") code = await install(args);
+    else if (cmd === "uninstall") code = uninstall(args);
+    else if (cmd === "status") code = await status(args);
+    else if (cmd === "mcp") {
+      // Long-lived stdio server, launched by the agent. stdout is reserved for the
+      // protocol, so it must stay silent here.
+      await runMcp({ url: args.url, token: args.token || args.key, ingestToken: args["ingest-token"] || args.ingest });
+      return;
+    } else {
+      console.error(`Unknown command "${cmd}".`);
+      code = help() || 1;
+    }
+  } catch (e) {
+    console.error(`\n  ! ${e?.message || e}\n`);
+    code = 1;
   }
-  else help();
+  process.exitCode = code;
 })();

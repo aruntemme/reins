@@ -7,7 +7,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { ensureProject, ensureMember, touchMember, projectWorkspace, recordTouch } from "../db.js";
+import { ensureProject, ensureMember, touchMember, projectWorkspace, recordTouch, getProject } from "../db.js";
 import { env } from "../env.js";
 import { bus } from "../bus.js";
 import { requireHook, counterMap, overLimit } from "../middleware.js";
@@ -20,8 +20,10 @@ export const hook = Router();
 
 const touchHits = counterMap();
 const readHits = counterMap();
+const helloHits = counterMap();
 const TOUCH_MAX_PER_MIN = 600;
 const READ_MAX_PER_MIN = 1200;
+const HELLO_MAX_PER_MIN = 120;
 
 const Base = {
   project: z.string().trim().min(1).max(120),
@@ -70,6 +72,27 @@ hook.post("/hook/touch", requireHook, (req, res) => {
   // Git state rides along (and runs the collision check); otherwise check here.
   if (!applyGitMeta(project, member, meta)) reconcileCollisions(project);
   res.json({ ok: true });
+});
+
+// The setup wizard's last step: prove the credentials and project work, and put
+// the member on the board right away (the connect page is watching for them).
+// Only presence is recorded: no event, no activity, no LLM.
+hook.post("/hook/hello", requireHook, (req, res) => {
+  if (!accepting()) return res.status(503).json({ error: "server is shutting down" });
+  const body = z
+    .object({ ...Base, displayName: z.string().max(120).optional(), source: z.string().max(40).optional() })
+    .safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.issues });
+  const { project, member, displayName } = body.data;
+  if (!hookProject(req, res, project, true)) return;
+  const ws = req.workspaceId ?? "default";
+  if (overLimit(helloHits, ws, HELLO_MAX_PER_MIN, 60_000)) return res.status(429).json({ error: "hello rate limit reached" });
+  ensureProject(project, undefined, ws);
+  ensureMember(project, member, displayName);
+  touchMember(project, member);
+  bus.emitChange({ type: "member.updated", project, member });
+  const p = getProject(project);
+  res.json({ ok: true, project: { id: p.id, name: p.name } });
 });
 
 // PreToolUse on an edit tool: who else is on this file? Answered in a few ms; the

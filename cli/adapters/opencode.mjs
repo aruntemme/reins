@@ -1,22 +1,23 @@
 #!/usr/bin/env node
 /**
- * Reins adapter for opencode (sst/opencode).
+ * Reins adapter for opencode.
  *
- * CONCRETE integration via opencode's plugin/event bus. An opencode plugin can
- * subscribe to events and shell out to this adapter, piping the event JSON. The
- * event envelope opencode emits is:
- *   { "type": "message.updated"|"session.idle"|..., "properties": { ... } }
- * For a user turn the prompt rides in properties (text/message); for an
- * idle/finished turn the assistant's text is the team-visible signal.
+ * CONCRETE integration via opencode's plugin event bus. `npx reins-hook` writes
+ * a small plugin to ~/.config/opencode/plugins/reins.js (see
+ * lib/agents.mjs#opencodePluginSource) that subscribes to `message.updated`,
+ * `message.part.updated` and `session.idle`, and pipes one JSON object per
+ * captured turn to this adapter on stdin:
+ *   { "type": "message.sent", "properties": { "role": "user", "text": "…", "sessionID": "…" }, "cwd": "/abs/repo" }
+ *   { "type": "session.idle", "properties": { "role": "assistant", "text": "…", "sessionID": "…" }, "cwd": "/abs/repo" }
  *
  * It also accepts a flat {role,text} message object so a minimal wrapper that
  * forwards just the last message still works.
  *
- * Env: REINS_URL, REINS_KEY, REINS_PROJECT, REINS_MEMBER.
+ * Connection: env, else ~/.reins/config.json by the payload's cwd (see _shared).
  */
 import { pathToFileURL } from "node:url";
-import { resolveMember, sendEvent } from "../lib/capture.mjs";
-import { readStdinJson, pick, resolveProject } from "./_shared.mjs";
+import { sendEvent } from "../lib/capture.mjs";
+import { readStdinJson, pick, connection } from "./_shared.mjs";
 
 export const SOURCE = "opencode";
 
@@ -57,13 +58,14 @@ if (isMain) {
   if (!text) process.exit(0);
 
   const props = payload.properties || payload;
+  const conn = connection(payload, SOURCE);
   sendEvent({
-    url: process.env.REINS_URL,
+    url: conn.url,
     // Git state (branch, dirty files) rides along from the repo the agent runs in.
-    cwd: (payload && payload.cwd) || process.cwd(),
-    key: process.env.REINS_KEY,
-    project: resolveProject(payload),
-    member: process.env.REINS_MEMBER || resolveMember(),
+    cwd: conn.cwd,
+    key: conn.key,
+    project: conn.project,
+    member: conn.member,
     kind,
     text,
     session: props.sessionID || props.session_id || payload.sessionID,

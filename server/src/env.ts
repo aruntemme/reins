@@ -46,6 +46,10 @@ export const env = {
   // cleanup (distilled state is kept). 0 = keep raw text forever.
   eventRetentionDays: num("REINS_EVENT_RETENTION_DAYS", 30),
 
+  // How long a `reins-hook` device login (POST /api/cli/login) stays approvable
+  // and pollable. 10 minutes; overridable only so tests can expire one quickly.
+  cliLoginTtlMs: Math.max(1000, num("REINS_CLI_LOGIN_TTL_MS", 10 * 60_000)),
+
   // Fallback inference backend (any OpenAI-compatible gateway). Used only when no
   // provider has been configured in the dashboard (DB). The active dashboard
   // provider, if any, overrides every field here at request time.

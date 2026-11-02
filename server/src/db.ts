@@ -177,6 +177,30 @@ CREATE TABLE IF NOT EXISTS password_resets (
 );
 CREATE INDEX IF NOT EXISTS idx_resets_code ON password_resets(code_hash);
 
+-- Device logins for the reins-hook wizard: the terminal holds device_code (only
+-- its sha256 is stored here) and polls; a signed-in human approves user_code in
+-- the browser, binding workspace/project/member. The ingest token is minted at
+-- the single successful poll, so no plaintext credential is ever stored.
+-- status: pending | approved | denied | consumed (expiry is read off expires_at).
+CREATE TABLE IF NOT EXISTS cli_logins (
+  id            TEXT PRIMARY KEY,
+  device_hash   TEXT NOT NULL UNIQUE,
+  user_code     TEXT NOT NULL,             -- 8 chars, no dash, unique among live rows
+  host          TEXT,
+  repo          TEXT,
+  wanted_project TEXT,                     -- the project the terminal asked for (preselected on approve)
+  status        TEXT NOT NULL DEFAULT 'pending',
+  workspace_id  TEXT,
+  user_id       TEXT,
+  project       TEXT,
+  member        TEXT,
+  expires_at    INTEGER NOT NULL,
+  approved_at   INTEGER,
+  consumed_at   INTEGER,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cli_logins_code ON cli_logins(user_code);
+
 -- ── Short-term goals (a declared layer beneath projects.goal) ────
 -- Human/agent-authored objectives, distinct from the emergent 'pending' queue.
 --   scope 'team'       → a common goal for the whole project (admin-authored)
@@ -317,6 +341,7 @@ function addColumn(table: string, column: string, ddl: string) {
 
 // Git awareness: the member's current branch, short HEAD, default branch, and
 // dirty files (json, capped) as last reported by their hook.
+addColumn("cli_logins", "wanted_project", "TEXT");
 addColumn("members", "branch", "TEXT");
 addColumn("members", "head", "TEXT");
 addColumn("members", "default_branch", "TEXT");
@@ -1769,12 +1794,17 @@ export function deleteWorkspace(id: string): boolean {
 // ── Housekeeping ──────────────────────────────────────────────
 /**
  * Periodic cleanup: drop expired unaccepted invites, spent/expired password
- * resets, and file touches older than a week, and blank the raw text of events older than `retentionDays` (0 = keep
+ * resets, device logins expired over an hour ago, and file touches older than a week, and blank the raw text of events older than `retentionDays` (0 = keep
  * forever). Distilled state (members, timeline, pending, handoffs, goals) is
  * untouched; the event rows stay so counts and evidence ids remain valid.
  */
-export function pruneStale(retentionDays: number, at = now()): { invites: number; resets: number; events: number; touches: number } {
+export function pruneStale(
+  retentionDays: number,
+  at = now()
+): { invites: number; resets: number; events: number; touches: number; cliLogins: number } {
   const invites = db.prepare("DELETE FROM invites WHERE accepted_at IS NULL AND expires_at < ?").run(at).changes;
+  // Kept an hour past expiry so the approve page can still say "expired", not "unknown".
+  const cliLogins = db.prepare("DELETE FROM cli_logins WHERE expires_at < ?").run(at - 60 * 60_000).changes;
   // File touches only matter within a short window; keep a week for the board.
   const touches = db.prepare("DELETE FROM file_touches WHERE created_at < ?").run(at - 7 * 24 * 60 * 60 * 1000).changes;
   const resets = db.prepare("DELETE FROM password_resets WHERE used_at IS NOT NULL OR expires_at < ?").run(at).changes;
@@ -1785,5 +1815,5 @@ export function pruneStale(retentionDays: number, at = now()): { invites: number
       .prepare("UPDATE events SET text = '', meta = NULL WHERE created_at < ? AND (text != '' OR meta IS NOT NULL)")
       .run(cutoff).changes;
   }
-  return { invites, resets, events, touches };
+  return { invites, resets, events, touches, cliLogins };
 }
