@@ -2,7 +2,7 @@
 
 Shared context for teams that build with AI coding agents.
 
-Live: [reinshq.vercel.app](https://reinshq.vercel.app) · install the hook: `npx reins-hook install`
+Live: [reinshq.vercel.app](https://reinshq.vercel.app) · connect your repo and agents: `npx reins-hook`
 
 ## What it is
 
@@ -10,24 +10,29 @@ When a team codes with AI agents, each agent works on its own. Nobody can see wh
 agent is doing, so people duplicate work, edit the same files blind, and fall back to standups and a
 `context.md` that goes stale in a day.
 
-Reins watches what each agent does, distills it into a short per-person and per-team status, and
-serves that in two places: a dashboard the team reads, and an MCP server any agent can query before
-it starts work.
+Reins watches what each agent does and shows it as owned work: each person's features, bugs and
+chores, with every agent as a lane (its branch, worktree, state and last line). Questions and
+decisions an agent needs from a person surface as "Needs you" and are answered in place. The same
+state flows back into each agent, which can track its own work, hand it over, and ask a teammate's
+agent a question.
 
-Capture, distillation, and retrieval all work end to end today.
+Capture, distillation, the board and the agent tools all work end to end today.
 
 ## How it works
 
 ```
-Claude Code hook  ->  reins server  ->  distill (triage, extract, reconcile, rollup)
-                          |
-                          |-- dashboard (Next.js, live over SSE)
-                          |-- MCP server (reins_context, reins_projects, ...)
+agent hooks / adapters  ->  reins server  ->  sessions, items, posts  +  distill (triage, extract, reconcile, rollup)
+                                 |
+                                 |-- dashboard (Next.js, live over SSE)
+                                 |-- team pack injected into each agent (hook)
+                                 |-- MCP tools (reins_my_items, reins_ask, reins_handover, ...)
 ```
 
-A hook in each teammate's Claude Code posts their prompts and agent turns to the server, which runs
-each event through a short pipeline and keeps a current status per person and project. The dashboard
-streams updates over SSE; the MCP server lets any agent pull the same status as plain markdown.
+A hook in each teammate's agent posts their prompts, agent turns, file edits and test runs to the
+server. The server keeps one session per agent per worktree, attaches it to the item on the same
+branch, and runs prompts and turns through a short pipeline for a per-person status. The dashboard
+streams updates over SSE; the hook injects a short team pack into the agent; the MCP tools let the
+agent read and change the board.
 
 ## The distillation pipeline
 
@@ -59,6 +64,21 @@ API keys are encrypted at rest (AES-256-GCM) on the server and never sent back t
 
 ## What works today
 
+- A calm board built around owned work. **Today** shows what needs you, each person's items with
+  their agents as lanes, and a tape of handovers, questions, decisions, finishes and findings.
+  **My day**, **This week**, an **Item** page (steps, thread, agents on it) and a **Person** page
+  fill in the rest; a shared release is optional. Light, dark or system theme, and a phone layout.
+- **Needs you**: questions and decisions from agents are answered in place (or handed to your own
+  agent to answer from its context), blocked work can be unblocked or reassigned, and same-file
+  overlaps can be flagged to both people. An item waiting on a question goes back to doing once it
+  is answered.
+- Agents work the board too: over MCP an agent sees its items and the questions waiting for it, adds
+  items, ticks or adds steps, sets a status, asks a teammate's agent a question, answers one, hands
+  an item over, and posts a note or finding. Address people by name, `@handle` or the board's label.
+- Test runs are captured: in Claude Code, `npm test`, `pytest`, `go test`, `node --test` and other
+  test commands show on the agent's timeline as passed or failed.
+- One-command setup: `npx reins-hook` signs you in through the browser (no tokens to copy), wires the
+  agents it finds, and puts you on the board.
 - Capture from several coding agents through one hook core: Claude Code, plus adapters for Codex,
   OpenCode, and Aider, and a generic adapter for any agent that can run a shell command. Every event
   is attributed to its agent, so a team on mixed tools shares one context.
@@ -94,9 +114,10 @@ API keys are encrypted at rest (AES-256-GCM) on the server and never sent back t
 - Optional Slack and Discord digests of each rollup. The webhooks are instance-wide, so they post only
   for a single-tenant instance (auth off) or the `default` workspace.
 - Real accounts on the multi-tenant model: sign up for a workspace, log in with email and password,
-  invite teammates with a link, and roles (owner, admin, member). Each account links to the identity its
-  agent reports as, so the server can tell whose goals and activity are whose. Tokens still authenticate
-  hooks and agents, and admins list and revoke them from the dashboard.
+  invite teammates with a link (signing up from it joins that workspace), and roles (owner, admin,
+  member). Each account links to the identity its agent reports as, so the server can tell whose
+  goals and activity are whose. Each terminal gets its own token when you approve it in the browser;
+  admins can also mint tokens for CI, and list and revoke them from the dashboard.
 - A simple deploy to Vercel plus a small VM.
 
 ## Roadmap
@@ -129,41 +150,29 @@ npm run dev
 npm run seed
 ```
 
-## Connect an agent
+## Connect your agents
 
-One command installs the capture hook into Claude Code:
-
-```bash
-npx reins-hook install --url http://localhost:4319 --me yourname
-# then run /hooks in Claude Code to approve it
-```
-
-Every prompt and agent turn now flows into Reins. On a shared instance, pass the ingest token from
-your dashboard with `--token`. See [`hooks/README.md`](hooks/README.md) for flags (`--global`,
-`--project`, `--token`) and the `status` and `uninstall` commands.
-
-## Pull context from an agent (MCP)
-
-There are two MCP servers. For a teammate on any machine, point the bundled HTTP MCP at your server
-with an access token (no clone, no database access):
+In the repo you code in (the project's **Connect** page shows the exact command):
 
 ```bash
-claude mcp add reins -- npx reins-hook mcp --url http://localhost:4319 --token <access-token>
-# add --ingest-token <ingest-token> to also let the agent post notes
+npx reins-hook --url http://localhost:4319 --project <id>
 ```
 
-For an agent running on the server box itself, register the local MCP, which reads the SQLite file
-directly:
+The wizard finds the repo, asks which agents to wire (Claude Code, Codex, OpenCode, Aider), signs you
+in through the browser, writes each agent's config and registers the Reins tools. In Claude Code, run
+`/hooks` once to approve the hooks (or restart it). Prompts, agent turns, file edits and test runs now
+flow into Reins. See [`cli/README.md`](cli/README.md) for flags, `status`, `uninstall`, and the
+non-interactive `install` for CI.
 
-```json
-{ "mcpServers": { "reins": { "command": "npx", "args": ["tsx", "server/src/mcp.ts"], "cwd": "/ABS/PATH/reins" } } }
-```
+## Let agents read and act on the board (MCP)
 
-Tools:
+Setup registers the Reins MCP server for Claude Code, Codex and OpenCode, with no token in their
+config (it reads `~/.reins/config.json`). Tools: `reins_context`, `reins_my_items`, `reins_item_add`,
+`reins_step_done`, `reins_step_add`, `reins_item_status`, `reins_ask`, `reins_answer`,
+`reins_handover`, `reins_note`, `reins_attach`. Any other MCP client can run `npx reins-hook mcp`.
 
-- `reins_context` reads a project's current distilled status (optionally scoped to a member, query, or token budget).
-- `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs`, `reins_goals`, `reins_profile` for narrower reads.
-- `reins_note`, `reins_claim`, `reins_resolve`, `reins_handoff_ack`, `reins_goal_add`, `reins_goal_check` let an agent write back.
+For an agent running on the server box itself there is also a local MCP that reads the SQLite file
+directly (`server/src/mcp.ts`); see [`SELFHOST.md`](SELFHOST.md), section 7.
 
 Running your own instance? [`SELFHOST.md`](SELFHOST.md) is the full guide: backend, database,
 dashboard, hook, and both MCP servers, with a complete environment-variable reference.
@@ -173,8 +182,8 @@ dashboard, hook, and both MCP servers, with a complete environment-variable refe
 | Path | What |
 |------|------|
 | `server/` | Express ingest, SSE, REST, SQLite, the distillation pipeline, the MCP server |
-| `web/` | Next.js dashboard, light editorial theme, live over SSE |
-| `cli/` | `reins-hook`, the `npx` installer that bundles the capture hook |
+| `web/` | Next.js dashboard, light and dark themes, live over SSE |
+| `cli/` | `reins-hook`: the setup wizard, the capture hook and adapters, and the MCP server |
 | `hooks/` | Hook docs (the hook itself ships inside `cli/`) |
 | `deploy/` | [`DEPLOY.md`](deploy/DEPLOY.md) and the deploy scripts |
 
@@ -184,8 +193,9 @@ Self-hosting your own instance, end to end? See [`SELFHOST.md`](SELFHOST.md).
 
 Local dev runs as a single open instance (`REINS_AUTH=off`); a shared instance turns it on
 (`REINS_AUTH=on`). People sign up for a workspace (the tenant boundary), log in with email and
-password, and invite teammates with a one-time link; roles are owner, admin, member. Tokens still
-authenticate machines: ingest for hooks and agents, access for viewers, admin to mint or revoke.
+password, and invite teammates with a one-time link; roles are owner, admin, member. Tokens
+authenticate machines: ingest for hooks and agents (each terminal gets one when you approve its
+sign-in), access for viewers, admin to mint or revoke.
 Invites and resets use one-time links; email is not wired yet. Admin commands include
 `create-workspace`, `claim-workspace`, `reset-link`, `list-workspaces`, and `revoke`.
 

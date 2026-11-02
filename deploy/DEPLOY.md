@@ -92,16 +92,21 @@ Point Vercel at the **`web/`** directory:
 
 ## 3. Onboard the team
 
+Invite teammates from the dashboard; signing up from the invite link joins your workspace. Each
+teammate then runs, in their repo (the project's Connect page shows the exact command):
+
 ```bash
-npx reins-hook install --url https://reins.example.com --me asha --token <ingest-token>
-# teammates sign up from an invite link on the Vercel dashboard
+npx reins-hook --url https://<your-vercel-app> --project <id>
 ```
+
+It signs them in through the browser, so nobody copies tokens.
 
 ---
 
 ## Notes
-- **Backups:** `ssh` in and `docker compose exec reins cp /data/reins.db /data/backup.db`, or
-  snapshot the Lightsail instance.
+- **Backups:** `ship.sh` and the on-box CI both take a verified online backup before every deploy
+  (newest 14 kept, on the box under `/data/backups/`; `ship.sh` also pulls a copy to
+  `deploy/lightsail/backups/`). For an extra copy, snapshot the Lightsail instance.
 - **Client IPs:** with Vercel → Caddy in front, set `REINS_TRUST_PROXY=2` in the box's `.env` so
   login/signup limits see real client IPs (see `SELFHOST.md`, section 8).
 - **Scale later:** SQLite-on-disk is fine for a team. For HA/multi-instance, swap `server/src/db.ts`

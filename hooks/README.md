@@ -8,14 +8,15 @@ In your repo:
 npx reins-hook --url https://reins.yourco.com --project <id>
 ```
 
-The wizard detects the repo, checks the server, signs you in through the browser
-(device login: you approve `<url>/cli?code=XXXX-XXXX` while signed in — nobody copies
-tokens), shows the coding agents it found, writes each one's real config, and says hello
+The wizard detects the repo, checks the server, shows the coding agents it found, signs you
+in through the browser (device login: you approve `<url>/cli?code=XXXX-XXXX` while signed in —
+nobody copies tokens), writes each one's real config, and says hello
 so the board shows you. In Claude Code, run `/hooks` once to approve (or restart). Run inside a git
 worktree, it keys the mapping by the main repo, so all its worktrees report to the same project.
 
 > Running from this repo before publishing to npm? Use `node cli/bin.mjs …`.
-> The CLI source is in [`../cli`](../cli).
+> The CLI source is in [`../cli`](../cli). After upgrading reins-hook, run setup again so new hooks
+> (such as test-run capture) get wired.
 
 Other commands: `npx reins-hook status`, `npx reins-hook uninstall [--all]`, and the
 non-interactive `npx reins-hook install --agent <a>[,<b>] --url <url> --project <id> --token <tok>`
@@ -52,7 +53,11 @@ The hook streams signals to the Reins server and feeds team state back into your
 - **`PreToolUse`** (Edit / Write / MultiEdit / NotebookEdit) → a non-blocking warning to the model
   when a present teammate edited the same file recently or it's assigned to someone else.
 - **`PostToolUse`** (same tools) → records the touched path, relative to the git repo root.
-- **`Stop` / `SubagentStop`** → `summary` (what the agent reported back)
+- **`PostToolUse` / `PostToolUseFailure`** (Bash) → when the command runs a test suite (`npm test`,
+  `pytest`, `go test`, `cargo test`, `node --test`, `make test`, …, in command position), records a
+  passed (exit 0) or failed run on the session's timeline. Other Bash calls exit at once, before
+  any git or network work; background runs and interrupts are ignored.
+- **`Stop`** → `summary` (what the agent reported back)
 
 Every event also carries git state (branch, short HEAD, dirty files) from the repo, and names
 its session: `session`, `source`, `branch`, `worktree` (the git toplevel) and `repo_root` (the
