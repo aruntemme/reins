@@ -100,6 +100,8 @@ test("headless setup: device login → every agent's real config → config.json
     assert.ok(r.out.includes(`${srv.url}/cli?code=ABCD-EFGH`));
     assert.ok(r.out.includes(`Open the board: ${srv.url}/project/demo`));
     assert.match(r.out, /Claude Code: run \/hooks to approve/);
+    // Agents are settled before the browser step, so nothing is left to answer after approval.
+    assert.ok(r.out.search(/3\s+Agents/) < r.out.search(/4\s+Sign in/), r.out);
 
     const login = srv.calls.find((c) => c.path === "/api/cli/login");
     assert.deepEqual(login.body, { host: hostname().slice(0, 120), repo: basename(repo), project: "demo" });
@@ -144,6 +146,22 @@ test("headless setup: device login → every agent's real config → config.json
     assert.match(st.out, /project demo/);
     assert.match(st.out, /✓ Codex CLI/);
     assert.match(st.out, /✓ Claude Code/);
+  } finally {
+    srv.close();
+  }
+});
+
+test("headless setup: a different project picked in the browser wins over --project", async () => {
+  const srv = await contractServer();
+  const home = mkdtempSync(join(tmpdir(), "reins-wiz-home-"));
+  const repo = gitRepo();
+  try {
+    const r = await cli(["--url", srv.url, "--project", "other", "--agents", "codex", "--yes", "--no-open"], { cwd: repo, home });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /Using demo, the project you approved in the browser \(--project said other\)/);
+    assert.deepEqual(json(join(home, ".reins", "config.json")).repos[repo], { url: srv.url, project: "demo" });
+    const hellos = srv.calls.filter((c) => c.path === "/api/hook/hello");
+    assert.deepEqual(hellos.map((h) => h.body.project), ["demo"]);
   } finally {
     srv.close();
   }

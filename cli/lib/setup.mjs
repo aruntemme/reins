@@ -4,10 +4,11 @@
  *   1 Repository   git root, repo name, branch, git email
  *   2 Server       --url, else this repo's saved server, else the last one used,
  *                  else the hosted Reins; GET /health
- *   3 Sign in      device login in the browser (POST /api/cli/login + /api/cli/poll),
+ *   3 Agents       detected agents pre-ticked; Claude Code scope (this repo / all repos)
+ *                  (asked before sign-in so nothing is left to answer after the browser)
+ *   4 Sign in      device login in the browser (POST /api/cli/login + /api/cli/poll),
  *                  or reuse a saved credential that still works; when the server
  *                  runs without accounts, pick a project from GET /api/projects
- *   4 Agents       detected agents pre-ticked; Claude Code scope (this repo / all repos)
  *   5 Configure    save ~/.reins/config.json (0600), write each agent's real config,
  *                  POST /api/hook/hello per agent so the board shows you
  *   → summary + board link
@@ -218,62 +219,10 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
   }
   ui.ok(`${c.b(url)}  ${c.dim(`AI summaries ${health.llm ? `on${health.model ? ` (${health.model})` : ""}` : "off"} · sign-in ${health.auth ? "required" : "off"}`)}`);
 
-  // ---------------------------------------------------------------- 3 Sign in / project
-  ui.step(3, health.auth ? "Sign in" : "Project");
-  let creds = null; // { token?, member, workspace?, project: {id, name} }
-  const flagProject = args.project && args.project !== true ? String(args.project) : null;
-  if (health.auth) {
-    const saved = cfg.servers[url];
-    const knownProject = flagProject || (repoCfg && normalizeUrl(repoCfg.url) === url ? repoCfg.project : null);
-    if (saved?.token && knownProject) {
-      const member = saved.member || email || os.userInfo().username;
-      const r = await http(url, "/api/hook/hello", {
-        method: "POST", key: saved.token, body: { project: knownProject, member, ...(displayName ? { displayName } : {}) },
-      });
-      if (r.ok) {
-        ui.ok(`Already signed in as ${c.b(member)}${saved.workspace?.name ? c.dim(` · workspace ${saved.workspace.name}`) : ""}`);
-        if (await p.confirm({ message: "Use this sign-in?", initial: true })) {
-          creds = { token: saved.token, member, workspace: saved.workspace, project: { id: knownProject, name: r.json?.project?.name || knownProject } };
-        }
-      } else if (r.status === 401 || r.status === 403) {
-        ui.warn(`Your saved sign-in doesn't work for ${c.b(knownProject)} any more — let's sign in again.`);
-      }
-    }
-    if (!creds) {
-      const login = await deviceLogin({ url, repoName, project: flagProject, ui, p, c, open, noOpen });
-      if (login.authOff) health.auth = false;
-      else if (!login.approved) return 1;
-      else {
-        creds = { token: login.token, member: login.member, workspace: login.workspace, project: login.project };
-        ui.ok(`Signed in as ${c.b(login.member)}${login.workspace?.name ? c.dim(` · workspace ${login.workspace.name}`) : ""}`);
-      }
-    }
-    if (creds && flagProject && creds.project.id !== flagProject) {
-      ui.warn(`You approved ${c.b(creds.project.id)} in the browser, but --project said ${c.b(flagProject)}.`);
-      const pick = await p.select({
-        message: "Which project should this repo report to?",
-        choices: [
-          { label: creds.project.name || creds.project.id, hint: `${creds.project.id} · approved in the browser`, value: creds.project.id },
-          { label: flagProject, hint: "from --project", value: flagProject },
-        ],
-      });
-      if (pick !== creds.project.id) {
-        const r = await http(url, "/api/hook/hello", { method: "POST", key: creds.token, body: { project: pick, member: creds.member } });
-        if (!r.ok) {
-          ui.err(`Can't use ${pick}: ${r.json?.error || `HTTP ${r.status}`}. Keeping ${creds.project.id}.`);
-        } else creds.project = { id: pick, name: r.json?.project?.name || pick };
-      }
-    }
-  }
-  if (!health.auth) {
-    const project = await pickOpenProject({ url, ui, p, c, flagProject, saved: repoCfg && normalizeUrl(repoCfg.url) === url ? repoCfg.project : null, repoName });
-    const member = (args.me && args.me !== true ? String(args.me) : null) || cfg.servers[url]?.member || email || os.userInfo().username;
-    creds = { member, project, memberOverride: args.me && args.me !== true ? String(args.me) : undefined };
-  }
-  ui.ok(`Project ${c.b(creds.project.name || creds.project.id)}${creds.project.name && creds.project.name !== creds.project.id ? c.dim(` (${creds.project.id})`) : ""}`);
-
-  // ---------------------------------------------------------------- 4 Agents
-  ui.step(4, "Agents");
+  // ---------------------------------------------------------------- 3 Agents
+  // Before sign-in on purpose: once the browser approves, the terminal has nothing
+  // left to ask, so it finishes on its own while the user is still in the browser.
+  ui.step(3, "Agents");
   const detected = detectAgents({ home, env });
   let agents;
   if (args.agents || args.agent) {
@@ -309,6 +258,49 @@ async function wizard({ args, p, ui, c, env, home, cwd, open, interactive }) {
       });
     }
   }
+
+  // ---------------------------------------------------------------- 4 Sign in / project
+  ui.step(4, health.auth ? "Sign in" : "Project");
+  let creds = null; // { token?, member, workspace?, project: {id, name} }
+  const flagProject = args.project && args.project !== true ? String(args.project) : null;
+  if (health.auth) {
+    const saved = cfg.servers[url];
+    const knownProject = flagProject || (repoCfg && normalizeUrl(repoCfg.url) === url ? repoCfg.project : null);
+    if (saved?.token && knownProject) {
+      const member = saved.member || email || os.userInfo().username;
+      const r = await http(url, "/api/hook/hello", {
+        method: "POST", key: saved.token, body: { project: knownProject, member, ...(displayName ? { displayName } : {}) },
+      });
+      if (r.ok) {
+        ui.ok(`Already signed in as ${c.b(member)}${saved.workspace?.name ? c.dim(` · workspace ${saved.workspace.name}`) : ""}`);
+        if (await p.confirm({ message: "Use this sign-in?", initial: true })) {
+          creds = { token: saved.token, member, workspace: saved.workspace, project: { id: knownProject, name: r.json?.project?.name || knownProject } };
+        }
+      } else if (r.status === 401 || r.status === 403) {
+        ui.warn(`Your saved sign-in doesn't work for ${c.b(knownProject)} any more — let's sign in again.`);
+      }
+    }
+    if (!creds) {
+      const login = await deviceLogin({ url, repoName, project: flagProject, ui, p, c, open, noOpen });
+      if (login.authOff) health.auth = false;
+      else if (!login.approved) return 1;
+      else {
+        creds = { token: login.token, member: login.member, workspace: login.workspace, project: login.project };
+        ui.ok(`Signed in as ${c.b(login.member)}${login.workspace?.name ? c.dim(` · workspace ${login.workspace.name}`) : ""}`);
+      }
+    }
+    // The approve page preselects --project, so a different pick there was deliberate
+    // and is the newer choice. Don't ask again: the user is in the browser by now.
+    if (creds && flagProject && creds.project.id !== flagProject) {
+      ui.warn(`Using ${c.b(creds.project.id)}, the project you approved in the browser (--project said ${c.b(flagProject)}).`);
+    }
+  }
+  if (!health.auth) {
+    const project = await pickOpenProject({ url, ui, p, c, flagProject, saved: repoCfg && normalizeUrl(repoCfg.url) === url ? repoCfg.project : null, repoName });
+    const member = (args.me && args.me !== true ? String(args.me) : null) || cfg.servers[url]?.member || email || os.userInfo().username;
+    creds = { member, project, memberOverride: args.me && args.me !== true ? String(args.me) : undefined };
+  }
+  ui.ok(`Project ${c.b(creds.project.name || creds.project.id)}${creds.project.name && creds.project.name !== creds.project.id ? c.dim(` (${creds.project.id})`) : ""}`);
 
   // ---------------------------------------------------------------- 5 Configure
   ui.step(5, "Configure");
