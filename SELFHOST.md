@@ -45,7 +45,7 @@ running the whole thing yourself.
 - The **dashboard** is a Next.js app. It proxies `/api/*` to the backend and streams live updates
   over SSE.
 - The **capture hook** runs inside each teammate's coding agent (Claude Code, Codex, etc.) and posts
-  their prompts and agent turns to `POST /api/ingest`.
+  their prompts and agent turns to `POST /api/ingest`, plus file edits and test runs to `/api/hook/*`.
 - Two **MCP servers** let an agent read and write the shared board: one runs on the server box and
   reads SQLite directly, the other runs anywhere and talks to the backend over HTTP.
 
@@ -210,53 +210,51 @@ Point a browser at `http://localhost:4320`. With `REINS_AUTH=on`, sign up for a 
 
 ## 6. The capture hook (CLI)
 
-The hook is what feeds Reins. It runs inside a teammate's coding agent and posts their prompts and
-agent turns. It is shipped as the `reins-hook` npm package (the `cli/` directory), installed with one
-command -- no clone needed on a teammate's machine.
+The hook is what feeds Reins. It runs inside a teammate's coding agent and posts their prompts,
+agent turns, file edits and test runs. It is shipped as the `reins-hook` npm package (the `cli/`
+directory) -- no clone needed on a teammate's machine.
 
-### Install
+### Set up
 
-```bash
-npx reins-hook install --url http://localhost:4319 --me yourname
-# then run /hooks in Claude Code to approve it
-```
-
-On a shared instance with auth on, pass the ingest token from your dashboard:
+In the repo you code in (the project's **Connect** page shows this command with your URL):
 
 ```bash
-npx reins-hook install --url https://reins.yourco.com --me asha --token rk_ingest_...
+npx reins-hook --url https://reins.yourco.com --project <id>
 ```
+
+The wizard finds the repo, checks `/health`, asks which agents to wire, signs you in through the
+browser (you approve `<url>/cli?code=XXXX-XXXX` while signed in; the terminal receives its own
+ingest token), writes each agent's config, registers the Reins MCP tools, and says hello so the
+board shows you. In Claude Code, run `/hooks` once to approve the hooks (or restart it). On a server
+with auth off there is no sign-in; you pick or name a project instead. Re-run it after upgrading
+reins-hook so new hooks get wired.
+
+For CI and scripts, `npx reins-hook install --agent claude-code --url <url> --project <id> --token
+rk_ingest_...` writes the same configs without prompts. Other commands: `npx reins-hook status` and
+`npx reins-hook uninstall [--all]`. See [`cli/README.md`](cli/README.md) for every flag.
 
 ### What it does
 
-- Copies the hook core to `~/.reins/` (the hook script, a shared `lib/`, and agent `adapters/`).
+- Copies the hook core to `~/.reins/` (the hook script, a shared `lib/`, agent `adapters/` and the
+  MCP server) and saves the connection in `~/.reins/config.json` (mode `0600`), keyed by repo.
 - **Merges** the hook into your agent settings without touching your other hooks (idempotent):
-  - per-project (default): `./.claude/settings.local.json`
-  - all repos (`--global`): `~/.claude/settings.json`
-
-### Flags
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--url <url>` | `http://localhost:4319` | Reins server |
-| `--me <name>` | git email, else `$USER` | Who you are (capture identity) |
-| `--project <id>` | folder name | Project scope |
-| `--token <tok>` | (none) | Ingest token (required when the server has auth on) |
-| `--agent <name>` | `claude-code` | Agent: `claude-code`, `codex`, `opencode`, `aider`, `generic` |
-| `--global` | off | Install for all repos |
-
-Other commands: `npx reins-hook status` and `npx reins-hook uninstall [--global]`.
+  - Claude Code, this repo (default): `./.claude/settings.local.json`; all repos: `~/.claude/settings.json`
+  - Codex, OpenCode, Aider: their global config (see [`hooks/README.md`](hooks/README.md))
+- The commands it writes carry no token or URL; they resolve both from `~/.reins/config.json` at
+  runtime.
 
 ### What it sends
 
-On each `UserPromptSubmit` (intent) and `Stop` / `SubagentStop` (summary), the hook posts to
-`POST /api/ingest` with `{ project, member, kind, text, source, ... }`, with git state (branch,
-short HEAD, dirty files) in `meta.git`. Secrets are redacted and text is capped before sending.
-After an edit tool runs it posts the repo-relative path to `POST /api/hook/touch`. It also reads:
-`POST /api/hook/pack` (the team pack injected at `SessionStart`, and deltas on `UserPromptSubmit`)
-and `POST /api/hook/check` (the pre-edit collision warning). These hook endpoints accept the same
-ingest token, scoped to its workspace, and answer without calling the model. The identity (`--me`) is what links activity to a teammate account, so keep
-it consistent with how that person signs in.
+On each `UserPromptSubmit` (intent) and `Stop` (summary), the hook posts to `POST /api/ingest` with
+`{ project, member, kind, text, session, source, branch, worktree, repo_root, ... }`, with git state
+(branch, short HEAD, dirty files) in `meta.git`. Secrets are redacted and text is capped before
+sending. After an edit tool runs it posts the repo-relative path to `POST /api/hook/touch`; after a
+Bash test command (`npm test`, `pytest`, `go test`, …) it posts the command and whether it passed to
+`POST /api/hook/run`. It also reads `POST /api/hook/pack` (the team pack injected at `SessionStart`,
+and deltas on `UserPromptSubmit`) and `POST /api/hook/check` (the pre-edit collision warning). These
+hook endpoints accept the same ingest token, scoped to its workspace, and answer without calling the
+model. The member it reports as comes from the browser sign-in, which links activity to that
+person's account.
 
 See [`hooks/README.md`](hooks/README.md) for adapter details for non-Claude agents.
 
@@ -264,31 +262,32 @@ See [`hooks/README.md`](hooks/README.md) for adapter details for non-Claude agen
 
 ## 7. MCP: let agents read and write the board
 
-The hook *sends* activity. MCP lets an agent *read* the shared board and *act on it* (claim work,
-resolve handoffs, post notes, manage goals). There are two MCP servers; pick based on where the agent
-runs.
+The hook *sends* activity. MCP lets an agent *read* the shared board and *act on it*: see its items
+and the questions waiting for it, add items, tick steps, ask a teammate's agent, hand work over, post
+notes. There are two MCP servers; pick based on where the agent runs.
 
 ### 7a. HTTP MCP -- for any teammate, anywhere (recommended)
 
-Runs anywhere, talks to your backend over the network with a token. No repo clone, no database access.
-This is what a remote teammate uses. It ships inside the same `reins-hook` package.
+Runs anywhere and talks to your backend over the network (the Agent API under `/api/agent/*`, with
+the ingest token from the browser sign-in). No repo clone, no database access. It ships inside the
+same `reins-hook` package, and **setup registers it for you**: `mcpServers.reins` in
+`~/.claude.json` for Claude Code, `[mcp_servers.reins]` in `~/.codex/config.toml` for Codex, and
+`mcp.reins` in `~/.config/opencode/opencode.json` for OpenCode. The registered command is
+`node ~/.reins/reins-mcp.mjs` and carries no token: it reads `~/.reins/config.json` for the folder
+the agent runs in, worktrees included.
+
+Any other MCP client can launch it with:
 
 ```bash
-claude mcp add reins -- npx reins-hook mcp --url https://your-reins --token rk_access_...
-# add --ingest-token rk_ingest_... to also let the agent post notes
+npx reins-hook mcp [--url <backend-url> --token <ingest-token> --project <id> --member <name>]
 ```
 
-Any MCP client works; the launch command is always:
+The flags override what is saved. Tools: `reins_context`, `reins_my_items`, `reins_item_add`,
+`reins_step_done`, `reins_step_add`, `reins_item_status`, `reins_ask`, `reins_answer`,
+`reins_handover`, `reins_note`, `reins_attach`. It is dependency-free (Node built-ins only).
 
-```bash
-npx reins-hook mcp --url <backend-url> --token <access-token> [--ingest-token <ingest-token>]
-```
-
-- Reads and most writes authenticate with the **access token** (`Authorization: Bearer`).
-- `reins_note` uses the optional **ingest token**.
-- `reins_context` takes the same `member` / `query` / `limit` scoping as the local MCP (served by
-  `GET /api/projects/:id/context`), and every request times out after 15 seconds.
-- It is dependency-free (Node built-ins only), so `npx` has nothing to install.
+Older setups keep working: passing an `rk_access_...` `--token` (optionally with
+`--ingest-token rk_ingest_...` for `reins_note`) selects the previous tool set listed below.
 
 ### 7b. Local MCP -- for an agent running on the server box
 
@@ -311,7 +310,7 @@ Or run it standalone from the repo: `npm run mcp` (i.e. `npx tsx server/src/mcp.
 the database file, it needs the same `REINS_DB` and (for write-back) `REINS_URL` environment the server
 uses. The HTTP MCP above is the right choice for everyone else.
 
-### Tools both expose
+### Previous tool set (local MCP, and the HTTP MCP with an access token)
 
 Reads: `reins_context`, `reins_projects`, `reins_member`, `reins_pending`, `reins_handoffs`,
 `reins_goals`, `reins_profile`. Writes: `reins_note`, `reins_claim`, `reins_resolve`,
@@ -336,7 +335,7 @@ When auth is on, machines authenticate with tokens minted from the dashboard (or
 
 | Kind | Used by | How it is sent |
 |---|---|---|
-| **ingest** | the capture hook, `reins_note` | `x-reins-key` or `Authorization: Bearer` |
+| **ingest** | the capture hook and the Reins MCP tools (each terminal gets one at sign-in) | `x-reins-key` or `Authorization: Bearer` |
 | **access** | viewers, the HTTP MCP reads/writes | `Authorization: Bearer` |
 | **admin** | minting and revoking tokens | `Authorization: Bearer` |
 
@@ -381,17 +380,14 @@ npm run dev
 # 3) (optional) populate a demo board without wiring agents
 npm run seed
 
-# 4) connect your agent (in any repo you code in)
-npx reins-hook install --url http://localhost:4319 --me yourname
+# 4) connect your agents (in any repo you code in); this also registers the Reins MCP tools
+npx reins-hook --url http://localhost:4319 --project <id>
 #   then run /hooks in Claude Code to approve
-
-# 5) (optional) let your agent read/write the board over MCP
-claude mcp add reins -- npx reins-hook mcp --url http://localhost:4319 --token <access-token>
 ```
 
 `npm run dev` at the repo root runs the server and the dashboard in parallel. Now code as usual: every
-prompt and agent turn flows into Reins, the dashboard updates live, and any agent with the MCP can pull
-the shared context before it starts.
+prompt, agent turn, file edit and test run flows into Reins, the dashboard updates live, and your
+agents can read and act on the board through the Reins tools.
 
 ---
 
@@ -496,10 +492,14 @@ encrypted in the database. These env vars are the fallback used when no provider
 - **Distillation stalls under load.** A rate-limited gateway can hang requests. Keep
   `REINS_DISTILL_CONCURRENCY=1` (the default, serial) and confirm `REINS_LLM_TIMEOUT_MS` is set so
   hung calls fail fast instead of wedging the queue.
-- **Hook posts nothing.** Confirm you approved it with `/hooks`, that `--url` points at a reachable
-  backend (`curl <url>/health`), and -- with auth on -- that you passed a valid ingest `--token`.
-- **HTTP MCP can't read.** It needs a valid **access** token (`--token`). `reins_note` additionally
-  needs an **ingest** token (`--ingest-token`). Mint both from the dashboard.
+- **Hook posts nothing.** Confirm you approved it with `/hooks`, that the server is reachable
+  (`curl <url>/health`), and run `npx reins-hook status` to see the saved sign-in, the repo's project
+  and which agents are wired. Re-running `npx reins-hook` fixes a stale or revoked sign-in.
+- **Test runs don't show.** They need reins-hook 0.2.0 or later; re-run `npx reins-hook` after
+  upgrading so the Bash hooks get wired, then approve them with `/hooks`.
+- **Reins tools missing in the agent.** Re-run setup, then restart the agent. Other MCP clients use
+  `npx reins-hook mcp`; with older flags, an `rk_access_...` `--token` reads and `--ingest-token`
+  lets `reins_note` write.
 - **Dashboard shows nothing / SSE errors.** Check `REINS_URL` points at the backend. If you opted into
   `NEXT_PUBLIC_REINS_URL` direct mode, the backend's `REINS_CORS_ORIGIN` must include the dashboard's
   origin.

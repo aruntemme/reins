@@ -25,15 +25,21 @@ The wizard:
 1. **Repository** — finds the git root, repo name, branch and your git email.
 2. **Server** — `--url`, else this repo's saved server, else the last one you used, else
    `https://reinshq.vercel.app`; checks `/health`.
-3. **Sign in** — opens your browser at `<url>/cli?code=ABCD-EFGH`. Check the code matches,
+3. **Agents** — detected agents are pre-ticked; for Claude Code choose this repo or all repos.
+4. **Sign in** — opens your browser at `<url>/cli?code=ABCD-EFGH`. Check the code matches,
    pick the project, approve. The terminal receives its credential — no tokens to copy, and
    teammates don't need an admin to send them one. A saved sign-in that still works is reused.
    (On a server without accounts you pick or name a project instead.)
-4. **Agents** — detected agents are pre-ticked; for Claude Code choose this repo or all repos.
 5. **Configure** — writes each agent's real config, saves `~/.reins/config.json`, and says
    hello so the board shows you right away. Then: `Open the board: <url>/project/<id>`.
 
-In Claude Code, run `/hooks` once to approve the new hooks (or restart it).
+In Claude Code, run `/hooks` once to approve the new hooks (or restart it). After upgrading
+reins-hook, run setup again so new hooks get wired.
+
+What each agent sends: Claude Code sends prompts, the agent's replies, the files it edits and its
+test runs (passed or failed; `npm test`, `pytest`, `go test`, `node --test`, …), and gets a short
+team pack back at session start and when something relevant changes. Codex, OpenCode and Aider
+send prompts and replies. Secrets are masked on your machine before anything is sent.
 
 | Agent | What gets written |
 |-------|-------------------|

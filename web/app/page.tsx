@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 
 const GITHUB = "https://github.com/aruntemme/reins";
 const SELFHOST = `${GITHUB}/blob/main/SELFHOST.md`;
-const INSTALL = "npx reins-hook install";
+const INSTALL = "npx reins-hook";
 const DEMO = "/signin?demo=1";
 
 /** The link glyph from Mark (components/ui.tsx), inlined so this server page
@@ -268,7 +268,7 @@ export default function Landing() {
             <div className="lp-plan">
               <span className="lp-plan-k">Hosted</span>
               <h3>Sign up and invite the team.</h3>
-              <p>A workspace, an invite link and tokens per teammate. Up and running before your next standup.</p>
+              <p>A workspace and an invite link; each teammate signs in from the terminal, no tokens to copy. Up and running before your next standup.</p>
               <Link href="/signup" className="rz-btn primary">Create a workspace</Link>
             </div>
             <div className="lp-plan">

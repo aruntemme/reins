@@ -46,7 +46,7 @@ export default function OpengraphImage() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 26 }}>
             <span>Live intent for teams of humans and agents</span>
             <span style={{ display: "flex", background: "#0B2540", color: "#FCFFFF", padding: "14px 24px", borderRadius: 16, fontSize: 24 }}>
-              <span style={{ color: "#5CC8F0", marginRight: 12 }}>$</span>npx reins-hook install
+              <span style={{ color: "#5CC8F0", marginRight: 12 }}>$</span>npx reins-hook
             </span>
           </div>
         </div>
