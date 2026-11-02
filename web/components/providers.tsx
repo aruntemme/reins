@@ -89,92 +89,93 @@ export function Providers() {
   };
 
   return (
-    <section>
-      <div className="label" style={{ marginBottom: 14 }}><span className="sq blue" /> model providers</div>
-      <p className="sub" style={{ fontSize: 14, marginBottom: 14 }}>
+    <section id="providers" className="st-section" aria-labelledby="st-h-providers">
+      <h2 id="st-h-providers" className="rz-section-h">Model providers</h2>
+      <p className="st-desc">
         Connect any OpenAI-compatible inference provider for <strong>this workspace</strong>. Add as many as
         you like and mark one active — it overrides the instance default for your team&rsquo;s projects. With
         none added, your workspace uses the instance default. API keys are encrypted at rest and never leave the server.
       </p>
       {active?.model && (
-        <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-          active model: <strong style={{ color: "var(--ink)" }}>{active.model}</strong>
+        <p className="st-model">
+          Active model: <code>{active.model}</code>
           {active.label ? ` · ${active.label}` : ""}
           {providers && providers.length === 0 ? " (instance default)" : ""}
         </p>
       )}
-      {err && <div className="mono" style={{ color: "var(--blocked)", marginBottom: 12 }}>{err}</div>}
+      {err && <p className="st-err" role="alert">{err}</p>}
 
       {providers === null ? (
-        <div className="empty">Loading…</div>
+        <p className="st-empty">Loading…</p>
       ) : (
-        <div className="card pad" style={{ display: "grid", gap: 14 }}>
+        <div className="rz-card st-card">
           {providers.length === 0 ? (
-            <div className="empty" style={{ padding: "8px 0" }}>
+            <p className="st-empty">
               {instanceDefault
                 ? "No workspace providers yet. Distillation uses the instance default; add one to use your own."
                 : "No providers yet. Add one to enable distillation."}
-            </div>
-          ) : providers.map((p) => {
-            const rowBusy = busy === p.id;
-            return (
-              <div key={p.id} className="pitem">
-                <div className="ptext" style={{ display: "grid", gap: 2 }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong>{p.label}</strong>
-                    {p.active && <span className="tiny" style={{ color: "var(--active)" }}>● active</span>}
-                  </span>
-                  <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                    {p.model}{p.fastModel && p.fastModel !== p.model ? ` · fast: ${p.fastModel}` : ""} · {p.baseURL}
-                    {p.hasKey ? ` · key ${p.keyMask}` : " · no key"}
-                  </span>
-                </div>
-                <div className="pmeta">
-                  <div className="acts" style={{ alignItems: "center" }}>
-                    {rowBusy ? (
-                      <span className="tiny">working…</span>
-                    ) : confirming === p.id ? (
-                      <>
-                        <button className="tiny" onClick={() => remove(p)}>confirm</button>
-                        <button className="tiny" onClick={() => setConfirming(null)}>cancel</button>
-                      </>
-                    ) : (
-                      <>
-                        {!p.active && <button className="tiny" onClick={() => activate(p)}>make active</button>}
-                        <button className="tiny" onClick={() => startEdit(p)}>edit</button>
-                        <button className="tiny" onClick={() => setConfirming(p.id)}>delete</button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+            </p>
+          ) : (
+            <ul className="st-list">
+              {providers.map((p) => {
+                const rowBusy = busy === p.id;
+                return (
+                  <li key={p.id} className="st-item">
+                    <div className="st-prov">
+                      <span className="st-prov-name">
+                        {p.label}
+                        {p.active && <span className="rz-chip live"><span className="rz-live" aria-hidden="true" />active</span>}
+                      </span>
+                      <span className="st-prov-meta">
+                        {p.model}{p.fastModel && p.fastModel !== p.model ? ` · fast: ${p.fastModel}` : ""} · {p.baseURL}
+                        {p.hasKey ? ` · key ${p.keyMask}` : " · no key"}
+                      </span>
+                    </div>
+                    <div className="st-ctrl">
+                      {rowBusy ? (
+                        <span className="st-working" role="status">working…</span>
+                      ) : confirming === p.id ? (
+                        <>
+                          <button className="rz-btn small warn" onClick={() => remove(p)}>Confirm delete</button>
+                          <button className="rz-btn small ghost" onClick={() => setConfirming(null)}>Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          {!p.active && <button className="rz-btn small ghost" onClick={() => activate(p)}>Make active</button>}
+                          <button className="rz-btn small ghost" onClick={() => startEdit(p)} aria-label={`Edit ${p.label}`}>Edit</button>
+                          <button className="rz-btn small ghost" onClick={() => setConfirming(p.id)} aria-label={`Delete ${p.label}`}>Delete</button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
 
           {editing ? (
-            <div style={{ display: "grid", gap: 10, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-              <div className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                {editing === "new" ? "new provider" : "edit provider"}
-              </div>
+            <div className="st-form">
+              <h3 className="st-title st-formhead">{editing === "new" ? "New provider" : "Edit provider"}</h3>
               <Field label="Label" value={form.label} placeholder="OpenAI" onChange={(v) => setForm({ ...form, label: v })} />
-              <Field label="Base URL" value={form.baseURL} placeholder="https://api.openai.com/v1" onChange={(v) => setForm({ ...form, baseURL: v })} />
-              <Field label="Model" value={form.model} placeholder="gpt-4o" onChange={(v) => setForm({ ...form, model: v })} />
-              <Field label="Fast model (optional)" value={form.fastModel ?? ""} placeholder="gpt-4o-mini" onChange={(v) => setForm({ ...form, fastModel: v })} />
+              <Field label="Model" value={form.model} placeholder="gpt-4o" mono onChange={(v) => setForm({ ...form, model: v })} />
+              <Field wide label="Base URL" value={form.baseURL} placeholder="https://api.openai.com/v1" mono onChange={(v) => setForm({ ...form, baseURL: v })} />
+              <Field label="Fast model (optional)" value={form.fastModel ?? ""} placeholder="gpt-4o-mini" mono onChange={(v) => setForm({ ...form, fastModel: v })} />
               <Field
                 label={editing === "new" ? "API key" : "API key (leave blank to keep current)"}
                 value={form.apiKey ?? ""}
                 placeholder="sk-…"
                 type="password"
+                mono
                 onChange={(v) => setForm({ ...form, apiKey: v })}
               />
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button className="btn solid" onClick={save} disabled={saving}>{saving ? "saving…" : "save provider"}</button>
-                <button className="btn" onClick={() => { setEditing(null); setErr(""); }}>cancel</button>
+              <div className="st-acts">
+                <button className="rz-btn primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save provider"}</button>
+                <button className="rz-btn ghost" onClick={() => { setEditing(null); setErr(""); }}>Cancel</button>
               </div>
             </div>
           ) : (
-            <div style={{ borderTop: providers.length ? "1px solid var(--line)" : undefined, paddingTop: providers.length ? 14 : 0 }}>
-              <button className="btn solid" onClick={startAdd}>add provider</button>
+            <div className={`st-addrow${providers.length ? "" : " first"}`}>
+              <button className="rz-btn primary" onClick={startAdd}>Add provider</button>
             </div>
           )}
         </div>
@@ -183,14 +184,14 @@ export function Providers() {
   );
 }
 
-function Field({ label, value, placeholder, type, onChange }: {
-  label: string; value: string; placeholder?: string; type?: string; onChange: (v: string) => void;
+function Field({ label, value, placeholder, type, mono, wide, onChange }: {
+  label: string; value: string; placeholder?: string; type?: string; mono?: boolean; wide?: boolean; onChange: (v: string) => void;
 }) {
   return (
-    <label style={{ display: "grid", gap: 4 }}>
-      <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{label}</span>
+    <label className={`st-field${wide ? " wide" : ""}`}>
+      <span className="st-label">{label}</span>
       <input
-        className="tokeninput"
+        className={`st-input${mono ? " mono" : ""}`}
         type={type || "text"}
         value={value}
         placeholder={placeholder}

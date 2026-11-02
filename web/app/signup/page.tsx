@@ -4,8 +4,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, installCommand } from "@/lib/api";
 import { safeNext } from "@/lib/guard";
-import { TopBar } from "@/components/ui";
 import { CopyCommand } from "@/components/copy-command";
+import { AuthShell, Field, FormError } from "../auth-shell";
 
 const MIN_PASSWORD = 10;
 
@@ -56,98 +56,51 @@ function SignupForm() {
   if (created) {
     const t = created.tokens;
     return (
-      <main className="wrap">
-        <div className="signin">
-          <div className="label" style={{ marginBottom: 18 }}><span className="sq active" /> account ready</div>
-          <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Save your tokens.</h1>
-          <p className="sub" style={{ maxWidth: 520, marginBottom: 24 }}>
-            <b>These are shown once.</b> Store them somewhere safe now: they cannot be shown again. You can
-            revoke them later from &ldquo;manage tokens&rdquo; on a project page.
-          </p>
-          <div className="card pad" style={{ display: "grid", gap: 10, maxWidth: 620 }}>
-            <div className="mono muted" style={{ fontSize: 11.5 }}>install the capture hook in your agent&rsquo;s repo (uses the ingest token)</div>
-            <CopyCommand block text={installCommand({ url: window.location.origin, me: created.email, token: t.ingest })} />
-            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 8 }}>ingest: lets agent hooks report activity</div>
-            <CopyCommand block text={t.ingest} />
-            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 8 }}>access: signs a dashboard (token sign in) or the MCP server in to the board</div>
-            <CopyCommand block text={t.access} />
-            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 8 }}>admin: manages the workspace; keep it like a password</div>
-            <CopyCommand block text={t.admin} />
-            <button className="btn solid" style={{ justifyContent: "center", marginTop: 8 }} onClick={() => router.replace("/dashboard")}>
-              I&rsquo;ve stored them, continue
-            </button>
-          </div>
+      <AuthShell
+        eyebrow="Account ready"
+        title="Save your tokens."
+        lede={<><b>These are shown once.</b> Store them somewhere safe now: they cannot be shown again. You can revoke them later from &ldquo;manage tokens&rdquo; on a project page.</>}
+        panel={{ title: "You are in.", text: "Next, create a project and connect your first agent. Reins walks you through it." }}
+      >
+        <div className="au-tokens">
+          <div className="au-tk">Install the capture hook<span>Run in your agent&rsquo;s repo. Uses the ingest token.</span></div>
+          <CopyCommand block text={installCommand({ url: window.location.origin, me: created.email, token: t.ingest })} />
+          <div className="au-tk">Ingest<span>Lets agent hooks report activity.</span></div>
+          <CopyCommand block text={t.ingest} />
+          <div className="au-tk">Access<span>Signs a dashboard (token sign in) or the MCP server in to the board.</span></div>
+          <CopyCommand block text={t.access} />
+          <div className="au-tk">Admin<span>Manages the workspace. Keep it like a password.</span></div>
+          <CopyCommand block text={t.admin} />
         </div>
-      </main>
+        <button type="button" className="rz-btn primary" style={{ marginTop: 14 }} onClick={() => router.replace("/dashboard")}>
+          I&rsquo;ve stored them, continue
+        </button>
+      </AuthShell>
     );
   }
 
   return (
-    <main className="wrap">
-      <div className="signin">
-        <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> sign up</div>
-        <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Create your account.</h1>
-        <p className="sub" style={{ maxWidth: 480, marginBottom: 24 }}>
-          One account, one workspace to start. You become the owner and your machine tokens are
-          minted for you. Already have an account?{" "}
-          <Link href={loginHref} className="hl" style={{ color: "var(--ink)" }}>Log in</Link>.
-        </p>
-
-        <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520 }}>
-          <label className="mono muted" style={{ fontSize: 11.5 }}>email</label>
-          <input
-            className="tokeninput"
-            type="email"
-            placeholder="you@team.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            spellCheck={false}
-            autoComplete="email"
-          />
-          <label className="mono muted" style={{ fontSize: 11.5 }}>password (at least {MIN_PASSWORD} characters)</label>
-          <input
-            className="tokeninput"
-            type="password"
-            placeholder="a strong password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-          />
-          <label className="mono muted" style={{ fontSize: 11.5 }}>confirm password</label>
-          <input
-            className="tokeninput"
-            type="password"
-            placeholder="repeat your password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            autoComplete="new-password"
-          />
-          <label className="mono muted" style={{ fontSize: 11.5 }}>workspace name (optional)</label>
-          <input
-            className="tokeninput"
-            type="text"
-            placeholder="My Team"
-            value={workspaceName}
-            onChange={(e) => setWorkspaceName(e.target.value)}
-            spellCheck={false}
-          />
-          {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
-          <button className="btn solid" disabled={busy} style={{ justifyContent: "center" }}>
-            {busy ? "Creating…" : "Create account"}
-          </button>
-        </form>
-      </div>
-    </main>
+    <AuthShell
+      eyebrow="Sign up"
+      title="Create your account."
+      lede={<>One account, one workspace to start. You become the owner and your machine tokens are minted for you. Already have an account? <Link href={loginHref} className="au-link">Log in</Link>.</>}
+    >
+      <form onSubmit={submit} className="au-form" noValidate>
+        <Field id="email" label="Email" type="email" placeholder="you@team.com" value={email} onChange={(e) => setEmail(e.target.value)} spellCheck={false} autoComplete="email" />
+        <Field id="password" label="Password" hint={`At least ${MIN_PASSWORD} characters.`} type="password" placeholder="A strong password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+        <Field id="confirm" label="Confirm password" type="password" placeholder="Repeat your password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+        <Field id="workspace" label="Workspace name (optional)" type="text" placeholder="My Team" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} spellCheck={false} autoComplete="organization" />
+        {err && <FormError>{err}</FormError>}
+        <button className="rz-btn primary" disabled={busy}>{busy ? "Creating…" : "Create account"}</button>
+      </form>
+    </AuthShell>
   );
 }
 
 export default function Signup() {
   return (
-    <>
-      <TopBar />
-      <Suspense fallback={<main className="wrap"><div className="signin" /></main>}>
-        <SignupForm />
-      </Suspense>
-    </>
+    <Suspense fallback={null}>
+      <SignupForm />
+    </Suspense>
   );
 }

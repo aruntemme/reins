@@ -3,6 +3,16 @@ import { useEffect, useState } from "react";
 import { api, errorMessage, installCommand } from "@/lib/api";
 import { CopyCommand } from "./copy-command";
 
+/** Calls `close` on Escape while `open`, like a native dialog. */
+export function useEscape(open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+}
+
 /**
  * Admin-only "invite a teammate" flow. Hands back an account join link (so the
  * teammate signs in as themselves, as a member) and, optionally, an ingest token
@@ -26,6 +36,7 @@ export function Invite({ projectId }: { projectId: string }) {
       setAuth(m.auth);
     }).catch(() => {});
   }, []);
+  useEscape(open, () => reset());
   if (!workspaceId) return null;
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -50,14 +61,14 @@ export function Invite({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <button className="btn" onClick={() => setOpen(true)}>+ invite</button>
+      <button type="button" className="rz-btn ghost small" onClick={() => setOpen(true)}>+ Invite</button>
       {open && (
         <div className="invite-backdrop" onClick={reset}>
-          <div className="invite-modal card pad" onClick={(e) => e.stopPropagation()}>
+          <div className="invite-modal card pad" role="dialog" aria-modal="true" aria-labelledby="invite-title" onClick={(e) => e.stopPropagation()}>
             {!result ? (
               <>
                 <div className="label" style={{ marginBottom: 12 }}><span className="sq blue" /> invite to {projectId}</div>
-                <h3 className="display" style={{ fontSize: 22, marginBottom: 6 }}>Invite a teammate</h3>
+                <h3 id="invite-title" className="display" style={{ fontSize: 22, marginBottom: 6 }}>Invite a teammate</h3>
                 <p className="sub" style={{ fontSize: 14, marginBottom: 18 }}>
                   {auth
                     ? `Creates a join link: they sign up or log in and land in this workspace as a member${ingest ? ", plus an ingest token and install command for their agent" : ""}.`
@@ -80,7 +91,7 @@ export function Invite({ projectId }: { projectId: string }) {
             ) : (
               <>
                 <div className="label" style={{ marginBottom: 12 }}><span className="sq active" /> invite ready</div>
-                <h3 className="display" style={{ fontSize: 22, marginBottom: 6 }}>Send this to {result.name || "your teammate"}</h3>
+                <h3 id="invite-title" className="display" style={{ fontSize: 22, marginBottom: 6 }}>Send this to {result.name || "your teammate"}</h3>
                 {result.url && (
                   <>
                     <p className="sub" style={{ fontSize: 13.5, margin: "0 0 8px" }}>
@@ -98,7 +109,7 @@ export function Invite({ projectId }: { projectId: string }) {
                     <CopyCommand block text={installCommand({ url: origin, project: projectId, token: result.ingest })} />
                     <p className="mono muted" style={{ marginTop: 14, fontSize: 11.5 }}>
                       The ingest token is shown once. It&rsquo;s workspace-scoped: revoke it any time from
-                      &ldquo;manage tokens&rdquo; on this page.
+                      &ldquo;Manage tokens&rdquo; on the project page.
                     </p>
                   </>
                 )}

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, type Me, type WorkspaceMembership } from "@/lib/api";
 import { initials } from "@/components/ui";
+import "./user-menu.css";
 
 /**
  * Account dropdown for the TopBar. Only renders when api.me() reports a real
@@ -66,96 +67,63 @@ export function UserMenu() {
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} className="um">
       <button
         type="button"
-        className="btn"
+        className="um-btn"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Account menu for ${email}`}
-        style={{ display: "flex", alignItems: "center", gap: 8 }}
       >
-        <span className="av" style={{ margin: 0, width: 22, height: 22, fontSize: 10 }}>{initials(email)}</span>
-        {/* Hidden on narrow screens (globals.css), leaving the initials. */}
-        <span className="um-email" style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
+        <span className="um-av" aria-hidden="true">{initials(email)}</span>
+        {/* Hidden on narrow screens (user-menu.css), leaving the initials. */}
+        <span className="um-email">{email}</span>
+        <svg className="um-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </button>
 
       {open && (
-        <div
-          role="menu"
-          className="card"
-          style={{
-            position: "absolute",
-            right: 0,
-            top: "calc(100% + 8px)",
-            width: 260,
-            padding: 8,
-            zIndex: 50,
-            boxShadow: "0 12px 32px rgba(27,26,23,.14)",
-          }}
-        >
-          <div style={{ padding: "8px 10px 10px" }}>
-            <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".06em" }}>
-              signed in as
-            </div>
-            <div style={{ fontSize: 14, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {email}
+        <div role="menu" className="um-panel">
+          <div className="um-head">
+            <span className="um-av" aria-hidden="true">{initials(email)}</span>
+            <div className="um-head-text">
+              <span className="um-eyebrow">signed in as</span>
+              <span className="um-name">{email}</span>
             </div>
           </div>
 
           {showSwitcher && (
-            <div style={{ borderTop: "1px solid var(--line)", padding: "8px 4px 4px" }}>
-              <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", padding: "0 6px 6px", textTransform: "uppercase", letterSpacing: ".06em" }}>
-                workspaces
-              </div>
-              <div style={{ display: "grid", gap: 2 }}>
-                {workspaces.map((w) => {
-                  const active = w.id === currentId;
-                  return (
-                    <button
-                      key={w.id}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => switchTo(w.id)}
-                      disabled={switching !== null}
-                      style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-                        width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 8,
-                        border: "1px solid transparent", background: active ? "var(--bg)" : "transparent",
-                        color: "var(--ink)", cursor: switching ? "default" : "pointer", fontSize: 14,
-                      }}
-                    >
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
-                      <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
-                        {switching === w.id ? "switching…" : active ? "current" : w.role}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="um-group">
+              <div className="um-eyebrow">workspaces</div>
+              {workspaces.map((w) => {
+                const active = w.id === currentId;
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    role="menuitem"
+                    className={`um-item${active ? " current" : ""}`}
+                    onClick={() => switchTo(w.id)}
+                    disabled={switching !== null}
+                  >
+                    <span className="um-item-name">{w.name}</span>
+                    <span className="um-item-meta">
+                      {switching === w.id ? "switching…" : active ? "current" : w.role}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
-          <div style={{ borderTop: "1px solid var(--line)", marginTop: 4, paddingTop: 4, display: "grid", gap: 2 }}>
-            <Link
-              href="/settings"
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              style={{ display: "block", padding: "9px 10px", borderRadius: 8, color: "var(--ink)", fontSize: 14 }}
-            >
+          <div className="um-group">
+            <Link href="/settings" role="menuitem" className="um-item" onClick={() => setOpen(false)}>
               Settings
             </Link>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={logout}
-              style={{
-                display: "block", width: "100%", textAlign: "left", padding: "9px 10px", borderRadius: 8,
-                border: "1px solid transparent", background: "transparent", color: "var(--ink)", cursor: "pointer", fontSize: 14,
-              }}
-            >
-              Logout
+            <button type="button" role="menuitem" className="um-item" onClick={logout}>
+              Sign out
             </button>
           </div>
         </div>

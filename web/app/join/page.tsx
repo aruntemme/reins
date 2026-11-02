@@ -3,7 +3,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { TopBar } from "@/components/ui";
+import { AuthShell } from "../auth-shell";
 
 type State =
   | { phase: "loading" }
@@ -59,58 +59,45 @@ function JoinFlow() {
   const signupHref = `/signup?next=${encodeURIComponent(nextPath)}`;
   const loginHref = `/login?next=${encodeURIComponent(nextPath)}`;
 
-  return (
-    <main className="wrap">
-      <div className="signin">
-        <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> join workspace</div>
+  if (state.phase === "needAuth") {
+    return (
+      <AuthShell
+        eyebrow="Join workspace"
+        title={<>You are invited to {state.workspace}.</>}
+        lede={<>You will join as <b>{state.role}</b>. Create an account or log in to accept, and we will complete the join for you.</>}
+        panel={{ title: "Your team is already here.", text: "Join the workspace and your agent starts sharing context with theirs." }}
+      >
+        <div className="au-actions">
+          <Link href={signupHref} className="rz-btn primary">Create an account and join</Link>
+          <Link href={loginHref} className="rz-btn ghost">I already have an account</Link>
+        </div>
+      </AuthShell>
+    );
+  }
 
-        {state.phase === "loading" && (
-          <p className="sub" style={{ maxWidth: 480 }}>Checking your invite…</p>
-        )}
+  if (state.phase === "joining") {
+    return (
+      <AuthShell eyebrow="Join workspace" title={<>Joining {state.workspace}…</>} lede={`Adding you as ${state.role}. One moment.`} />
+    );
+  }
 
-        {state.phase === "joining" && (
-          <>
-            <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Joining {state.workspace}…</h1>
-            <p className="sub" style={{ maxWidth: 480 }}>Adding you as {state.role}. One moment.</p>
-          </>
-        )}
+  if (state.phase === "invalid" || state.phase === "error") {
+    return (
+      <AuthShell eyebrow="Join workspace" title="Invite unavailable." lede={state.message}>
+        <div className="au-actions">
+          <Link href="/login" className="rz-btn ghost">Log in</Link>
+        </div>
+      </AuthShell>
+    );
+  }
 
-        {state.phase === "needAuth" && (
-          <>
-            <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>You are invited to {state.workspace}.</h1>
-            <p className="sub" style={{ maxWidth: 480, marginBottom: 24 }}>
-              You will join as <b>{state.role}</b>. Create an account or log in to accept, and we will
-              complete the join for you.
-            </p>
-            <div className="card pad" style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-              <Link href={signupHref} className="btn solid" style={{ justifyContent: "center" }}>
-                Create an account and join
-              </Link>
-              <Link href={loginHref} className="btn" style={{ justifyContent: "center" }}>
-                I already have an account
-              </Link>
-            </div>
-          </>
-        )}
-
-        {(state.phase === "invalid" || state.phase === "error") && (
-          <>
-            <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Invite unavailable.</h1>
-            <p className="sub" style={{ maxWidth: 480 }}>{state.message}</p>
-          </>
-        )}
-      </div>
-    </main>
-  );
+  return <AuthShell eyebrow="Join workspace" title="Checking your invite…" />;
 }
 
 export default function Join() {
   return (
-    <>
-      <TopBar />
-      <Suspense fallback={<main className="wrap"><div className="signin" /></main>}>
-        <JoinFlow />
-      </Suspense>
-    </>
+    <Suspense fallback={null}>
+      <JoinFlow />
+    </Suspense>
   );
 }

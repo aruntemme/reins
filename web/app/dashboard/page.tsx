@@ -1,22 +1,26 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { api, timeAgo, type ProjectSummary } from "@/lib/api";
+import { api, errorMessage, timeAgo, type ProjectSummary } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth, toLogin } from "@/lib/guard";
 import { TopBar } from "@/components/ui";
 import { ProjectCreate } from "@/components/project-create";
+import "./dashboard.css";
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [llm, setLlm] = useState(true);
   const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState("");
+  const [workspace, setWorkspace] = useState("");
 
   // Gate: if auth is on and there's no session, bounce to /login (the account
   // entry). The token-paste /signin page is reachable via "Try the demo".
   useEffect(() => {
     api.me().then((m) => {
       if (m.auth && !m.workspace) toLogin();
+      else if (m.workspace) setWorkspace(m.workspace.name);
     }).catch(() => {});
   }, []);
 
@@ -25,9 +29,10 @@ export default function Dashboard() {
       const r = await api.projects();
       setProjects(r.projects);
       setLlm(r.llm);
+      setLoadErr("");
     } catch (e) {
       if (handleAuth(e)) return;
-      /* server may be down */
+      setLoadErr(errorMessage(e));
     } finally {
       setLoaded(true);
     }
@@ -39,51 +44,70 @@ export default function Dashboard() {
   return (
     <>
       <TopBar brandHref="/dashboard" live={live} />
-      <main className="wrap">
-        <section className="dashtop">
-          <div className="label eyebrow"><span className="sq" /> live context · for agent teams</div>
-          <h1 className="display" style={{ fontSize: "clamp(34px, 5vw, 56px)" }}>
-            Your team, <span className="hl">live</span>.
-          </h1>
+      <main className="db-wrap">
+        <section className="db-top">
+          <p className="rz-eyebrow">{workspace ? `${workspace} · live context` : "Live context · for agent teams"}</p>
+          <h1 className="db-title">Your team, live.</h1>
         </section>
 
         {!llm && loaded && (
-          <div className="banner" style={{ marginBottom: 24 }}>
-            ⚠ No model provider configured: running in degraded mode (raw capture, no distillation). Add one in{" "}
-            <Link href="/settings" style={{ textDecoration: "underline" }}>settings → model providers</Link>.
+          <div className="db-banner" role="status">
+            No model provider configured: running in degraded mode (raw capture, no distillation). Add one in{" "}
+            <Link href="/settings">settings → model providers</Link>.
           </div>
         )}
 
-        <div
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12 }}
-        >
-          <div className="label" style={{ marginBottom: 0 }}><span className="sq blue" /> projects</div>
+        <div className="db-bar">
+          <h2 className="rz-section-h">Projects{loaded && projects.length > 0 ? ` · ${projects.length}` : ""}</h2>
           <ProjectCreate onCreated={load} />
         </div>
-        {projects.length === 0 ? (
-          <div className="card pad empty">
-            {loaded
-              ? "No projects yet. Click + new project to create one and get the install command for your agent."
-              : "Loading…"}
+
+        {!loaded ? (
+          <div className="db-grid" aria-busy="true" aria-label="Loading projects">
+            {[0, 1, 2].map((i) => <div key={i} className="db-card db-skel" />)}
+          </div>
+        ) : loadErr && projects.length === 0 ? (
+          <div className="db-empty" role="alert">
+            <p>Could not load your projects: {loadErr}</p>
+            <button type="button" className="rz-btn ghost small" onClick={load}>Try again</button>
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="db-empty">
+            <p><b>No projects yet.</b></p>
+            <p>Create one to get the install command for your first agent.</p>
           </div>
         ) : (
-          <div className="grid projects">
+          <div className="db-grid">
             {projects.map((p) => (
-              <Link key={p.id} href={`/project/${encodeURIComponent(p.id)}`} className="card pcard">
-                <div className="label"><span className="sq" /> {p.id}</div>
-                <h3>{p.name}</h3>
-                <div className="goal">{p.goal || "No goal set yet."}</div>
-                <div className="foot">
-                  <div className="mono">{p.active}/{p.members} active</div>
-                  <div className="mono">{timeAgo(p.updatedAt)}</div>
+              <article key={p.id} className="db-card">
+                <div className="db-card-top">
+                  <span className="db-id">{p.id}</span>
+                  {p.members === 0 ? (
+                    <span className="db-state">No agents yet</span>
+                  ) : (
+                    <span className={`db-state${p.active > 0 ? " on" : ""}`}>
+                      <span className={`rz-live${p.active > 0 ? "" : " away"}`} aria-hidden="true" />
+                      {p.active}/{p.members} active
+                    </span>
+                  )}
                 </div>
-              </Link>
+                <h3 className="db-name">
+                  <Link href={`/project/${encodeURIComponent(p.id)}`} className="db-card-link">{p.name}</Link>
+                </h3>
+                <p className="db-goal">{p.goal || "No goal set yet."}</p>
+                <div className="db-foot">
+                  <span>Updated {timeAgo(p.updatedAt)}</span>
+                  {p.members === 0 && (
+                    <Link href={`/project/${encodeURIComponent(p.id)}/connect`} className="db-connect">Connect an agent</Link>
+                  )}
+                </div>
+              </article>
             ))}
           </div>
         )}
       </main>
-      <footer className="foot">
-        <div className="wrap">reins · <Link href="/privacy">privacy</Link></div>
+      <footer className="db-footer">
+        <div className="db-wrap">reins · <Link href="/privacy">privacy</Link></div>
       </footer>
     </>
   );

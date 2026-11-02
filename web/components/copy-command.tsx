@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import "./copy-command.css";
 
 function CopyIcon() {
   return (
@@ -17,9 +18,16 @@ function CheckIcon() {
   );
 }
 
-/** A terminal-style command that copies to the clipboard on click, with feedback. */
-export function CopyCommand({ text, block }: { text: string; block?: boolean }) {
+/**
+ * A terminal-style command that copies `text` to the clipboard on click, with
+ * feedback. `display` swaps what is shown (e.g. a masked or multi-line view)
+ * without changing what is copied.
+ */
+export function CopyCommand({ text, block, display }: { text: string; block?: boolean; display?: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const copy = async () => {
     try {
@@ -35,18 +43,25 @@ export function CopyCommand({ text, block }: { text: string; block?: boolean }) 
       document.body.removeChild(ta);
     }
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1600);
   };
 
   return (
-    <button
-      type="button"
-      className={`installcmd copycmd${block ? " block" : ""}${copied ? " copied" : ""}`}
-      onClick={copy}
-      aria-label={copied ? "Copied to clipboard" : `Copy command: ${text}`}
-    >
-      <span className="cc-text">{text}</span>
-      <span className="cc-ic" aria-hidden="true">{copied ? <CheckIcon /> : <CopyIcon />}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={`installcmd copycmd${block ? " block" : ""}${copied ? " copied" : ""}`}
+        onClick={copy}
+        aria-label={`Copy command: ${text}`}
+      >
+        <span className="cc-text">{display ?? text}</span>
+        <span className="cc-ic" aria-hidden="true">
+          {copied ? <CheckIcon /> : <CopyIcon />}
+          {copied && <span className="cc-label">Copied</span>}
+        </span>
+      </button>
+      <span className="cc-sr" role="status">{copied ? "Copied to clipboard" : ""}</span>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { TopBar } from "@/components/ui";
+import "./privacy.css";
 
 export const metadata: Metadata = {
   title: "Privacy · Reins",
@@ -11,12 +12,13 @@ export default function PrivacyPage() {
   return (
     <>
       <TopBar brandHref="/" hideLive />
-      <main className="wrap">
-        <article className="legal">
-          <h1>Privacy</h1>
-          <p className="legal-sub">Last updated 27 June 2026</p>
+      <main className="pv-wrap">
+        <article className="pv">
+          <p className="rz-eyebrow">Privacy</p>
+          <h1>What Reins records, and what it doesn&rsquo;t.</h1>
+          <p className="pv-sub">Last updated 27 June 2026</p>
 
-          <p>
+          <p className="pv-lead">
             Reins keeps a team in sync on what their AI coding assistants are doing. This page explains
             what it records, how that information is used, and the controls you have.
           </p>
@@ -75,11 +77,11 @@ export default function PrivacyPage() {
             For data requests or questions, reach the team that operates your Reins instance.
           </p>
 
-          <p className="legal-back"><Link href="/" className="hl">‹ back home</Link></p>
+          <p className="pv-back"><Link href="/">Back to home</Link></p>
         </article>
       </main>
-      <footer className="foot">
-        <div className="wrap">reins · <Link href="/">home</Link></div>
+      <footer className="pv-foot">
+        <div className="pv-wrap">reins · <Link href="/">home</Link></div>
       </footer>
     </>
   );

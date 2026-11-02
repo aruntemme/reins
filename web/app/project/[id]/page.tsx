@@ -1,48 +1,51 @@
 "use client";
+import "./project.css";
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { api, ApiError, errorMessage, timeAgo, type Project, type Goal, type GoalProposal } from "@/lib/api";
+import { ProjectTabs } from "@/components/project-tabs";
+import { api, ApiError, errorMessage, timeAgo, type Project, type Goal, type GoalProposal, type Member, type Handoff } from "@/lib/api";
 import { useStream } from "@/lib/useStream";
 import { handleAuth } from "@/lib/guard";
-import { TopBar, Avatar, STATUS } from "@/components/ui";
+import { Mark } from "@/components/ui";
+import { UserMenu } from "@/components/user-menu";
 import { Invite } from "@/components/invite";
 import { ManageTokens } from "@/components/admin";
-import { GoalsDrawer, GoalsRef } from "@/components/goals";
-import { LeadPanel, AssignForm, AutoClosedList, gitLabel } from "@/components/lead";
+import {
+  Lanes, PeopleList, Legend, HotFiles, useNow, rowsOf, collisionIds, caughtAt, blockedSince, isBranchArea, clock, span, WINDOW_MS,
+} from "@/components/lanes";
 
 type Viewer = { admin: boolean; me: string; auth: boolean };
+type Act = (p: Promise<unknown>) => void;
 
-export default function Dashboard({ params }: { params: Promise<{ id: string }> }) {
+export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [proj, setProj] = useState<Project | null>(null);
   const [missing, setMissing] = useState(false);
   // A failed load that is not a 404 (server down, 5xx): transient, cleared on the next good load.
   const [loadErr, setLoadErr] = useState("");
-  // The last failed board action (resync, ack/resolve), with the server's message.
+  // The last failed board action (resync, ack/resolve/reopen), with the server's message.
   const [actErr, setActErr] = useState("");
-
   const [goals, setGoals] = useState<Goal[]>([]);
+  // Already scoped server-side to what this caller can act on.
   const [proposals, setProposals] = useState<GoalProposal[]>([]);
-  const [goalsOpen, setGoalsOpen] = useState(false);
   const [viewer, setViewer] = useState<Viewer>({ admin: false, me: "", auth: true });
+  const [workspace, setWorkspace] = useState("");
+  const now = useNow();
 
   useEffect(() => {
     api.me()
-      .then((m) =>
+      .then((m) => {
         setViewer({
           admin: !!m.admin || !m.auth,
-          // The account's capture identity drives which goals are "mine" and who
-          // claims; falls back to a local name only in the auth-off dev instance.
+          // The account's capture identity marks "you" and who claims; falls back to
+          // a local name only in the auth-off dev instance.
           me: m.member || m.user?.email || (!m.auth ? localStorage.getItem("reins-me") : "") || "",
           auth: m.auth,
-        })
-      )
+        });
+        setWorkspace(m.workspace?.name || "");
+      })
       .catch(() => {});
   }, []);
-
-  // Proposals are already scoped server-side to what this caller can act on
-  // (team -> admins, individual -> the owning teammate), so use them directly.
-  const myProposals = proposals;
 
   const load = useCallback(async () => {
     try {
@@ -57,7 +60,7 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
   }, [id]);
 
   const fail = useCallback((e: unknown) => { if (!handleAuth(e)) setActErr(errorMessage(e)); }, []);
-  const act = useCallback((p: Promise<unknown>) => { setActErr(""); p.then(load, fail); }, [load, fail]);
+  const act = useCallback<Act>((p) => { setActErr(""); p.then(load, fail); }, [load, fail]);
 
   const loadGoals = useCallback(async () => {
     try {
@@ -67,79 +70,82 @@ export default function Dashboard({ params }: { params: Promise<{ id: string }> 
     } catch (e) { handleAuth(e); }
   }, [id]);
 
-  // One change handler drives both the board and the goals pane off the same SSE.
   const onChange = useCallback(() => { load(); loadGoals(); }, [load, loadGoals]);
   useEffect(() => { load(); loadGoals(); }, [load, loadGoals]);
   const live = useStream(id, onChange);
 
-  if (missing) return (
-    <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash"><div className="card pad empty">No project “{id}”. <Link href="/dashboard" className="hl">Back</Link></div></div></main></>
-  );
-  if (!proj) return (
-    <><TopBar brandHref="/dashboard" live={live} /><main className="wrap"><div className="dash">
-      {loadErr ? (
-        <div className="card pad empty">
-          <span className="mono" style={{ color: "var(--blocked)" }}>Could not load “{id}”: {loadErr}</span>{" "}
-          <button className="tiny" onClick={load}>retry</button>
-        </div>
-      ) : <div className="empty">Loading…</div>}
-    </div></main></>
-  );
+  const name = proj?.name || id;
+  useEffect(() => { document.title = `${name} · Reins`; }, [name]);
+  const enc = encodeURIComponent(id);
+  const meInProject = !!viewer.me && !!proj?.members.some((m) => m.member === viewer.me);
+  const liveCount = proj ? proj.members.filter((m) => m.live).length : 0;
 
   return (
-    <>
-      <TopBar
-        live={live}
-        right={<button className="btn ghost" onClick={() => act(api.refreshRollup(id))}>resync</button>}
-      />
-      <main className="wrap">
-        <div className="dash">
-          <DashHead proj={proj} goals={goals} proposals={myProposals} onSaved={load} onOpenGoals={() => setGoalsOpen(true)} />
-          {(loadErr || actErr) && (
-            <div className="mono" style={{ color: "var(--blocked)" }}>{actErr || `Could not refresh the board: ${loadErr}`}</div>
-          )}
-          <div className="cols">
-            <div style={{ display: "grid", gap: 24 }}>
-              <Rollup proj={proj} admin={viewer.admin} onChange={load} />
-              <div>
-                <div className="label teamhead">
-                  <span><span className="sq active" /> team · live</span>
-                  <span className="teamhead-acts">
-                    {proj.handoffs.length > 0 && (
-                      <span className="hcount"><span className="sq blocked" /> {proj.handoffs.length} open handoff{proj.handoffs.length > 1 ? "s" : ""}</span>
-                    )}
-                    <Invite projectId={id} />
-                    <ManageTokens />
-                  </span>
-                </div>
-                {proj.members.length === 0 ? (
-                  <div className="card pad empty">No activity captured yet.</div>
-                ) : (
-                  <div className="team">
-                    {proj.members.map((m, i) => (
-                      <MemberCard
-                        key={m.member} m={m} i={i} projectId={proj.id} act={act}
-                        assigned={proj.assignments.filter((a) => a.member === m.member).map((a) => a.area)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="rail">
-              <LeadPanel proj={proj} admin={viewer.admin} onChange={load} />
-              <PendingRail proj={proj} viewer={viewer} onChange={onChange} />
-            </div>
-          </div>
+    <div className="pj">
+      <header className="pj-top">
+        <div className="pj-top-l">
+          <Link href="/dashboard" className="pj-logo" aria-label="Reins projects"><Mark size={36} /></Link>
+          <nav aria-label="Breadcrumb" className="pj-crumbs">
+            <ol>
+              {workspace && <li className="pj-crumb-ws"><Link href="/dashboard">{workspace}</Link></li>}
+              <li className="pj-crumb-cur" aria-current="page">{name}</li>
+            </ol>
+          </nav>
         </div>
-      </main>
-      <GoalsDrawer open={goalsOpen} onClose={() => setGoalsOpen(false)} projectId={proj.id} goals={goals} proposals={myProposals} viewer={viewer} onChange={onChange} />
-      <footer className="foot"><div className="wrap">project · {proj.id} · <Link href="/privacy">privacy</Link></div></footer>
-    </>
+        <nav aria-label="View" className="pj-views">
+          <Link href={`/project/${enc}`} aria-current="page">Lanes</Link>
+          {meInProject && <Link href={`/project/${enc}/${encodeURIComponent(viewer.me)}`}>Brief</Link>}
+        </nav>
+        <div className="pj-top-r">
+          <span className={`pj-livecount${live && liveCount ? "" : " off"}`} role="status">
+            <span className={`rz-live${live && liveCount ? "" : " away"}`} aria-hidden="true" />
+            {!live ? "offline" : liveCount === 0 ? "nobody live" : <>{liveCount}<span className="pj-lc-long">&nbsp;agent{liveCount > 1 ? "s" : ""}</span>&nbsp;live</>}
+          </span>
+          {viewer.admin && <Link href={`/project/${enc}/lead`} className="pj-leadlink">Lead console</Link>}
+          <UserMenu />
+        </div>
+      </header>
+
+      {missing ? (
+        <main className="pj-msg">No project “{id}”. <Link href="/dashboard">Back to projects</Link></main>
+      ) : !proj ? (
+        <main className="pj-msg">
+          {loadErr ? (
+            <>Could not load “{id}”: {loadErr} <button type="button" className="rz-btn ghost small" onClick={load}>Retry</button></>
+          ) : "Loading…"}
+        </main>
+      ) : (
+        <>
+          <GoalBand proj={proj} goals={goals} proposals={proposals} onSaved={load} />
+          <div className="pj-body">
+            <main className="pj-main">
+              {(loadErr || actErr) && (
+                <p className="pj-err" role="alert">{actErr || `Could not refresh the board: ${loadErr}`}</p>
+              )}
+              <div className="pj-m-only"><Attention proj={proj} admin={viewer.admin} now={now} compact="overlaps" /></div>
+              <Board proj={proj} viewer={viewer} now={now} />
+            </main>
+            <aside className="pj-rail" aria-label="Right now">
+              <div className="pj-d-only"><Attention proj={proj} admin={viewer.admin} now={now} /></div>
+              <div className="pj-m-only"><Attention proj={proj} admin={viewer.admin} now={now} compact="rest" /></div>
+              <FromLead proj={proj} admin={viewer.admin} />
+              <UpForGrabs proj={proj} viewer={viewer} onChange={onChange} />
+              <Handoffs proj={proj} act={act} />
+              <Summary proj={proj} act={act} />
+            </aside>
+          </div>
+        </>
+      )}
+
+      <footer className="pj-foot">project · {id} · <Link href="/privacy">privacy</Link></footer>
+
+      <ProjectTabs projectId={id} me={meInProject ? viewer.me : null} current="lanes" lead={viewer.admin} />
+    </div>
   );
 }
 
-function DashHead({ proj, goals, proposals, onSaved, onOpenGoals }: { proj: Project; goals: Goal[]; proposals: GoalProposal[]; onSaved: () => void; onOpenGoals: () => void }) {
+/** The slim sky band: the project goal (editable, as before) and team-goal progress. */
+function GoalBand({ proj, goals, proposals, onSaved }: { proj: Project; goals: Goal[]; proposals: GoalProposal[]; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proj.goal);
   const [err, setErr] = useState("");
@@ -157,204 +163,182 @@ function DashHead({ proj, goals, proposals, onSaved, onOpenGoals }: { proj: Proj
     onSaved();
   };
 
+  const team = goals.filter((g) => g.scope === "team" && !g.parentId);
+  const steps = team.reduce((a, g) => ({ done: a.done + g.rollup.done, total: a.total + g.rollup.total }), { done: 0, total: 0 });
+  const prog = steps.total > 0 ? steps : { done: team.filter((g) => g.status === "done").length, total: team.length };
+  const pct = prog.total ? Math.round((prog.done / prog.total) * 100) : 0;
+
   return (
-    <div className="dashhead">
-      <div className="crumbs">
-        <Link href="/dashboard" className="mono">‹ projects</Link>
-        <span className="mono">/</span>
-        <span className="label"><span className="sq" /> {proj.id}</span>
-      </div>
-      <div className="label"><span className="sq blue" /> global goal{proj.goalSetBy ? ` · set by ${proj.goalSetBy}` : ""}</div>
-      <div className="goalbox">
+    <section aria-label="Goal" className="rz-field pj-band">
+      <span className="rz-blob pj-band-blob" aria-hidden="true" />
+      <div className="pj-band-in">
         {editing ? (
-          <div style={{ flex: 1, display: "grid", gap: 10 }}>
-            <textarea value={draft} rows={2} onChange={(e) => setDraft(e.target.value)} autoFocus />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn solid" onClick={save}>Save goal</button>
-              <button className="btn ghost" onClick={() => { setEditing(false); setErr(""); }}>Cancel</button>
-            </div>
-            {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
-          </div>
+          <form className="pj-goal-edit" onSubmit={(e) => { e.preventDefault(); save(); }}>
+            <label htmlFor="pj-goal" className="pj-band-k">Goal</label>
+            <input id="pj-goal" value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus placeholder="The goal this whole team is steering toward" />
+            <button type="submit" className="rz-btn light small">Save goal</button>
+            <button type="button" className="rz-btn small pj-band-ghost" onClick={() => { setEditing(false); setErr(""); setDraft(proj.goal); }}>Cancel</button>
+            {err && <span className="pj-band-err" role="alert">{err}</span>}
+          </form>
         ) : (
-          <>
-            <div className="goaltext">{proj.goal || "Set the goal this whole team is steering toward…"}</div>
-            <button className="btn" onClick={() => setEditing(true)}>Edit</button>
-          </>
-        )}
-      </div>
-      <GoalsRef goals={goals} proposals={proposals} onOpen={onOpenGoals} />
-    </div>
-  );
-}
-
-function Rollup({ proj, admin, onChange }: { proj: Project; admin: boolean; onChange: () => void }) {
-  const r = proj.rollup;
-  // Which card is being assigned: "c<i>" for a collision, "r<i>" for a risk.
-  const [assigning, setAssigning] = useState<string | null>(null);
-  // Live overlaps show even before the first rollup is synthesized.
-  const collisions = r ? r.collisions : proj.collisions;
-  const risks = r ? r.risks : [];
-  const idOf = (name: string) => proj.members.find((m) => m.displayName === name || m.member === name)?.member;
-  const openForm = (() => {
-    if (!assigning) return null;
-    const i = Number(assigning.slice(1));
-    if (assigning[0] === "c" && collisions[i]) {
-      const c = collisions[i]!;
-      return { area: c.area.replace(/^branch /, ""), suggested: c.members.map(idOf).filter(Boolean) as string[] };
-    }
-    if (assigning[0] === "r" && risks[i]) return { area: risks[i]!.slice(0, 200), suggested: [] };
-    return null;
-  })();
-
-  const watch = (collisions.length > 0 || risks.length > 0) && (
-    <div>
-      <div className="label" style={{ marginBottom: 6 }}><span className="sq blocked" /> watch</div>
-      <div className="chiprow">
-        {collisions.map((c, i) => (
-          <span key={`c${i}`} className="chip warn chipact" title={c.note}>
-            ⚠ {c.area} · {c.members.join(", ")}
-            {admin && <button className="chipbtn" onClick={() => setAssigning(`c${i}`)} aria-label={`assign ${c.area}`}>assign</button>}
-          </span>
-        ))}
-        {risks.map((x, i) => (
-          <span key={`r${i}`} className="chip warn chipact">
-            {x}
-            {admin && <button className="chipbtn" onClick={() => setAssigning(`r${i}`)} aria-label="assign an owner for this risk">assign</button>}
-          </span>
-        ))}
-      </div>
-      {openForm && (
-        <AssignForm
-          key={assigning}
-          proj={proj}
-          area={openForm.area}
-          suggested={openForm.suggested}
-          onCancel={() => setAssigning(null)}
-          onDone={() => { setAssigning(null); onChange(); }}
-        />
-      )}
-    </div>
-  );
-
-  if (!r) return (
-    <div className="card pad rollup">
-      <div className="label"><span className="sq" /> status</div>
-      <div className="empty">No rollup yet. It synthesizes after the team logs a bit of activity.</div>
-      {watch}
-    </div>
-  );
-  return (
-    <div className="card pad rollup">
-      <div className="label"><span className="sq" /> status · synthesized {timeAgo(r.updatedAt)}</div>
-      <div className="summary">{r.summary}</div>
-      <div className="meta">
-        {r.alignment && (
-          <div>
-            <div className="label" style={{ marginBottom: 6 }}><span className="sq blue" /> goal alignment</div>
-            <div className="sub" style={{ fontSize: 14 }}>{r.alignment}</div>
+          <div className="pj-goal">
+            <span className="pj-band-k">Goal</span>
+            <span className="pj-goal-t">{proj.goal || "No goal yet. Set the one this whole team is steering toward."}</span>
+            <button type="button" className="pj-goal-btn" onClick={() => setEditing(true)} aria-label={proj.goal ? "Edit the project goal" : "Set the project goal"}>
+              {proj.goal ? "Edit" : "Set goal"}
+            </button>
+            {proj.goalSetBy && <span className="pj-band-by">set by {proj.goalSetBy}</span>}
           </div>
         )}
-        {watch}
+        <Link href={`/project/${encodeURIComponent(proj.id)}/lead`} className="pj-prog" aria-label={prog.total ? `Team goals: ${prog.done} of ${prog.total} done. Open goals` : "No team goals yet. Open goals"}>
+          {prog.total ? (
+            <>
+              <span>{prog.done} of {prog.total} done</span>
+              <span className="pj-prog-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
+            </>
+          ) : <span>No team goals yet</span>}
+          {proposals.length > 0 && <span className="pj-pill">{proposals.length} to review</span>}
+          <span aria-hidden="true">›</span>
+        </Link>
       </div>
-    </div>
+    </section>
   );
 }
 
-const HKIND: Record<string, string> = { mention: "@mention", collision: "collision", blocker: "blocker", fyi: "fyi", assignment: "assignment" };
-
-// The member's name is the link (not the whole card), so the handoff buttons
-// inside the card are never nested in an interactive element.
-function MemberCard({ m, i, projectId, assigned, act }: { m: Project["members"][number]; i: number; projectId: string; assigned: string[]; act: (p: Promise<unknown>) => void }) {
-  const s = STATUS[m.displayStatus] ?? STATUS.idle;
-  const git = gitLabel(m);
-  // Real edits first; inferred working-on entries that repeat one are dropped.
-  const touched = new Set(m.touches.map((t) => t.path.toLowerCase()));
-  const inferred = m.workingOn.filter((w) => ![...touched].some((t) => t === w.toLowerCase() || t.endsWith(`/${w.toLowerCase()}`)));
+function Board({ proj, viewer, now }: { proj: Project; viewer: Viewer; now: number }) {
+  const rows = rowsOf(proj, now, viewer.me);
+  const anyLive = proj.members.some((m) => m.live);
+  const enc = encodeURIComponent(proj.id);
   return (
-    <div className={`card mcard${m.live ? "" : " stale"}`}>
-      <div className="top">
-        <div className="who">
-          <Avatar name={m.displayName} i={i} />
-          <div>
-            <Link href={`/project/${encodeURIComponent(projectId)}/${encodeURIComponent(m.member)}`} className="name">{m.displayName}</Link>
-            <div className="mono">{m.live ? `active · ${timeAgo(m.lastSeen)}` : `last seen ${timeAgo(m.lastSeen)}`}</div>
-            {git && <div className="mono gitline" title={m.git?.head ? `HEAD ${m.git.head}` : undefined}>{git}</div>}
-          </div>
-        </div>
-        <span className="statuslabel"><span className={`sq ${s.cls}`} /> {s.label}</span>
+    <>
+      <div className="pj-h">
+        <h1>Who is on what</h1>
+        <span className="pj-quiet">
+          <span className="pj-d-inline">last {WINDOW_MS / 60_000} minutes · </span>
+          <span className="pj-m-inline">last hour · </span>
+          {proj.members.length === 0 ? "waiting for the first agent" : anyLive ? "updates as agents work" : "nobody is live right now"}
+        </span>
       </div>
-      {m.handoffs.length > 0 && <Handoffs items={m.handoffs} projectId={projectId} act={act} />}
-      <AutoClosedList items={m.autoClosed} projectId={projectId} act={act} />
-      <div className="headline">{m.headline || "…"}</div>
-      {m.goal && <div className="goal">{m.goal}</div>}
-      {(m.touches.length > 0 || inferred.length > 0 || assigned.length > 0) && (
-        <div className="chiprow">
-          {assigned.map((a) => <span key={`a${a}`} className="chip owns" title="assigned by the lead">owns {a}</span>)}
-          {m.touches.map((t) => <span key={`t${t.path}`} className="chip edited" title={`edited ${timeAgo(t.at)}`}>✎ {t.path}</span>)}
-          {inferred.map((w, k) => <span key={k} className="chip">{w}</span>)}
+      {proj.members.length === 0 ? (
+        <div className="pj-empty">
+          <p className="pj-empty-t">No agents connected yet.</p>
+          <p className="pj-quiet">Lanes fill in as soon as a teammate’s agent sends its first edit.</p>
+          <Link href={`/project/${enc}/connect`} className="rz-btn primary small">Connect an agent</Link>
         </div>
+      ) : (
+        <>
+          <div className="pj-d-only"><Legend /></div>
+          <div className="pj-d-only"><Lanes rows={rows} collisions={proj.collisions} members={proj.members} now={now} /></div>
+          <div className="pj-m-only"><PeopleList rows={rows} now={now} /></div>
+          <HotFiles members={proj.members} collisions={proj.collisions} now={now} />
+        </>
       )}
-      {m.timeline.length > 0 && (
-        <div className="timeline">
-          {m.timeline.slice(0, 4).map((t, k) => (
-            <div className="tl" key={k}><span className="tk">{t.kind}</span><span>{t.summary}</span></div>
-          ))}
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
-// Incoming handoffs for a member. More than a couple would balloon the card, so
-// they collapse behind a count (with a kind breakdown) and expand on click.
-function Handoffs({ items, projectId, act }: { items: Project["members"][number]["handoffs"]; projectId: string; act: (p: Promise<unknown>) => void }) {
-  const [open, setOpen] = useState(false);
-  const COLLAPSE_AT = 2;
-  const collapsed = items.length > COLLAPSE_AT && !open;
+const assignHref = (projectId: string, area: string, suggest: string[] = []) =>
+  `/project/${encodeURIComponent(projectId)}/lead?assign=${encodeURIComponent(area.slice(0, 200))}${suggest.length ? `&suggest=${encodeURIComponent(suggest.join(","))}` : ""}#assign`;
+const andList = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
-  if (collapsed) {
-    const counts = items.reduce<Record<string, number>>((a, h) => ((a[h.kind] = (a[h.kind] || 0) + 1), a), {});
-    const breakdown = Object.entries(counts)
-      .map(([k, n]) => `${n} ${HKIND[k] || k}${n > 1 ? "s" : ""}`)
-      .join(" · ");
-    return (
-      <button className="handoff-collapse" onClick={() => setOpen(true)}>
-        <span className="sq blocked" />
-        <span className="hc-n">{items.length} for you</span>
-        <span className="mono hc-b">{breakdown}</span>
-        <span className="hc-x">▾</span>
-      </button>
-    );
-  }
+/** Overlaps (pink), blocked teammates (amber) and synthesized risks. On phones it splits:
+ *  `compact="overlaps"` sits above the people list, `compact="rest"` in the rail below it. */
+function Attention({ proj, admin, now, compact }: { proj: Project; admin: boolean; now: number; compact?: "overlaps" | "rest" }) {
+  const collisions = compact === "rest" ? [] : proj.rollup ? proj.rollup.collisions : proj.collisions;
+  const blocked = compact === "overlaps" ? [] : proj.members.filter((m) => m.displayStatus === "blocked");
+  const risks = compact === "overlaps" ? [] : proj.rollup?.risks ?? [];
+  const enc = encodeURIComponent(proj.id);
+  if (compact && collisions.length === 0 && blocked.length === 0 && risks.length === 0) return null;
 
   return (
-    <div className="handoffs">
-      {items.length > COLLAPSE_AT && (
-        <button className="handoff-collapse hide" onClick={() => setOpen(false)}>
-          <span className="hc-x">▴</span> <span className="mono">{items.length} for you · collapse</span>
-        </button>
+    <section className="pj-sec" aria-labelledby={compact ? `pj-att-${compact}` : "pj-att"}>
+      <h2 id={compact ? `pj-att-${compact}` : "pj-att"} className={`rz-section-h${compact === "overlaps" ? " pj-sr" : ""}`}>Needs attention</h2>
+      {collisions.length === 0 && blocked.length === 0 && risks.length === 0 && (
+        <p className="pj-quiet">Nothing needs you. No overlaps, nobody blocked.</p>
       )}
-      {items.map((h) => (
-        <div className={`handoff ${h.kind}${h.status === "ack" ? " ackd" : ""}`} key={h.id}>
-          <div className="hmeta">
-            <span className="hkind">{HKIND[h.kind] || h.kind}{h.from ? ` · ${h.from}` : ""}</span>
-            {h.status === "ack" && <span className="mono">ack’d</span>}
-          </div>
-          <div className="htext">{h.text}</div>
-          {!!h.conventions?.length && <div className="hconv">their conventions: {h.conventions.join("; ")}</div>}
-          <div className="hacts">
-            {h.status === "open" && (
-              <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "ack"))}>ack</button>
+      {collisions.map((c, i) => {
+        const caught = c.computed ? caughtAt(c, proj.members) : null;
+        const branch = isBranchArea(c.area);
+        return (
+          <article key={`c${i}`} className="pj-att ov">
+            <span className="pj-att-k"><span className="pj-pip" aria-hidden="true" />
+              {c.computed ? (caught?.sent ? `Heads-up sent · ${clock(caught.at)}` : "Overlap · live") : "Possible overlap"}
+            </span>
+            <span className="pj-att-t">
+              {c.computed ? (
+                branch
+                  ? <>{andList(c.members)} are both on <span className="pj-mono">{c.area.replace(/^branch /, "")}</span>.</>
+                  : <>{andList(c.members)} both reached for <span className="pj-mono">{c.area}</span>.</>
+              ) : (
+                <><span className="pj-mono">{c.area}</span> · {andList(c.members)}{c.note ? `: ${c.note}` : ""}</>
+              )}
+            </span>
+            {admin && (
+              <Link className="rz-btn ghost small pj-att-a" href={assignHref(proj.id, c.area.replace(/^branch /, ""), collisionIds(c, proj.members))}>
+                Assign an owner
+              </Link>
             )}
-            <button className="tiny" onClick={() => act(api.handoff(h.id, projectId, "resolve"))}>resolve</button>
-          </div>
+          </article>
+        );
+      })}
+      {blocked.map((m) => {
+        const b = blockedSince(m);
+        const why = b?.why || m.headline;
+        return (
+          <article key={m.member} className="pj-att bl">
+            <span className="pj-att-k"><span className="pj-pip" aria-hidden="true" />Blocked{b ? ` · ${span(Math.min(b.at, now))}` : ""}</span>
+            <span className="pj-att-t">{m.displayName} is blocked{why ? `: ${why}` : "."}</span>
+            <Link className="rz-btn ghost small pj-att-a" href={`/project/${enc}/${encodeURIComponent(m.member)}`}>Open {m.displayName}’s brief</Link>
+          </article>
+        );
+      })}
+      {risks.map((r, i) => (
+        <article key={`r${i}`} className="pj-att">
+          <span className="pj-att-k">Risk</span>
+          <span className="pj-att-t">{r}</span>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function untilLabel(ts: number): string {
+  const h = Math.max(0, (ts - Date.now()) / 3_600_000);
+  return h < 1 ? `${Math.max(1, Math.round(h * 60))}m left` : h < 48 ? `${Math.round(h)}h left` : `${Math.round(h / 24)}d left`;
+}
+
+/** Active directives and assignments, read-only here; leads post and clear them in the console. */
+function FromLead({ proj, admin }: { proj: Project; admin: boolean }) {
+  const nameOf = (id: string) => proj.members.find((m) => m.member === id)?.displayName || id;
+  const empty = proj.directives.length === 0 && proj.assignments.length === 0;
+  return (
+    <section className="pj-sec" aria-labelledby="pj-lead">
+      <h2 id="pj-lead" className="rz-section-h">From the lead</h2>
+      {empty && (
+        <p className="pj-quiet">
+          Nothing from the lead right now.
+          {admin && <> <Link href={`/project/${encodeURIComponent(proj.id)}/lead`} className="pj-a">Post a directive</Link></>}
+        </p>
+      )}
+      {proj.directives.map((d) => (
+        <div key={d.id} className="pj-dir">
+          <p className="pj-dir-t">“{d.text}”</p>
+          <span className="pj-quiet">
+            to {d.targets.length ? d.targets.map(nameOf).join(", ") : "the whole team"} · {untilLabel(d.expiresAt)}{d.by ? ` · ${d.by}` : ""}
+          </span>
         </div>
       ))}
-    </div>
+      {proj.assignments.map((a) => (
+        <div key={a.id} className="pj-asg">
+          <span><span className="pj-mono">{a.area}</span> → <b>{nameOf(a.member)}</b></span>
+          <span className="pj-quiet">assigned {timeAgo(a.createdAt)}{a.by ? ` by ${a.by}` : ""}{a.note ? ` · ${a.note}` : ""}</span>
+        </div>
+      ))}
+    </section>
   );
 }
 
-function PendingRail({ proj, viewer, onChange }: { proj: Project; viewer: Viewer; onChange: () => void }) {
+function UpForGrabs({ proj, viewer, onChange }: { proj: Project; viewer: Viewer; onChange: () => void }) {
   const [local, setLocal] = useState("");
   const [err, setErr] = useState("");
   // Claim as the signed-in account. Only the auth-off local instance (no
@@ -380,31 +364,109 @@ function PendingRail({ proj, viewer, onChange }: { proj: Project; viewer: Viewer
   const open = proj.pending.filter((p) => p.status !== "done");
 
   return (
-    <div className="card pend">
-      <div className="label"><span className="sq" /> pending · up for grabs</div>
-      {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
-        {open.length === 0 ? (
-          <div className="empty">Nothing waiting. Clean board.</div>
-        ) : (
-          open.map((p) => (
-            <div className="pitem" key={p.id}>
-              <div className="ptext">{p.text}</div>
-              <div className="pmeta">
-                <span className="mono">
-                  from {p.member}{p.status === "claimed" && p.claimedBy ? ` · ${p.claimedBy} on it` : ""}
-                </span>
-                <div className="acts">
-                  {p.status === "open" ? (
-                    <button className="tiny" onClick={() => claim(p.id)}>claim</button>
-                  ) : (
-                    <span className="tiny claimed">claimed</span>
-                  )}
-                  <button className="tiny" onClick={() => run(api.done(p.id, proj.id))}>done</button>
-                </div>
-              </div>
+    <section className="pj-sec" aria-labelledby="pj-grabs">
+      <h2 id="pj-grabs" className="rz-section-h">Up for grabs</h2>
+      {err && <p className="pj-err" role="alert">{err}</p>}
+      {open.length === 0 ? (
+        <p className="pj-quiet">Nothing waiting. Clean board.</p>
+      ) : (
+        open.map((p) => (
+          <div className="pj-grab" key={p.id}>
+            <div className="pj-grab-t">
+              <span>{p.text}</span>
+              <span className="pj-quiet">from {p.member}{p.status === "claimed" && p.claimedBy ? ` · ${p.claimedBy} on it` : ""}</span>
             </div>
-          ))
-        )}
-    </div>
+            <div className="pj-grab-a">
+              {p.status === "open"
+                ? <button type="button" className="pj-btn sky" onClick={() => claim(p.id)}>Claim</button>
+                : <span className="pj-claimed">Claimed</span>}
+              <button type="button" className="pj-btn" onClick={() => run(api.done(p.id, proj.id))} aria-label={`Mark done: ${p.text}`}>Done</button>
+            </div>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
+
+const HKIND: Record<string, string> = { mention: "@mention", collision: "Overlap", blocker: "Blocker", fyi: "FYI", assignment: "Assignment" };
+const SHOW = 4;
+
+/** Every open handoff on the team, with ack/resolve, then the ones Reins closed itself (reopen). */
+function Handoffs({ proj, act }: { proj: Project; act: Act }) {
+  const [all, setAll] = useState(false);
+  const nameOf = (id: string) => proj.members.find((m) => m.member === id)?.displayName || id;
+  const open: { h: Handoff; to: Member }[] = proj.members.flatMap((m) => m.handoffs.map((h) => ({ h, to: m })));
+  const closed: { h: Handoff; to: Member }[] = proj.members.flatMap((m) => m.autoClosed.map((h) => ({ h, to: m })));
+  open.sort((a, b) => b.h.createdAt - a.h.createdAt);
+  const shown = all ? open : open.slice(0, SHOW);
+
+  return (
+    <section className="pj-sec" aria-labelledby="pj-hand">
+      <h2 id="pj-hand" className="rz-section-h">Handoffs{open.length > 0 ? ` · ${open.length} open` : ""}</h2>
+      {open.length === 0 && closed.length === 0 && <p className="pj-quiet">No open handoffs.</p>}
+      {shown.map(({ h, to }) => (
+        <div key={h.id} className={`pj-ho${h.kind === "collision" ? " ov" : h.kind === "blocker" ? " bl" : ""}`}>
+          <span className="pj-ho-k">
+            {HKIND[h.kind] || h.kind}
+            <span className="pj-ho-route">
+              {h.from ? nameOf(h.from) : "Reins"}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-label="to"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              {to.displayName}
+            </span>
+            {h.status === "ack" && <span className="pj-quiet">ack’d</span>}
+          </span>
+          <span className="pj-ho-t">{h.text}</span>
+          {!!h.conventions?.length && <span className="pj-quiet">their conventions: {h.conventions.join("; ")}</span>}
+          <span className="pj-ho-a">
+            {h.status === "open" && <button type="button" className="pj-btn" onClick={() => act(api.handoff(h.id, proj.id, "ack"))}>Ack</button>}
+            <button type="button" className="pj-btn" onClick={() => act(api.handoff(h.id, proj.id, "resolve"))}>Resolve</button>
+          </span>
+        </div>
+      ))}
+      {open.length > SHOW && (
+        <button type="button" className="pj-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? "Show fewer" : `Show all ${open.length}`}
+        </button>
+      )}
+      {closed.length > 0 && (
+        <div className="pj-closed">
+          <span className="pj-quiet">Closed on their own</span>
+          {closed.map(({ h, to }) => (
+            <div key={h.id} className="pj-closed-r" title={h.text}>
+              <span>
+                <span className="pj-mono">{HKIND[h.kind] || h.kind} · {h.from ? `${nameOf(h.from)} → ` : ""}{to.displayName}</span>
+                <span className="pj-quiet">{h.autoClosed?.reason || "no longer applies"}</span>
+              </span>
+              <button type="button" className="pj-btn" onClick={() => act(api.handoff(h.id, proj.id, "reopen"))}>Reopen</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The synthesized team status, a manual resync, and the team tools (invite, tokens) for admins. */
+function Summary({ proj, act }: { proj: Project; act: Act }) {
+  const r = proj.rollup;
+  return (
+    <section className="pj-sec" aria-labelledby="pj-sum">
+      <h2 id="pj-sum" className="rz-section-h">Team summary</h2>
+      {r ? (
+        <>
+          <p className="pj-sum-t">{r.summary}</p>
+          {r.alignment && <p className="pj-quiet"><b>Goal alignment:</b> {r.alignment}</p>}
+          <span className="pj-quiet">synthesized {timeAgo(r.updatedAt)}</span>
+        </>
+      ) : (
+        <p className="pj-quiet">No summary yet. It synthesizes after the team logs a bit of activity.</p>
+      )}
+      <div className="pj-tools">
+        <button type="button" className="rz-btn ghost small" onClick={() => act(api.refreshRollup(proj.id))}>Resync</button>
+        <Invite projectId={proj.id} />
+        <ManageTokens />
+      </div>
+    </section>
   );
 }

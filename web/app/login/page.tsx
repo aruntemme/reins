@@ -3,8 +3,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, AuthError } from "@/lib/api";
-import { TopBar } from "@/components/ui";
 import { safeNext } from "@/lib/guard";
+import { AuthShell, Field, FormError } from "../auth-shell";
 
 function LoginForm() {
   const router = useRouter();
@@ -45,67 +45,34 @@ function LoginForm() {
   const signupHref = next === "/dashboard" ? "/signup" : `/signup?next=${encodeURIComponent(next)}`;
 
   return (
-    <main className="wrap">
-      <div className="signin">
-        <div className="label" style={{ marginBottom: 18 }}><span className="sq blue" /> log in</div>
-        <h1 className="display" style={{ fontSize: 40, marginBottom: 14 }}>Welcome back.</h1>
-        <p className="sub" style={{ maxWidth: 480, marginBottom: 24 }}>
-          Log in to your account to open your workspaces. New here?{" "}
-          <Link href={signupHref} className="hl" style={{ color: "var(--ink)" }}>Create an account</Link>.
-        </p>
+    <AuthShell
+      eyebrow="Log in"
+      title="Welcome back."
+      lede={<>Log in to open your workspaces. New here? <Link href={signupHref} className="au-link">Create an account</Link>.</>}
+    >
+      {justReset && <p className="au-note" role="status"><b>Password updated.</b> Log in with your new password below.</p>}
 
-        {justReset && (
-          <div className="signin-note" style={{ marginBottom: 18 }}>
-            <b>Password updated.</b> Log in with your new password below.
-          </div>
-        )}
+      <form onSubmit={submit} className="au-form" noValidate>
+        <Field id="email" label="Email" type="email" placeholder="you@team.com" value={email} onChange={(e) => setEmail(e.target.value)} spellCheck={false} autoComplete="email" />
+        <Field id="password" label="Password" type="password" placeholder="Your password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+        {err && <FormError>{err}</FormError>}
+        <button className="rz-btn primary" disabled={busy}>{busy ? "Logging in…" : "Log in"}</button>
+      </form>
 
-        <form onSubmit={submit} className="card pad" style={{ display: "grid", gap: 14, maxWidth: 520 }}>
-          <label className="mono muted" style={{ fontSize: 11.5 }}>email</label>
-          <input
-            className="tokeninput"
-            type="email"
-            placeholder="you@team.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            spellCheck={false}
-            autoComplete="email"
-          />
-          <label className="mono muted" style={{ fontSize: 11.5 }}>password</label>
-          <input
-            className="tokeninput"
-            type="password"
-            placeholder="your password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-          {err && <div className="mono" style={{ color: "var(--blocked)" }}>{err}</div>}
-          <button className="btn solid" disabled={busy} style={{ justifyContent: "center" }}>
-            {busy ? "Logging in…" : "Log in"}
-          </button>
-        </form>
-
-        <div className="mono muted" style={{ marginTop: 14, fontSize: 11.5, maxWidth: 520 }}>
-          Forgot your password? There is no email reset yet. Ask a workspace admin to send you a
-          reset link, then open it to set a new password.
-        </div>
-        <div className="mono muted" style={{ marginTop: 10, fontSize: 11.5, maxWidth: 520 }}>
-          Have an access or agent token instead?{" "}
-          <Link href="/signin" className="hl" style={{ color: "var(--ink)" }}>Use token sign in</Link>.
-        </div>
-      </div>
-    </main>
+      <p className="au-sub">
+        Forgot your password? There is no email reset yet. Ask a workspace admin to send you a reset link, then open it to set a new password.
+      </p>
+      <p className="au-sub">
+        Have an access or agent token instead? <Link href="/signin" className="au-link">Use token sign in</Link>.
+      </p>
+    </AuthShell>
   );
 }
 
 export default function Login() {
   return (
-    <>
-      <TopBar />
-      <Suspense fallback={<main className="wrap"><div className="signin" /></main>}>
-        <LoginForm />
-      </Suspense>
-    </>
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

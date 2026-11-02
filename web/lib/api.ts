@@ -69,6 +69,9 @@ export interface MemberDetail extends Member {
   assignments: Assignment[];
   sharesTraits: boolean;
 }
+// The exact text the capture hook injects into a member's agent at session start
+// (empty when it would inject nothing). Capped server-side at ~300 tokens.
+export interface MemberBrief { text: string; version: string }
 export interface PendingItem {
   id: string;
   member: string;
@@ -239,6 +242,8 @@ export const api = {
   project: (id: string) => j<Project>(`/api/projects/${encodeURIComponent(id)}`),
   member: (id: string, member: string) =>
     j<MemberDetail>(`/api/projects/${encodeURIComponent(id)}/members/${encodeURIComponent(member)}`),
+  memberBrief: (id: string, member: string) =>
+    j<MemberBrief>(`/api/projects/${encodeURIComponent(id)}/members/${encodeURIComponent(member)}/brief`),
   setGoal: (id: string, goal: string, by?: string) =>
     j(`/api/projects/${encodeURIComponent(id)}/goal`, {
       method: "PUT",

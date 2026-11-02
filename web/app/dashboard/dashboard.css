@@ -1,0 +1,45 @@
+/* Dashboard project list. Prefix: db-. */
+.db-wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 32px; }
+.db-top { padding: clamp(36px, 6vw, 64px) 0 28px; display: flex; flex-direction: column; gap: 12px; }
+.db-top .rz-eyebrow { margin: 0; }
+.db-title { margin: 0; font-size: clamp(36px, 5.2vw, 60px); font-weight: 300; line-height: 1.02; letter-spacing: -0.04em; }
+.db-banner { margin-bottom: 24px; padding: 12px 16px; border-radius: 14px; font-size: 14px; line-height: 1.5; color: var(--amber-text); background: var(--amber-soft); border: 1px solid var(--amber-line); }
+.db-banner a { text-decoration: underline; text-underline-offset: 3px; }
+.db-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+
+.db-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; padding-bottom: 72px; }
+.db-card { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 20px 22px; min-height: 188px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+.db-card:hover { border-color: var(--sky-tint); box-shadow: 0 16px 36px -22px rgba(4,120,168,.45); transform: translateY(-2px); }
+.db-card:has(.db-card-link:focus-visible) { border-color: var(--sky); box-shadow: 0 0 0 3px rgba(5,147,198,.2); }
+.db-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.db-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono), monospace; font-size: 12px; color: var(--ink-3); }
+.db-state { flex: none; display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
+.db-state.on { color: var(--sky-text); }
+.db-name { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
+.db-card-link { color: var(--ink); outline: none; }
+.db-card-link::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+.db-goal { margin: 0; flex: 1; font-size: 14.5px; line-height: 1.5; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.db-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+.db-connect { position: relative; z-index: 1; display: inline-flex; align-items: center; min-height: 44px; margin: -8px -6px; padding: 0 6px; color: var(--sky-text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+.db-connect:hover { color: #035E84; }
+.db-connect:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; border-radius: 6px; }
+
+.db-skel { min-height: 188px; background: linear-gradient(100deg, var(--line) 30%, var(--sky-soft) 50%, var(--line) 70%); background-size: 220% 100%; animation: db-shimmer 1.6s ease-in-out infinite; border-color: transparent; }
+@keyframes db-shimmer { from { background-position: 120% 0; } to { background-position: -20% 0; } }
+
+.db-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 72px; padding: 28px; border: 1px dashed var(--line-2); border-radius: var(--radius); background: var(--panel); }
+.db-empty p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink-3); }
+.db-empty b { color: var(--ink); font-weight: 500; }
+.db-empty .rz-btn { margin-top: 10px; }
+
+.db-footer { border-top: 1px solid var(--line); padding: 28px 0; font-size: 13px; color: var(--ink-3); }
+.db-footer a { text-decoration: underline; text-underline-offset: 3px; }
+
+@media (max-width: 640px) {
+  .db-wrap { padding: 0 20px; }
+  .db-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-card, .db-card:hover { transition: none; transform: none; }
+  .db-skel { animation: none; }
+}
