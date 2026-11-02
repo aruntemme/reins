@@ -93,7 +93,7 @@ test("codex: fresh install, idempotent re-run, foreign keys preserved, uninstall
   assert.ok(after.indexOf("notify = ") < after.indexOf("[mcp_servers.docs]"), "top-level, before the first table");
   installAgent("codex", o);
   assert.equal(read(path), after, "re-running doesn't duplicate");
-  assert.equal(agentStatus("codex", o).length, 1);
+  assert.deepEqual(agentStatus("codex", o).map((r) => r.note), ["notify", "Reins tools (MCP)"]);
   assert.deepEqual(uninstallAgent("codex", o), [path]);
   assert.equal(read(path), before);
   assert.deepEqual(agentStatus("codex", o), []);
@@ -107,9 +107,12 @@ test("codex: a foreign notify is left untouched and reported", () => {
   const r = installAgent("codex", o);
   assert.match(r.conflict, /terminal-notifier/);
   assert.match(r.conflict, /adapters\/codex\.mjs/, "says exactly what to change it to");
-  assert.equal(read(path), 'notify = ["terminal-notifier"]\n');
-  assert.deepEqual(uninstallAgent("codex", o), []);
+  // The notify slot is theirs; the Reins tools are a separate table and still get wired.
+  assert.ok(read(path).startsWith('notify = ["terminal-notifier"]\n'));
+  assert.equal(r.tools, true);
   assert.equal(agentStatus("codex", o)[0].foreign, true);
+  assert.deepEqual(uninstallAgent("codex", o), [path]);
+  assert.equal(read(path), 'notify = ["terminal-notifier"]\n');
 });
 
 test("codex honours CODEX_HOME", () => {
@@ -136,14 +139,16 @@ test("opencode: writes a global plugin, idempotent, never overwrites a foreign r
   const hooks = await mod.ReinsPlugin({ directory: home, worktree: home });
   assert.equal(typeof hooks.event, "function");
   await hooks.event({ event: { type: "server.connected", properties: {} } }); // ignored, no throw
-  assert.deepEqual(uninstallAgent("opencode", o), [path]);
+  assert.deepEqual(uninstallAgent("opencode", o), [path, join(home, ".config", "opencode", "opencode.json")]);
   assert.ok(!existsSync(path));
 
   writeFileSync(path, "export const Mine = async () => ({})\n");
   const r = installAgent("opencode", o);
   assert.match(r.conflict, /isn't ours/);
   assert.equal(read(path), "export const Mine = async () => ({})\n");
-  assert.deepEqual(uninstallAgent("opencode", o), []);
+  assert.equal(r.tools, true, "the plugin slot is theirs, the Reins tools are still wired");
+  // Only the tools entry is ours to remove; their plugin file stays.
+  assert.deepEqual(uninstallAgent("opencode", o), [join(home, ".config", "opencode", "opencode.json")]);
   assert.ok(existsSync(path));
 });
 
@@ -228,7 +233,7 @@ test("claude-code: repo scope writes settings.local.json; global writes ~/.claud
     const cmd = s.hooks.Stop[0].hooks[0].command;
     assert.match(cmd, /^REINS_SOURCE=claude-code node "[^"]+\/\.reins\/reins-hook\.mjs"$/);
   }
-  assert.equal(agentStatus("claude-code", o).length, 2);
+  assert.equal(agentStatus("claude-code", o).length, 3, "two hook files + the Reins tools in ~/.claude.json");
   uninstallAgent("claude-code", o);
   assert.deepEqual(JSON.parse(read(join(home, ".claude", "settings.json"))).hooks, {});
   assert.deepEqual(agentStatus("claude-code", o), []);

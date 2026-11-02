@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { themeScript } from "@/lib/theme";
 import "./globals.css";
 
 // One family carries body and display: weight does the hierarchy (300 for big
@@ -22,7 +23,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geist.variable} ${mono.variable}`}>
+    // suppressHydrationWarning: the inline script below sets data-theme on <html>
+    // before React hydrates, so the server markup and the DOM differ on purpose.
+    <html lang="en" className={`${geist.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* Applies the stored theme (lib/theme.ts) before first paint: no flash. */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

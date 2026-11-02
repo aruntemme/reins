@@ -34,13 +34,13 @@
 .st-label { font-size: 13px; font-weight: 500; color: var(--ink-2); }
 .st-input, .st-select {
   min-height: 44px; width: 100%; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 12px;
-  background: var(--white); color: var(--ink); font: inherit; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s;
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s;
 }
 .st-input.mono { font-family: var(--font-mono), monospace; font-size: 13px; }
 .st-select { width: auto; max-width: 100%; cursor: pointer; padding-right: 10px; }
 .st-select:disabled { opacity: .55; cursor: default; }
 .st-input:hover, .st-select:hover { border-color: var(--ink-3); }
-.st-input:focus-visible, .st-select:focus-visible { border-color: var(--sky); box-shadow: 0 0 0 3px var(--sky-tint); }
+.st-input:focus-visible, .st-select:focus-visible { border-color: var(--sky); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky) 22%, transparent); }
 .st-inline { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .st-inline .st-input { flex: 1 1 220px; max-width: 420px; }
 .st-saved { font-family: var(--font-mono), monospace; font-size: 12px; color: var(--sky-text); }
@@ -51,7 +51,7 @@
 .st-toggle input:disabled { cursor: default; }
 .st-track { width: 40px; height: 24px; border-radius: 999px; background: var(--line-2); position: relative; flex: none; transition: background .15s; }
 .st-knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--white); box-shadow: 0 1px 3px rgba(11,37,64,.3); transition: left .15s; }
-.st-toggle input:checked + .st-track { background: var(--sky-text); }
+.st-toggle input:checked + .st-track { background: var(--sky); }
 .st-toggle input:checked + .st-track .st-knob { left: 19px; }
 .st-toggle input:focus-visible + .st-track { outline: 2px solid var(--sky); outline-offset: 3px; }
 .st-toggle input:disabled ~ * { opacity: .6; }
@@ -59,7 +59,7 @@
 /* buttons inside settings keep a 44px target */
 .st-page .rz-btn.small { min-height: 44px; }
 .st-page .rz-btn.warn { background: var(--amber-soft); border-color: var(--amber-line); color: var(--amber-text); }
-.st-page .rz-btn.warn:hover { background: #fff3dc; }
+.st-page .rz-btn.warn:hover { border-color: var(--amber); }
 .st-page .rz-btn:disabled[title] { cursor: not-allowed; }
 .st-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .st-working { font-family: var(--font-mono), monospace; font-size: 12px; color: var(--ink-3); padding: 0 6px; }

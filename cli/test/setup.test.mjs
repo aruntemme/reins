@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, statSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync, realpathSync } from "node:fs";
 import { tmpdir, hostname } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,6 +123,18 @@ test("headless setup: device login → every agent's real config → config.json
       assert.ok(!readFileSync(f, "utf8").includes(TOKEN), `${f} holds no token`);
     }
 
+    // The Reins tools (MCP) are registered where each agent reads them; no token, and Aider is told it has none.
+    for (const label of ["Claude Code", "Codex CLI", "OpenCode"]) assert.match(r.out, new RegExp(`${label}: Reins tools connected`));
+    assert.match(r.out, /Aider has no MCP/);
+    assert.match(r.out, /Reins tools connected in Claude Code, Codex CLI, OpenCode/);
+    assert.match(r.out, /Restart your agents to load the Reins tools/);
+    const reinsMcp = `${home}/.reins/reins-mcp.mjs`;
+    assert.deepEqual(json(join(home, ".claude.json")).mcpServers.reins.args, [reinsMcp]);
+    assert.match(readFileSync(join(home, ".codex", "config.toml"), "utf8"), /\[mcp_servers\.reins\] # added by reins-hook/);
+    assert.deepEqual(json(join(home, ".config", "opencode", "opencode.json")).mcp.reins.command, ["node", reinsMcp]);
+    assert.ok(!existsSync(join(repo, ".mcp.json")), "no committed project file");
+    for (const f of [join(home, ".claude.json"), join(home, ".config", "opencode", "opencode.json")]) assert.ok(!readFileSync(f, "utf8").includes(TOKEN), `${f} holds no token`);
+
     const hellos = srv.calls.filter((c) => c.path === "/api/hook/hello");
     assert.deepEqual(hellos.map((h) => h.body.source).sort(), ["aider", "claude-code", "codex", "opencode"]);
     for (const h of hellos) {
@@ -146,6 +158,13 @@ test("headless setup: device login → every agent's real config → config.json
     assert.match(st.out, /project demo/);
     assert.match(st.out, /✓ Codex CLI/);
     assert.match(st.out, /✓ Claude Code/);
+    assert.match(st.out, /Reins tools \(MCP\)/);
+    // uninstall takes the tools out again, leaving the other settings alone.
+    const un = await cli(["uninstall"], { cwd: repo, home });
+    assert.equal(un.code, 0, un.out);
+    assert.equal(json(join(home, ".claude.json")).mcpServers, undefined);
+    assert.ok(!readFileSync(join(home, ".codex", "config.toml"), "utf8").includes("mcp_servers"));
+    assert.ok(!existsSync(join(home, ".config", "opencode", "opencode.json")));
   } finally {
     srv.close();
   }
@@ -224,4 +243,37 @@ test("headless setup: an unreachable server fails fast with a friendly error", a
   const r = await cli(["--url", "http://127.0.0.1:9", "--yes", "--no-open"], { cwd: gitRepo(), home });
   assert.equal(r.code, 1);
   assert.match(r.out, /http:\/\/127\.0\.0\.1:9 — couldn't reach it/);
+});
+
+test("headless setup inside a git worktree keys the config by the main repo, says so, and every worktree maps to the project", async () => {
+  const srv = await contractServer();
+  const home = mkdtempSync(join(tmpdir(), "reins-wiz-home-"));
+  const repo = gitRepo();
+  const g = (...a) => execFileSync("git", a, { cwd: repo, stdio: "ignore" });
+  writeFileSync(join(repo, "a.txt"), "1\n");
+  g("add", ".");
+  g("commit", "-q", "-m", "init");
+  const wt = join(realpathSync(mkdtempSync(join(tmpdir(), "reins-wiz-wt-"))), "co");
+  g("worktree", "add", "-q", "-b", "feature/y", wt);
+  try {
+    const r = await cli(["--url", srv.url, "--project", "demo", "--agents", "codex", "--yes", "--no-open"], { cwd: wt, home });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /git worktree of .*Reins maps the main repo, so every worktree reports to the same project/);
+    const cfg = json(join(home, ".reins", "config.json"));
+    assert.deepEqual(Object.keys(cfg.repos), [repo], "keyed by the main repo, not the worktree");
+    const hello = srv.calls.find((c) => c.path === "/api/hook/hello");
+    assert.deepEqual([hello.body.worktree, hello.body.repo_root], [wt, repo]);
+
+    // status from the worktree and from the main checkout both land on the project.
+    for (const cwd of [wt, repo]) {
+      const st = await cli(["status"], { cwd, home });
+      assert.match(st.out, /project demo/, `status in ${cwd}`);
+      assert.doesNotMatch(st.out, /not set up/);
+    }
+    // uninstall from the worktree forgets the main repo's mapping.
+    await cli(["uninstall"], { cwd: wt, home });
+    assert.deepEqual(json(join(home, ".reins", "config.json")).repos, {});
+  } finally {
+    srv.close();
+  }
 });

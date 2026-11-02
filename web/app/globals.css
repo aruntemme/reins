@@ -1,46 +1,107 @@
 /* Sky Blue × Hot Pink. Colour is rationed by meaning:
-   sky = live / primary, pink = two agents on one file (heads-up) and nothing else,
-   amber = blocked, grey = away. Text colours below all pass 4.5:1 on --panel. */
-:root {
-  --sky: #0593C6;             /* brand field, live dots, fills (not small text) */
-  --sky-text: #0478A8;        /* blue text and primary buttons on white */
-  --sky-soft: #EAF5FB;
-  --sky-tint: #BFE4F5;
-  --sky-hi: #5CC8F0;          /* blue on dark */
-  --pink: #D83995;            /* dots, borders, glows only */
-  --pink-text: #B8237C;
-  --pink-deep: #C42A86;       /* filled pink surfaces with white text */
-  --pink-soft: #FDEAF4;
-  --pink-line: #F4BCDB;
-  --pink-hi: #F684C4;         /* pink on dark */
-  --amber: #E2A33B;
-  --amber-text: #8A5A0B;
-  --amber-soft: #FFFBF3;
-  --amber-line: #F1D7A6;
-  --white: #FCFFFF;
-  --navy: #0B2540;            /* ink, terminals, code blocks */
-  --deep: #0A2C52;
+   sky = live / primary, pink = needs a person (a question, a decision, a same-file overlap),
+   amber = blocked, grey = away.
 
-  --bg: #F6FAFC;
-  --panel: #FCFFFF;
-  --ink: #0B2540;
-  --ink-2: #3C5468;
-  --ink-3: #566E81;
-  --line: #E3EEF4;
-  --line-2: #C9DDE8;
-  --accent: #0478A8;          /* primary action */
-  --accent-ink: #FCFFFF;
-  --active: #0593C6;
-  --blocked: #E2A33B;
-  --idle: #A9B8C3;
-  --blue: #0478A8;
+   Themes. Every themed token is one light-dark(LIGHT, DARK) pair, resolved by the
+   root's color-scheme, so each palette is written exactly once:
+     - no data-theme / data-theme="system": follows the OS (color-scheme: light dark)
+     - data-theme="light" | "dark": forced (set before paint by the script in layout.tsx)
+     - the landing page (.lp) is always light.
+   Light = the "Calm" boards, dark = "Dusk". Text pairs meet WCAG AA (4.5:1) in both
+   themes on --bg, --surface and --surface-2 (lowest: --ink-3 4.9 light / 5.2 dark,
+   --sky-text 4.5 light / 6.5 dark). For a one-off themed value in page CSS use
+   light-dark() too, never a [data-theme] selector (it would miss "system"). */
+:root {
+  color-scheme: light dark;
+
+  /* page + surfaces */
+  --bg: light-dark(#F7FAFC, #0C2135);
+  --bg-wash-1: light-dark(#E4F2FA, #10304D);   /* header wash: wash-1 → wash-2 → --bg */
+  --bg-wash-2: light-dark(#EEF7FC, #0E2840);
+  --surface: light-dark(#FCFFFF, #12304B);     /* cards */
+  --surface-2: light-dark(#F1F6F9, #183650);   /* subtle fill: chips, code, hover */
+  --line: light-dark(#E3EEF4, #1E3E5C);
+  --line-2: light-dark(#C9DDE8, #2E5172);
+
+  /* text */
+  --ink: light-dark(#0B2540, #E8F3FA);
+  --ink-2: light-dark(#3C5468, #A9C3D6);
+  --ink-3: light-dark(#566E81, #8FAAC0);
+
+  /* sky: live / primary */
+  --sky: #0593C6;                                 /* fills, dots, focus rings (not small text) */
+  --sky-text: light-dark(#0478A8, #5CC8F0);       /* links, accent text */
+  --sky-soft: light-dark(#EEF7FC, #163F5E);       /* hover / selected fill under --sky-text */
+  --sky-tint: light-dark(#D4EDF9, #1D5E84);       /* feature block fill */
+  --sky-tint-line: light-dark(#A9D9EF, #2F7BA5);
+
+  /* pink: needs a person */
+  --pink: #D83995;                                /* dots, borders */
+  --pink-text: light-dark(#B8237C, #F684C4);
+  --pink-fill: #C42A86;                           /* filled button, white text */
+  --pink-soft: light-dark(#FDEAF4, #4A1E3E);
+  --pink-line: light-dark(#F4BCDB, #7A3366);
+
+  /* amber: blocked */
+  --amber: #E2A33B;
+  --amber-text: light-dark(#8A5A0B, #F1D7A6);
+  --amber-soft: light-dark(#FFF4DF, #3D3118);
+  --amber-line: light-dark(#F1D7A6, #6B5427);
+
+  /* kinds of work */
+  --bug-fill: light-dark(#E5EBF0, #22394F);
+  --bug-line: light-dark(#BCCAD5, #3A5874);
+  --chore-hatch-1: light-dark(#EDF2F5, #1A3550);
+  --chore-hatch-2: light-dark(#F7FAFC, #12293F);
+
+  /* navy tiles (terminals, agent cards) and the strong button */
+  --terminal-bg: light-dark(#0B2540, #081C2F);
+  --terminal-ink: light-dark(#FCFFFF, #E8F3FA);
+  --terminal-dim: light-dark(#BFE4F5, #A9C3D6);
+  --btn-strong-bg: light-dark(#0B2540, #E8F3FA);
+  --btn-strong-ink: light-dark(#FCFFFF, #0B2540);
+
+  /* texture + depth */
+  --flute: repeating-linear-gradient(90deg,
+    light-dark(rgba(4,120,168,0.035), rgba(92,200,240,0.05)) 0px, rgba(4,120,168,0) 5px,
+    light-dark(rgba(4,120,168,0.02), rgba(92,200,240,0.03)) 11.5px,
+    light-dark(rgba(4,120,168,0.035), rgba(92,200,240,0.05)) 14px);
+  --shadow-soft: 0 12px 28px -18px light-dark(rgba(11,37,64,0.35), rgba(0,0,0,0.6));
+  --shadow-pop: 0 1px 0 light-dark(rgba(11,37,64,0.03), rgba(0,0,0,0.2)), 0 24px 56px -22px light-dark(rgba(11,37,64,0.45), rgba(0,0,0,0.7));
+  --shadow: 0 1px 0 light-dark(rgba(11,37,64,0.03), rgba(0,0,0,0.2)), 0 12px 32px -18px light-dark(rgba(11,37,64,0.22), rgba(0,0,0,0.5));
+  --scrim: light-dark(rgba(11,37,64,0.4), rgba(3,12,22,0.66));   /* modal backdrop */
+
+  /* brand field (.rz-field): bright sky in light, a muted sky block at dusk.
+     Text on it is always --white; its ribs are --flute-field. */
+  --sky-field: light-dark(#0478A8, #17537A); /* #0478A8 keeps white copy at 4.9:1; the landing keeps #0593C6 below */
+  --flute-field: repeating-linear-gradient(90deg, rgba(255,255,255,0.20) 0px, rgba(255,255,255,0.03) 4.9px, rgba(0,30,60,0.12) 11.5px, rgba(255,255,255,0.20) 14px);
+
+  /* fixed colours: the same in both themes (text on the sky field, on-dark accents) */
+  --white: #FCFFFF;
+  --navy: #0B2540;
+  --deep: #0A2C52;
+  --sky-hi: #5CC8F0;          /* blue on a navy tile */
+  --pink-hi: #F684C4;         /* pink on a navy tile */
+
+  /* older names, kept as aliases so existing components follow the theme */
+  --panel: var(--surface);
+  --pink-deep: var(--pink-fill);
+  --accent: var(--sky-text);                       /* primary action fill */
+  --accent-ink: light-dark(#FCFFFF, #0B2540);      /* text on --accent */
+  --active: var(--sky);
+  --blocked: var(--amber);
+  --idle: light-dark(#A9B8C3, #5C7891);
+  --blue: var(--sky-text);
+
   --radius: 20px;
-  --shadow: 0 1px 0 rgba(11,37,64,0.03), 0 12px 32px -18px rgba(11,37,64,0.22);
   --maxw: 1240px;
   --font-display: var(--font-body);
-  /* Fluted glass ribs: lay over a --sky field (see .rz-field). */
-  --flute: repeating-linear-gradient(90deg, rgba(255,255,255,0.20) 0px, rgba(255,255,255,0.03) 4.9px, rgba(0,30,60,0.12) 11.5px, rgba(255,255,255,0.20) 14px);
 }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+/* The landing page has its own fixed design and always renders light. The landing
+   CSS lays --flute over its sky fields, so it gets the field ribs back here. */
+:root:has(.lp) { color-scheme: light; --flute: var(--flute-field); --sky-field: #0593C6; }
 
 * { box-sizing: border-box; }
 html, body { padding: 0; margin: 0; }
@@ -95,7 +156,7 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); font-weight: 400; letter-spaci
 .topbar {
   position: sticky; top: 0; z-index: 20;
   backdrop-filter: blur(8px);
-  background: rgba(252,255,255,0.82);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
   border-bottom: 1px solid var(--line);
 }
 .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
@@ -141,7 +202,7 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); font-weight: 400; letter-spaci
 
 .av {
   width: 28px; height: 28px; border-radius: 999px; margin-left: -7px;
-  border: 2px solid var(--panel); background: var(--ink); color: #fff;
+  border: 2px solid var(--panel); background: var(--navy); color: var(--white);
   display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; font-weight: 500;
 }
 .av:first-child { margin-left: 0; }
@@ -156,7 +217,7 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); font-weight: 400; letter-spaci
 
 .chip {
   font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2);
-  background: #f6f3ec; border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px;
   /* Long unbroken tokens (e.g. file paths) must stay inside the card, not spill
      past its edge: allow the chip to shrink and break the text where needed. */
   max-width: 100%; min-width: 0; overflow-wrap: anywhere;
@@ -178,7 +239,7 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); font-weight: 400; letter-spaci
 .pitem .acts { display: flex; gap: 6px; }
 .tiny { font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); cursor: pointer; color: var(--ink-2); }
 .tiny:hover { border-color: var(--ink-3); color: var(--ink); }
-.tiny.claimed { background: #eef4ff; border-color: #d3e0fb; color: var(--blue); }
+.tiny.claimed { background: var(--sky-soft); border-color: var(--sky-tint-line); color: var(--sky-text); }
 
 /* member card link + stale state */
 
@@ -188,16 +249,16 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); font-weight: 400; letter-spaci
 .handoff {
   border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 10px 12px; display: grid; gap: 7px;
 }
-.handoff.collision { border-color: #f0c9c0; background: #fbeeea; }
+.handoff.collision { border-color: var(--pink-line); background: var(--pink-soft); }
 .handoff.blocker { border-color: var(--amber-line); background: var(--amber-soft); }
-.handoff.mention { border-color: #d3e0fb; background: #eef4ff; }
+.handoff.mention { border-color: var(--sky-tint-line); background: var(--sky-soft); }
 
 /* ── member detail (creed-style doc) ─────────────────── */
 
 /* Legal / content pages */
 
-.tiny.danger { color: var(--blocked); border-color: #f0c9c0; }
-.tiny.danger:hover { background: #fbeeea; border-color: var(--blocked); }
+.tiny.danger { color: var(--amber-text); border-color: var(--amber-line); }
+.tiny.danger:hover { background: var(--amber-soft); border-color: var(--amber); }
 
 /* Taste profile ("grain") */
 .grain { display: grid; gap: 16px; }
@@ -211,7 +272,7 @@ h2.display { font-size: clamp(26px, 3.4vw, 38px); font-weight: 400; letter-spaci
   border: 1px solid var(--line-2); border-radius: 11px; background: var(--bg);
   color: var(--ink); outline: none; transition: .15s;
 }
-.tokeninput:focus { border-color: var(--ink-3); background: #fff; }
+.tokeninput:focus { border-color: var(--ink-3); background: var(--surface); }
 
 footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--ink-3); font-size: 13px; }
 
@@ -245,20 +306,20 @@ footer.foot { border-top: 1px solid var(--line); padding: 28px 0; color: var(--i
 .signin { max-width: 720px; margin: 0 auto; padding-top: 56px; }
 
 pre.code {
-  font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); background: #f6f3ec;
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); background: var(--surface-2);
   border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; white-space: pre-wrap; line-height: 1.5; margin: 0;
 }
 
 /* ── invite teammate modal ──────────────────────────────────── */
 .invite-backdrop {
-  position: fixed; inset: 0; z-index: 60; background: rgba(27,26,23,0.34);
+  position: fixed; inset: 0; z-index: 60; background: var(--scrim);
   backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center;
   padding: 24px; overflow-y: auto;
 }
 .invite-modal {
   width: 100%; max-width: 560px; background: var(--panel);
   max-height: calc(100vh - 48px); overflow-y: auto;
-  box-shadow: 0 24px 60px -24px rgba(27,26,23,0.5);
+  box-shadow: var(--shadow-pop);
 }
 .invite-l { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
 .invite-check {
@@ -273,7 +334,7 @@ pre.code {
 
 /* text inputs in the goals panel match the dashboard's .tokeninput look + focus */
 
-.tiny.solid { background: var(--ink); color: #fff; border-color: var(--ink); }
+.tiny.solid { background: var(--btn-strong-bg); color: var(--btn-strong-ink); border-color: var(--btn-strong-bg); }
 
 .goal-items { display: grid; gap: 2px; margin: 8px 0 4px; }
 
@@ -292,8 +353,8 @@ pre.code {
 /* ── lead actions, real edits, git, auto-closed handoffs ─────────── */
 .lead { padding: 16px 18px; display: grid; gap: 11px; }
 
-.chip.edited { background: #eef4ff; border-color: #d3e0fb; color: #2b55b5; }
-.chip.owns { background: #eef7f1; border-color: #cfe5d7; color: #2f7a4c; }
+.chip.edited { background: var(--sky-soft); border-color: var(--sky-tint-line); color: var(--sky-text); }
+.chip.owns { background: var(--surface-2); border-color: var(--line-2); color: var(--ink-2); }
 
 .autoclosed { display: grid; gap: 6px; }
 .acrow {
@@ -306,19 +367,19 @@ pre.code {
 .toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--ink); }
 .toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .toggle-track { width: 36px; height: 20px; border-radius: 999px; background: var(--line-2); position: relative; transition: .15s; flex: none; }
-.toggle-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: .15s; }
+.toggle-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--white); box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: .15s; }
 .toggle input:checked + .toggle-track { background: var(--active); }
 .toggle input:checked + .toggle-track .toggle-knob { left: 18px; }
-.toggle input:focus-visible + .toggle-track { outline: 2px solid var(--blue); outline-offset: 2px; }
+.toggle input:focus-visible + .toggle-track { outline: 2px solid var(--sky); outline-offset: 2px; }
 
 /* ── shared primitives (Sky × Pink) ──────────────────────
    Page-specific styles live in each page's own CSS file; these are the
    pieces every page shares. Prefix: rz-. */
-.rz-field { position: relative; overflow: hidden; background: var(--sky); color: var(--white); isolation: isolate; }
+.rz-field { position: relative; overflow: hidden; background: var(--sky-field); color: var(--white); isolation: isolate; }
 .rz-field > .rz-blob { position: absolute; z-index: -2; border-radius: 50%; pointer-events: none;
   background: radial-gradient(closest-side, var(--pink) 0%, rgba(216,57,149,.5) 45%, rgba(216,57,149,0) 76%); filter: blur(46px);
   animation: rz-drift 14s ease-in-out infinite alternate; }
-.rz-field::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: var(--flute); }
+.rz-field::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: var(--flute-field); }
 @keyframes rz-drift { 0% { transform: translateX(-3%) skewX(-6deg); } 100% { transform: translateX(4%) skewX(-10deg); } }
 
 .rz-glass { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.32);
@@ -332,8 +393,8 @@ pre.code {
   text-decoration: none; transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
 .rz-btn:hover { transform: translateY(-1px); }
 .rz-btn:focus-visible, .rz-chip:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
-.rz-btn.primary { background: var(--sky-text); color: var(--white); }
-.rz-btn.primary:hover { background: #036a95; box-shadow: 0 10px 26px rgba(3,60,90,.2); }
+.rz-btn.primary { background: var(--accent); color: var(--accent-ink); }
+.rz-btn.primary:hover { background: color-mix(in srgb, var(--accent) 86%, var(--ink)); box-shadow: var(--shadow-soft); }
 .rz-btn.light { background: var(--white); color: var(--navy); }
 .rz-btn.light:hover { box-shadow: 0 10px 26px rgba(3,60,90,.25); }
 .rz-btn.ghost { background: var(--panel); border-color: var(--line-2); color: var(--ink); }
@@ -361,14 +422,3 @@ pre.code {
   .rz-btn, .rz-btn:hover { transition: none; transform: none; }
 }
 
-/* phone bottom bar for a project's Lanes / Brief / Lead pages (components/project-tabs.tsx) */
-.rz-tabs, .rz-tabs-space { display: none; }
-@media (max-width: 760px) {
-  .rz-tabs-space { display: block; height: calc(76px + env(safe-area-inset-bottom)); }
-  .rz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-    padding: 6px 8px calc(10px + env(safe-area-inset-bottom)); background: rgba(252,255,255,.95); border-top: 1px solid var(--line);
-    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
-  .rz-tabs a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; font-size: 11px; color: var(--ink-3); }
-  .rz-tabs a[aria-current="page"] { color: var(--sky-text); font-weight: 500; }
-  .rz-tabs a:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; border-radius: 10px; }
-}

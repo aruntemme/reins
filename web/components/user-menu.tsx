@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, type Me, type WorkspaceMembership } from "@/lib/api";
 import { initials } from "@/components/ui";
+import { ThemeToggle } from "@/components/theme-toggle";
 import "./user-menu.css";
 
 /**
@@ -117,6 +118,11 @@ export function UserMenu() {
               })}
             </div>
           )}
+
+          <div className="um-group">
+            <div className="um-eyebrow" aria-hidden="true">theme</div>
+            <ThemeToggle />
+          </div>
 
           <div className="um-group">
             <Link href="/settings" role="menuitem" className="um-item" onClick={() => setOpen(false)}>

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { ingest, accepting } from "../pipeline/index.js";
 import { runRollup } from "../pipeline/rollup.js";
 import { projectSnapshot, projectsList, memberDetail } from "../state.js";
+import { captureFrom, recordSession, firstLine, isNoisePrompt } from "../sessions.js";
+import { touchMember } from "../db.js";
 import { setGoal, setPendingStatus, claimPending, getProject, getMember, setHandoffStatus, resolveHandoffs, listPending, ensureProject, projectWorkspace } from "../db.js";
 import {
   buildGoalsView, createGoal, getGoal, updateGoal, deleteGoal,
@@ -72,6 +74,27 @@ api.post("/ingest", requireIngest, asyncHandler(async (req, res) => {
   }
   if (overLimit(ingestHits, ws, INGEST_MAX_PER_MIN, 60_000)) {
     return res.status(429).json({ error: "ingest rate limit reached for this workspace, slow down" });
+  }
+  const { project, member, displayName, kind, text } = parsed.data;
+  ensureProject(project, undefined, ws);
+  ensureMember(project, member, displayName);
+  touchMember(project, member);
+  // Every event moves the agent's session: a prompt or progress → working, a turn
+  // summary (Stop) → idle or waiting, SessionEnd → ended. A subagent finishing is
+  // not the agent stopping. Placeholder texts ("Notification event") carry no line.
+  const cap = captureFrom(req.body);
+  const placeholder = /^\w+ event$/.test(text.trim());
+  const transition =
+    cap.event === "SessionEnd" ? "ended"
+    : kind === "summary" ? (cap.event === "SubagentStop" ? "seen" : "stop")
+    : placeholder ? "seen" : "working";
+  const lastLine = kind !== "intent" && !placeholder && cap.event !== "SubagentStop" ? firstLine(text) : undefined;
+  recordSession(project, member, cap, transition, { lastLine });
+  // System-injected or intent-free prompts ("ok", "continue", <system-reminder>…)
+  // are not pipeline events: the session was touched above, nothing is stored.
+  if (kind === "intent" && isNoisePrompt(text)) {
+    bus.emitChange({ type: "member.updated", project, member });
+    return res.json({ ok: true, eventId: null, ignored: "noise" });
   }
   const { eventId } = await ingest({ ...parsed.data, workspaceId: ws });
   res.json({ ok: true, eventId });
@@ -390,7 +413,7 @@ function accessProposalGoal(req: Request, res: Response, proposalId: string): { 
   return { goal };
 }
 
-api.post("/goal-proposals/:id/accept", requireViewer, (req, res) => {
+api.post(["/goal-proposals/:id/accept", "/proposals/:id/accept"], requireViewer, (req, res) => {
   const ctx = accessProposalGoal(req, res, req.params.id!);
   if (!ctx) return;
   acceptGoalProposal(req.params.id!);
@@ -398,7 +421,7 @@ api.post("/goal-proposals/:id/accept", requireViewer, (req, res) => {
   res.json({ ok: true });
 });
 
-api.post("/goal-proposals/:id/dismiss", requireViewer, (req, res) => {
+api.post(["/goal-proposals/:id/dismiss", "/proposals/:id/dismiss"], requireViewer, (req, res) => {
   const ctx = accessProposalGoal(req, res, req.params.id!);
   if (!ctx) return;
   dismissGoalProposal(req.params.id!);

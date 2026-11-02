@@ -11,7 +11,9 @@ export type ReinsEvent =
   | { type: "profile.changed"; project: string; member: string }
   | { type: "ingest"; project: string; member: string }
   | { type: "touch"; project: string; member: string }
-  | { type: "lead.changed"; project: string };
+  | { type: "lead.changed"; project: string }
+  // Owned items, steps, releases, posts or an agent session's state/item changed.
+  | { type: "work.changed"; project: string };
 
 class Bus extends EventEmitter {
   emitChange(e: ReinsEvent) {

@@ -73,21 +73,28 @@ Flags: `--agent`, `--url`, `--project`, `--token` (alias `--key`), `--me`, `--gl
 Explicit env vars (`REINS_URL`, `REINS_KEY`, `REINS_PROJECT`, `REINS_MEMBER`) always win over
 the config file, so installs that embedded them keep working.
 
-## Read the board back (MCP)
+## Reins tools for your agent (MCP)
 
-The hook *sends* activity to Reins. To let your agent *read* the shared board (and
-act on it), add the bundled MCP server. It talks to Reins over the network with
-your access token, so any teammate can use it (no repo clone, no local database):
+Setup also registers the Reins MCP server, so your agent can see the board and act on it:
+what it is on, its open steps, questions waiting for it, what teammates are doing. It can add
+an item, tick a step, set a status, ask a teammate a question (only when the answer lives in
+their work), answer one, hand an item over, and post a short note or finding.
 
-```bash
-claude mcp add reins -- npx reins-hook mcp --url https://your-reins --token rk_access_…
-# add --ingest-token rk_ingest_… to also let the agent post notes
-```
+| Agent | Where it is registered |
+|-------|------------------------|
+| Claude Code | `mcpServers.reins` in `~/.claude.json` (user scope: no project file is created or committed) |
+| Codex CLI | `[mcp_servers.reins]` in `~/.codex/config.toml` |
+| OpenCode | `mcp.reins` in `~/.config/opencode/opencode.json` |
+| Aider | none (Aider has no MCP; capture still works) |
 
-Tools your agent gets: `reins_context`, `reins_member`, `reins_pending`,
-`reins_handoffs`, `reins_goals`, `reins_profile`, `reins_claim` / `reins_resolve`,
-`reins_handoff_ack`, `reins_goal_add` / `reins_goal_check`, and `reins_note`.
+The command is `node ~/.reins/reins-mcp.mjs` and carries no token: it reads
+`~/.reins/config.json` for the folder the agent runs in (worktrees included), like the hook.
+`npx reins-hook uninstall` removes it. Tools: `reins_context`, `reins_my_items`, `reins_item_add`,
+`reins_step_done`, `reins_step_add`, `reins_item_status`, `reins_ask`, `reins_answer`,
+`reins_handover`, `reins_note`, `reins_attach`.
 
-Any MCP client works; the command is `npx reins-hook mcp --url <url> --token <access-token>`.
+Any other MCP client can run `npx reins-hook mcp` (flags `--url`, `--token`, `--project`,
+`--member` override what is saved). Older setups keep working: `--ingest-token`, or an
+`rk_access_…` `--token`, selects the previous tool set.
 
 Dependency-free, only Node built-ins (Node ≥ 22). MIT.

@@ -248,6 +248,155 @@ export interface CliLogin {
 }
 export type CliApproveInput = { project: string } | { newProject: { name: string } };
 
+// ── Calm workspace: owned items, releases, agent sessions, posts ──
+export type ItemKind = "feature" | "bug" | "try" | "chore";
+export type ItemStatus = "open" | "doing" | "waiting" | "blocked" | "paused" | "done";
+export type Tone = "calm" | "needs" | "block" | "good";
+export type SessionState = "working" | "waiting" | "blocked" | "idle" | "ended";
+export type PostKind = "handover" | "update" | "question" | "answer" | "note" | "review" | "decision" | "finding";
+export type PostStatus = "open" | "answered" | "approved" | "changed" | "dismissed";
+export type ClipKind = ItemKind | "wait" | "block" | "none";
+export type WorkPart = { kind: ItemKind | "blocked"; hours: number };
+
+export interface Who { member: string; displayName: string }
+export interface ItemLane {
+  id: string;
+  title: string;
+  kind: ItemKind;
+  owner: Who;
+  release: { id: string; title: string } | null;
+  steps: { done: number; total: number };
+  /** `at` is the rider's position along the lane, 0..1 (= done/total). */
+  agents: { sessionId: string; source: string; state: SessionState; at: number }[];
+  state: { text: string; tone: Tone };
+}
+export interface Post {
+  id: string;
+  kind: PostKind;
+  itemId: string | null;
+  itemTitle: string | null;
+  author: Who;
+  source: string;
+  toMember: string | null;
+  /** The addressee for display (null = the team, or the leads for questions/decisions). */
+  to?: Who | null;
+  replyTo: string | null;
+  status: PostStatus | null;
+  delegate: boolean;
+  text: string;
+  createdAt: number;
+}
+export interface Need {
+  id: string;
+  type: "question" | "decision" | "blocked" | "overlap";
+  text: string;
+  meta: string;
+  item: { id: string; title: string } | null;
+  from: Who & { source: string };
+  at: number;
+  postId: string | null;
+  sessionId: string | null;
+}
+export interface Clip { itemId: string | null; label: string; kind: ClipKind; from: number; to: number | null }
+export interface KindCounts { feature: number; bug: number; try: number; chore: number }
+export interface Trait2 { text: string; why: string }
+
+export interface TodayData {
+  now: number;
+  project: { id: string; name: string };
+  viewer: Who & { role: Role };
+  counts: KindCounts & { waitingOnViewer: number };
+  since: { tasksDone: number; questionsSettled: number; blocked: number };
+  release: null | { id: string; title: string; dueAt: number | null; items: { id: string; title: string; stateText: string; tone: Tone }[] };
+  groups: { kind: "feature" | "bug" | "try_chore"; items: ItemLane[] }[];
+  untracked: { sessionId: string; member: Who; source: string; text: string; minutes: number }[];
+  tracks: {
+    from: number;
+    to: number;
+    now: number;
+    rows: { sessionId: string; who: Who; source: string; branch: string | null; worktree: string | null; clips: Clip[] }[];
+    overlaps: { members: Who[]; path: string; at: number }[];
+  };
+  needs: Need[];
+  tape: { at: number; kind: "Asked" | "Answered" | "Done" | "Blocked" | "Delegated" | "Finding" | "Handed over"; text: string }[];
+  people: { who: Who; owns: KindCounts; done7d: number; style: string }[];
+}
+export interface MyAgent {
+  sessionId: string;
+  source: string;
+  branch: string | null;
+  worktree: string | null;
+  item: { id: string; title: string } | null;
+  state: SessionState;
+  stateSince: number;
+  lastLine: string | null;
+  clips: Clip[];
+  /** Agent step marks: edits and questions ("test" may never appear). */
+  steps: { at: number; kind: "edit" | "test" | "ask" }[];
+}
+export interface MyDayData {
+  me: Who;
+  counts?: Partial<KindCounts & { waitingOnViewer: number }>;
+  forYou: Post[];
+  agents: MyAgent[];
+  around: { who: Who; text: string; meta: string; tone: Tone }[];
+  owned: ItemLane[];
+  traits: Trait2[];
+}
+export interface WeekData {
+  from: number;
+  to: number;
+  tasksDone: number;
+  /** % of agent-active time per kind. */
+  mix: KindCounts;
+  owned: { id: string; title: string; kind: ItemKind; owner: Who; stateText: string; tone: Tone; before: number; now: number; total: number; perDay: number[] }[];
+  people: { who: Who; agents: number; days: { date: string | number; hours: number; parts: WorkPart[] }[] }[];
+  table: { who: Who; done: number; owns: string; blockedHours: number; helped: number }[];
+  look: Trait2[];
+}
+export interface ItemStep { id: string; text: string; done: boolean; doneBy: Who | null; doneSource: string | null; doneAt: number | null }
+export interface ItemData {
+  item: {
+    id: string;
+    title: string;
+    kind: ItemKind;
+    status: ItemStatus;
+    owner: Who;
+    release: { id: string; title: string; dueAt?: number | null } | null;
+    branch: string | null;
+    summary: string | null;
+    createdAt: number;
+    steps: ItemStep[];
+  };
+  agents: { sessionId: string; source: string; who: Who; branch: string | null; worktree: string | null; state: SessionState; stateSince: number; lastLine: string | null }[];
+  thread: Post[];
+  open: Post[];
+  files: string[];
+  nearby: { text: string; meta: string }[];
+  proposals: { id: string; text: string; reason: string }[];
+}
+export interface PersonData {
+  who: Who;
+  owns: string;
+  agentsNow: number;
+  stats: { done: number; stepsTicked: number; activeHours: number; blockedHours: number; helped: number; asked: number; askMedianMin: number | null };
+  owned: ItemLane[];
+  finished: { id: string; title: string; kind: ItemKind }[];
+  week: { date: string | number; hours: number; parts: WorkPart[] }[];
+  agents: { sessionId: string; source: string; item: { id: string; title: string } | null; branch: string | null; state: SessionState; lines: string[] }[];
+  traits: Trait2[];
+}
+export interface NewItem { title: string; kind: ItemKind; owner?: string; releaseId?: string; steps?: string[]; branch?: string }
+export interface ItemPatch { title?: string; kind?: ItemKind; owner?: string; status?: ItemStatus; releaseId?: string | null; branch?: string | null; note?: string }
+export interface NewPost { itemId?: string; kind: PostKind; text: string; toMember?: string; replyTo?: string }
+
+const P = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
+/** The browser's timezone offset and local midnight, for endpoints that count "since today". */
+function localDay(): string {
+  return `tz=${new Date().getTimezoneOffset()}&since=${new Date().setHours(0, 0, 0, 0)}`;
+}
+const E = encodeURIComponent;
+
 export const api = {
   me: () => j<Me>("/api/auth/me"),
   signin: (token: string) => j<{ ok: boolean; workspace: Workspace }>("/api/auth/session", { method: "POST", body: JSON.stringify({ token }) }),
@@ -401,6 +550,40 @@ export const api = {
   patchTrait: (id: string, patch: { statement?: string; type?: TraitType }) =>
     j<{ ok: boolean }>(`/api/traits/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteTrait: (id: string) => j<{ ok: boolean }>(`/api/traits/${id}`, { method: "DELETE" }),
+
+  // ── Calm workspace reads ──
+  // tz/since make "today" the browser's day, not the server's.
+  today: (id: string) => j<TodayData>(`${P(id)}/today?${localDay()}`),
+  myDay: (id: string) => j<MyDayData>(`${P(id)}/me?${localDay()}`),
+  week: (id: string, days = 7) => j<WeekData>(`${P(id)}/week?days=${days}&tz=${new Date().getTimezoneOffset()}`),
+  item: (id: string, itemId: string) => j<ItemData>(`${P(id)}/items/${E(itemId)}`),
+  person: (id: string, member: string) => j<PersonData>(`${P(id)}/people/${E(member)}?tz=${new Date().getTimezoneOffset()}`),
+
+  // ── Calm workspace writes ──
+  createItem: (id: string, item: NewItem) =>
+    j<{ ok: boolean; id: string; item?: unknown }>(`${P(id)}/items`, { method: "POST", body: JSON.stringify(item) }),
+  patchItem: (itemId: string, patch: ItemPatch) =>
+    j<{ ok?: boolean }>(`/api/items/${E(itemId)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  addStep: (itemId: string, text: string) =>
+    j<{ ok: boolean; id: string; step?: unknown }>(`/api/items/${E(itemId)}/steps`, { method: "POST", body: JSON.stringify({ text }) }),
+  setStep: (stepId: string, done: boolean) =>
+    j<{ ok?: boolean }>(`/api/steps/${E(stepId)}`, { method: "PATCH", body: JSON.stringify({ done }) }),
+  createRelease: (id: string, r: { title: string; dueAt?: number | null }) =>
+    j<{ ok: boolean; id: string; release?: unknown }>(`${P(id)}/releases`, { method: "POST", body: JSON.stringify(r) }),
+  patchRelease: (releaseId: string, r: { title?: string; dueAt?: number | null }) =>
+    j<{ ok?: boolean }>(`/api/releases/${E(releaseId)}`, { method: "PATCH", body: JSON.stringify(r) }),
+  deleteRelease: (releaseId: string) =>
+    j<{ ok?: boolean }>(`/api/releases/${E(releaseId)}`, { method: "DELETE" }),
+  createPost: (id: string, p: NewPost) =>
+    j<{ id?: string }>(`${P(id)}/posts`, { method: "POST", body: JSON.stringify(p) }),
+  answerPost: (postId: string, text: string) =>
+    j<{ ok?: boolean }>(`/api/posts/${E(postId)}/answer`, { method: "POST", body: JSON.stringify({ text }) }),
+  resolvePost: (postId: string, status: "approved" | "changed" | "dismissed", text?: string) =>
+    j<{ ok?: boolean }>(`/api/posts/${E(postId)}/resolve`, { method: "POST", body: JSON.stringify(text ? { status, text } : { status }) }),
+  delegatePost: (postId: string) =>
+    j<{ ok?: boolean }>(`/api/posts/${E(postId)}/delegate`, { method: "POST" }),
+  trackSession: (sessionId: string, t: { title?: string; kind: ItemKind }) =>
+    j<{ id?: string }>(`/api/sessions/${E(sessionId)}/track`, { method: "POST", body: JSON.stringify(t) }),
 };
 
 // Quote a value for a POSIX shell command line unless it is plainly safe.

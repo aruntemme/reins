@@ -13,7 +13,7 @@ import { openSync, readSync, fstatSync, closeSync, realpathSync } from "node:fs"
 import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 import { redactSecrets } from "./redact.mjs";
-import { gitSnapshot, repoPath } from "./git.mjs";
+import { gitSnapshot, gitIdentity, repoPath } from "./git.mjs";
 
 const DEFAULT_URL = "http://localhost:4319";
 const MAX_TEXT = 6000;
@@ -27,6 +27,26 @@ function prepareText(raw) {
   let text = redactSecrets(String(raw ?? "").trim());
   if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
   return text;
+}
+
+// Prompts that carry no intent: system-injected blocks and one-word nudges. They
+// are never sent as events (the session is still touched by the pack request).
+const NOISE_PREFIXES = [
+  "<task-notification>", "<system-reminder>", "<command-name>", "<command-message>", "<local-command-",
+  "Caveat: The messages below",
+];
+const NOISE_WORDS = new Set([
+  "continue", "go on", "go ahead", "ok", "okay", "yes", "y", "no", "n", "next", "check now", "status",
+  "proceed", "done", "thanks",
+]);
+
+/** True for a prompt that isn't a real instruction (empty, injected, or a filler word). */
+export function isNoisePrompt(raw) {
+  const t = String(raw ?? "").trim();
+  if (!t) return true;
+  if (NOISE_PREFIXES.some((p) => t.startsWith(p))) return true;
+  const word = t.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/\s+/g, " ");
+  return NOISE_WORDS.has(word);
 }
 
 /** Resolve who the event is from: explicit env, then git email, then $USER. */
@@ -92,6 +112,10 @@ export function lastAssistantText(transcriptPath) {
  * @param {string} [o.url]     server url
  * @param {string} [o.key]     ingest key (x-reins-key)
  * @param {string} [o.session] session id
+ *
+ * Besides session and source, the body carries branch, worktree (git toplevel) and
+ * repo_root (main repo root) when cwd is in a repo, so the board can tell a
+ * person's agents and worktrees apart. A noise `intent` is dropped (see isNoisePrompt).
  * @param {object} [o.meta]    extra metadata (merged with {source})
  * @param {string} [o.cwd]     working directory; when set, git state (branch,
  *                             HEAD, dirty files, a detected merge) rides in meta.git
@@ -102,9 +126,10 @@ export async function sendEvent(o) {
   // Mask credentials before anything leaves the machine (the server masks again
   // at ingest as a backstop).
   const text = prepareText(o.text);
-  if (!text) return { ok: false, skipped: true };
+  if (!text || ((o.kind || "progress") === "intent" && isNoisePrompt(text))) return { ok: false, skipped: true };
 
   const git = o.cwd && o.git !== false ? gitSnapshot(o.cwd) : null;
+  const where = o.cwd && o.git !== false ? gitIdentity(o.cwd) : {};
   const r = await postJson(o, "/api/ingest", {
     project: o.project,
     member: o.member || resolveMember(),
@@ -112,7 +137,8 @@ export async function sendEvent(o) {
     text,
     session: o.session,
     source,
-    meta: { ...(o.meta || {}), source, ...(git ? { git } : {}) },
+    ...where,
+    meta: { ...(o.meta || {}), source, ...where, ...(git ? { git } : {}) },
   }, o.timeoutMs ?? 1500);
   return r.unreachable ? { ok: false, unreachable: true } : { ok: r.ok, status: r.status };
 }
@@ -152,11 +178,15 @@ export async function sendTouch(o) {
   const path = repoPath(o.file, o.cwd);
   if (!path) return { ok: false, skipped: true };
   const git = o.git !== false ? gitSnapshot(o.cwd) : null;
+  const where = o.git !== false ? gitIdentity(o.cwd) : {};
   return postJson(o, "/api/hook/touch", {
     project: o.project,
     member: o.member || resolveMember(),
     path,
     tool: o.tool,
+    session: o.session,
+    source: o.source,
+    ...where,
     meta: git ? { git } : undefined,
   }, o.timeoutMs ?? 1500);
 }
@@ -171,7 +201,7 @@ export async function sendTouch(o) {
  */
 export function sendEventDetached(o) {
   const text = prepareText(o.text);
-  if (!text) return true; // nothing to send
+  if (!text || ((o.kind || "progress") === "intent" && isNoisePrompt(text))) return true; // nothing to send
   return spawnDetached({ ...o, text });
 }
 
