@@ -107,7 +107,9 @@ test("security: tenant isolation, crash safety, roles, identity, and abuse limit
     const signup = async (c: ReturnType<typeof makeClient>, email: string, name: string) => {
       const r = await c.call("/api/auth/signup", post({ email, password: "supersecret-1", workspaceName: name }));
       assert.equal(r.status, 200, JSON.stringify(r.body));
-      return r.body as { workspace: { id: string }; tokens: { ingest: string; access: string; admin: string } };
+      // Signup mints no machine tokens; the owner mints the ones the test uses.
+      const mint = async (kind: string) => (await c.call("/api/admin/tokens", post({ kind }))).body.token as string;
+      return { ...r.body, tokens: { ingest: await mint("ingest"), access: await mint("access"), admin: await mint("admin") } } as { workspace: { id: string }; tokens: { ingest: string; access: string; admin: string } };
     };
     const ownerA = makeClient(url, "10.0.1.1");
     const emailA = `a-${uid}@acme.test`;

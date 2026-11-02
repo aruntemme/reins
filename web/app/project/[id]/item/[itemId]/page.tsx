@@ -1,7 +1,7 @@
 "use client";
 import { use, useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
-import { api, type ItemData, type ItemKind, type ItemStep, type Post, type Who } from "@/lib/api";
+import { api, type ItemData, type ItemKind, type ItemStep, type Post } from "@/lib/api";
 import { PageState, PhoneTabs, StaleNote, WorkHeader, useAction, useNow, useWork } from "@/components/work/shell";
 import { AgentTile, Avatar, SectionHead, agentLabel } from "@/components/work/bits";
 import { AskCard } from "@/components/work/needs";
@@ -69,8 +69,6 @@ export default function ItemPage({ params }: { params: Promise<{ id: string; ite
   const river = item.steps.length > 0 && item.steps.length <= 6;
   const waitingOnYou = open.length > 0;
   const ownerHref = `/project/${encodeURIComponent(id)}/people/${encodeURIComponent(item.owner.member)}`;
-  const people: Who[] = [item.owner, ...agents.map((a) => a.who), ...thread.map((p) => p.author)]
-    .filter((w, i, a) => a.findIndex((x) => x.member === w.member) === i);
   const intro = [
     `Owned by ${item.owner.displayName}.`,
     item.steps.length ? `${done} of ${plural(item.steps.length, "step")} done.` : "No steps yet.",
@@ -152,7 +150,7 @@ export default function ItemPage({ params }: { params: Promise<{ id: string; ite
               )}
             </section>
 
-            <WriteBox projectId={id} itemId={item.id} title={item.title} people={people} onDone={load} />
+            <WriteBox projectId={id} itemId={item.id} title={item.title} onDone={load} />
           </div>
 
           <aside aria-label="Details" className="w-col-side w-stack-lg">
@@ -160,7 +158,8 @@ export default function ItemPage({ params }: { params: Promise<{ id: string; ite
               <SectionHead id="ag-h" title="Agents on it" />
               {agents.length === 0 ? (
                 <p className="w-card w-calm-empty">
-                  No agent is on it right now.{item.branch ? <> Sessions on <span className="w-mono">{item.branch}</span> attach on their own.</> : ""}
+                  {/* One span: the card is a flex column, and the branch must stay inline in the sentence. */}
+                  <span>No agent is on it right now.{item.branch ? <> Sessions on <span className="w-mono">{item.branch}</span> attach on their own.</> : ""}</span>
                 </p>
               ) : (
                 <div className="w-card w-list">
@@ -366,7 +365,7 @@ function ThreadPost({ p, now }: { p: Post; now: number }) {
 }
 
 /** "Write to <item>": a note the agents on it read at their next prompt; "@name" aims it at one person. */
-function WriteBox({ projectId, itemId, title, people, onDone }: { projectId: string; itemId: string; title: string; people: Who[]; onDone: () => void }) {
+function WriteBox({ projectId, itemId, title, onDone }: { projectId: string; itemId: string; title: string; onDone: () => void }) {
   const uid = useId();
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
@@ -374,9 +373,9 @@ function WriteBox({ projectId, itemId, title, people, onDone }: { projectId: str
   const post = async () => {
     const t = text.trim();
     if (!t) return;
-    const m = /^@(\S+)/.exec(t);
-    const to = m ? people.find((w) => w.member.toLowerCase() === m[1].toLowerCase() || w.displayName.toLowerCase() === m[1].toLowerCase()) : undefined;
-    if (await run(() => api.createPost(projectId, { itemId, kind: "note", text: t, ...(to ? { toMember: to.member } : {}) }))) {
+    // "@bob …" aims it at one teammate; the server resolves the handle and refuses an unknown or ambiguous one.
+    const to = /^@(\S+)/.exec(t)?.[1];
+    if (await run(() => api.createPost(projectId, { itemId, kind: "note", text: t, ...(to ? { toMember: to } : {}) }))) {
       setText("");
       setSent(true);
     }

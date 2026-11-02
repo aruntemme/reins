@@ -18,6 +18,7 @@ export default function PersonPage({ params }: { params: Promise<{ id: string; m
   const [projectName, setProjectName] = useState(id);
   const [give, setGive] = useState(false);
   const [write, setWrite] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
   useEffect(() => { api.project(id).then((p) => setProjectName(p.name || id)).catch(() => {}); }, [id]);
   const name = data?.who.displayName || member;
   useEffect(() => { document.title = `${name} · ${projectName} · Reins`; }, [name, projectName]);
@@ -72,8 +73,9 @@ export default function PersonPage({ params }: { params: Promise<{ id: string; m
           </div>
           <div className="w-itemhead-acts">
             <button type="button" className="w-btn strong" onClick={() => setGive(true)}>{self ? "New item" : `Give ${first} something`}</button>
-            {!self && <button type="button" className="w-btn" onClick={() => setWrite(true)}>Write to {first}</button>}
+            {!self && <button type="button" className="w-btn" onClick={() => { setSentTo(null); setWrite(true); }}>Write to {first}</button>}
           </div>
+          {sentTo && <p className="w-ok" role="status">Note sent to {sentTo}. Their agents read it at the next prompt.</p>}
         </div>
       </div>
 
@@ -181,7 +183,7 @@ export default function PersonPage({ params }: { params: Promise<{ id: string; m
       </main>
 
       <NewItemDialog projectId={id} open={give} onClose={() => setGive(false)} onDone={load} me={me?.member} owner={p.who.member} release={null} />
-      <WriteDialog projectId={id} open={write} onClose={() => setWrite(false)} onDone={load} to={p.who.member} me={me?.member} />
+      <WriteDialog projectId={id} open={write} onClose={() => setWrite(false)} onDone={load} onSent={setSentTo} to={p.who.member} me={me?.member} />
       <PhoneTabs projectId={id} current="people" />
     </div>
   );

@@ -27,6 +27,7 @@ export default function TodayPage({ params }: { params: Promise<{ id: string }> 
   const [release, setRelease] = useState(false);
   const [write, setWrite] = useState(false);
   const [handover, setHandover] = useState<{ id: string; title: string } | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   const name = data?.project.name || id;
   useEffect(() => { document.title = `Today · ${name} · Reins`; }, [name]);
@@ -46,8 +47,6 @@ export default function TodayPage({ params }: { params: Promise<{ id: string }> 
   const lead = isLead(me, t.viewer.role);
   const viewerId = t.viewer.member;
   const total = t.counts.feature + t.counts.bug + t.counts.try + t.counts.chore;
-  const w = t.counts.waitingOnViewer;
-  const waitLine = w > 0 ? `${countWord(w)} ${w === 1 ? "is" : "are"} waiting on you.` : "Nothing is waiting on you.";
   const moving = total === 0 ? "Nothing is moving yet." : `${plural(total, "thing")} moving`;
   const liveRows = t.tracks.rows.filter((r) => r.clips.some((c) => c.to == null));
   const livePeople = new Set(liveRows.map((r) => r.who.member)).size;
@@ -58,6 +57,8 @@ export default function TodayPage({ params }: { params: Promise<{ id: string }> 
   ].filter(Boolean);
   const anyItems = t.groups.some((g) => g.items.length > 0);
   const needCount = t.needs.length;
+  // The same count as the "needs you" pill and panel, so the headline never contradicts them.
+  const waitLine = needCount > 0 ? `${countWord(needCount)} ${needCount === 1 ? "thing needs" : "things need"} you.` : "Nothing needs you.";
   const allLanes = t.groups.flatMap((g) => g.items);
   const quiet = !anyItems && t.untracked.length === 0 && t.tracks.rows.length === 0;
 
@@ -84,9 +85,10 @@ export default function TodayPage({ params }: { params: Promise<{ id: string }> 
           </p>
           <div className="w-hero-acts">
             <button type="button" className="w-btn small" onClick={() => setNewItem(true)}>New item</button>
-            <button type="button" className="w-btn small" onClick={() => setWrite(true)}>Write to the team</button>
+            <button type="button" className="w-btn small" onClick={() => { setSentTo(null); setWrite(true); }}>Write to the team</button>
             {lead && !t.release && <button type="button" className="w-btn small ghost" onClick={() => setRelease(true)}>Plan a release</button>}
           </div>
+          {sentTo && <p className="w-ok" role="status">Note sent to {sentTo}. Their agents read it at the next prompt.</p>}
         </div>
 
         {t.release && (
@@ -214,7 +216,7 @@ export default function TodayPage({ params }: { params: Promise<{ id: string }> 
 
         <div className="w-row">
           <section aria-labelledby="tp-h" className="w-col-main w-stack w-desk">
-            <SectionHead id="tp-h" title="The tape" note="handovers, questions, answers, finishes, findings" />
+            <SectionHead id="tp-h" title="The tape" note="handovers, questions, decisions, finishes, findings" />
             {t.tape.length === 0 ? (
               <p className="w-quiet">Nothing on the tape yet today.</p>
             ) : (
@@ -262,7 +264,7 @@ export default function TodayPage({ params }: { params: Promise<{ id: string }> 
 
       <NewItemDialog projectId={id} open={newItem} onClose={() => setNewItem(false)} onDone={load} me={viewerId} release={t.release ? { id: t.release.id, title: t.release.title } : null} />
       <ReleaseDialog projectId={id} open={release} onClose={() => setRelease(false)} onDone={load} release={t.release ? { id: t.release.id, title: t.release.title, dueAt: t.release.dueAt } : null} />
-      <WriteDialog projectId={id} open={write} onClose={() => setWrite(false)} onDone={load} me={viewerId} />
+      <WriteDialog projectId={id} open={write} onClose={() => setWrite(false)} onDone={load} onSent={setSentTo} me={viewerId} />
       <HandoverDialog projectId={id} open={!!handover} onClose={() => setHandover(null)} onDone={load} item={handover} />
       <PhoneTabs projectId={id} current="today" />
     </div>

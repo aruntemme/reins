@@ -17,6 +17,7 @@ import {
   projectHidesBranches,
   traitsShared,
   resolveMember,
+  db,
 } from "./db.js";
 import { STALE_MS, TOUCH_WINDOW_MS } from "./liveness.js";
 import { computeOverlaps } from "./collisions.js";
@@ -199,12 +200,16 @@ export function projectsList(workspaceId?: string) {
   return listProjects(workspaceId).map((p) => {
     const members = listMembers(p.id);
     const active = members.filter((m) => m.status === "active").length;
+    const open = (db
+      .prepare("SELECT COUNT(*) AS n FROM goals WHERE project = ? AND scope = 'individual' AND COALESCE(status, 'open') != 'done'")
+      .get(p.id) as { n: number }).n;
     return {
       id: p.id,
       name: p.name,
       goal: p.goal,
       members: members.length,
       active,
+      open,
       updatedAt: p.updated_at,
     };
   });

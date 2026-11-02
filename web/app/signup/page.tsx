@@ -35,7 +35,9 @@ function SignupForm() {
     if (password !== confirm) { setErr("Passwords do not match."); return; }
     setBusy(true);
     try {
-      await api.signup(email.trim(), password, workspaceName.trim() || undefined);
+      // From an invite link (next = /join?code=…): join that workspace directly, with no empty one of our own.
+      const invite = next.startsWith("/join?") ? new URLSearchParams(next.slice("/join?".length)).get("code") || undefined : undefined;
+      await api.signup(email.trim(), password, invite ? undefined : workspaceName.trim() || undefined, invite);
       // No tokens to copy: each teammate's terminal is approved in the browser by
       // `npx reins-hook`. A fresh owner goes straight to creating their first project;
       // next is otherwise a same-origin path (e.g. /join?code=...) that resolves an invite.

@@ -139,11 +139,12 @@ function NeedCard({
   const unblock = async () => {
     const t = text.trim();
     if (!t) return;
-    const ok = await run(() =>
-      need.postId
-        ? api.answerPost(need.postId, t)
-        : api.createPost(projectId, { kind: "note", text: t, toMember: need.from.member, ...(need.item ? { itemId: need.item.id } : {}) }),
-    );
+    const ok = await run(async () => {
+      if (need.postId) await api.answerPost(need.postId, t);
+      else await api.createPost(projectId, { kind: "note", text: t, toMember: need.from.member, ...(need.item ? { itemId: need.item.id } : {}) });
+      // What unblocks it is on its way: the item is back in progress and leaves "Needs you".
+      if (need.item) await api.patchItem(need.item.id, { status: "doing" });
+    });
     if (ok) { setText(""); setWriting(false); setSent(`Sent to ${need.from.displayName}’s agent.`); }
   };
 
@@ -210,7 +211,7 @@ function NeedCard({
     <div className="w-card w-need">
       <span className={`w-tag ${tagCls}`}>{TAG[need.type]}</span>
       <span className="w-need-t">{need.text}</span>
-      {need.meta && <span className="w-meta">{need.meta}</span>}
+      {need.meta && <span className="w-mono w-meta">{need.meta}</span>}
       {body}
     </div>
   );

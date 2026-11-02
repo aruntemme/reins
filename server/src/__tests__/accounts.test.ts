@@ -68,9 +68,13 @@ test("invites: single-use, adds membership, expired rejected", () => {
   const res = a.acceptInvite(code, joiner.id);
   assert.equal(res?.workspaceId, ws.id);
   assert.equal(a.getMembership(joiner.id, ws.id)?.role, "member");
-  // single-use: second accept fails and invite no longer valid
-  assert.equal(a.acceptInvite(code, joiner.id), null);
+  // single-use: the invite is spent; the joiner opening it again is simply still in,
+  // anyone else is refused
   assert.equal(a.getInvite(code)?.valid, false);
+  assert.deepEqual(a.acceptInvite(code, joiner.id), { workspaceId: ws.id, role: "member" });
+  const other = a.createUser("late@beta.com", "pw-late-12");
+  assert.equal(a.acceptInvite(code, other.id), null);
+  assert.equal(a.getMembership(other.id, ws.id), undefined);
 
   // expired invite cannot be accepted
   const expired = a.createInvite(ws.id, "member", inviter.id, undefined, -1);

@@ -76,7 +76,7 @@ type Client = ReturnType<typeof makeClient>;
 async function signup(c: Client, email: string, workspaceName?: string) {
   const r = await c.call("/api/auth/signup", post({ email, password: "supersecret-1", workspaceName }));
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  return r.body as { workspace: { id: string; name: string }; tokens: { ingest: string } };
+  return r.body as { workspace: { id: string; name: string } };
 }
 
 const CODE = /^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/;

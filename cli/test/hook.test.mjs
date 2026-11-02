@@ -170,6 +170,47 @@ test("PostToolUse on Write records a repo-relative touch from a detached child",
   assert.equal(touch.body.meta.git.branch, "main");
 });
 
+test("a test run is recorded with its outcome: PostToolUse passed, PostToolUseFailure failed; other Bash is ignored", async () => {
+  requests.length = 0;
+  respond = () => ({ status: 200, json: { ok: true } });
+  // Payload shapes as Claude Code sends them (captured from a real session).
+  const pass = await runHook({
+    ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "toolu_3",
+    tool_input: { command: "cd server && npm test", description: "Run tests" },
+    tool_response: { stdout: "ok", stderr: "", interrupted: false, isImage: false },
+  }, { REINS_STATE_DIR: stateDir });
+  const fail = await runHook({
+    ...base, hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_use_id: "toolu_4",
+    tool_input: { command: "API_TOKEN=sk-live-0123456789abcdefghij npx vitest run", description: "Run tests" },
+    error: "Exit code 1\n1 failed", is_interrupt: false,
+  }, { REINS_STATE_DIR: stateDir });
+  const other = await runHook({
+    ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "toolu_5",
+    tool_input: { command: "git status" }, tool_response: { stdout: "", stderr: "" },
+  }, { REINS_STATE_DIR: stateDir });
+  for (const r of [pass, fail, other]) assert.deepEqual([r.stdout, r.code], ["", 0]);
+  const runs = await waitFor(() => { const x = requests.filter((q) => q.path === "/api/hook/run"); return x.length >= 2 ? x : null; });
+  assert.ok(runs, "both runs posted");
+  const byOk = Object.fromEntries(runs.map((x) => [String(x.body.ok), x.body]));
+  assert.equal(byOk.true.command, "cd server && npm test");
+  assert.deepEqual([byOk.true.session, byOk.true.branch, byOk.true.member], ["sess-1", "main", "asha"]);
+  assert.match(byOk.false.command, /npx vitest run$/);
+  assert.ok(!byOk.false.command.includes("sk-live-0123456789abcdefghij"), "secrets in the command are redacted");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(requests.filter((q) => q.path === "/api/hook/run").length, 2, "a non-test command sends nothing");
+  assert.ok(!requests.some((q) => q.path === "/api/hook/touch"), "and Bash is never a file touch");
+});
+
+test("isTestCommand: test runners in command position, not mentions of them", async () => {
+  const { isTestCommand } = await import("../lib/capture.mjs");
+  for (const c of ["npm test", "pnpm run test:unit", "CI=1 yarn test", "npx jest src", "pytest -q", "uv run pytest", "python -m unittest", "go test ./...", "cargo test", "node --test x.test.mjs", "npx tsx --test a.test.ts", "./gradlew clean test", "make test", "cd web && npx playwright test"]) {
+    assert.ok(isTestCommand(c), c);
+  }
+  for (const c of ["npm install", "git commit -m 'add test'", "cat test.js", "rg pytest", "vim jest.config.js", "echo npm test", "npm run testing-lib"]) {
+    assert.ok(!isTestCommand(c), c);
+  }
+});
+
 test("fail open: server down or hanging → no output, exit 0, within the time budget", async () => {
   const dead = "http://127.0.0.1:1";
   const fresh = mkdtempSync(join(tmpdir(), "reins-state-"));

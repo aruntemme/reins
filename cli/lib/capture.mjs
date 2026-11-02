@@ -191,6 +191,44 @@ export async function sendTouch(o) {
   }, o.timeoutMs ?? 1500);
 }
 
+// A shell command that runs a test suite: npm/pnpm/yarn/bun test, jest, vitest, pytest,
+// go/cargo/deno/mix/dotnet test, gradle/maven test, node --test, make test, …
+const TEST_COMMAND = new RegExp(
+  // Only in command position: at the start, after ; & | ( and any VAR=value prefixes.
+  "(?:^|[;&|(])\\s*(?:\\w+=\\S*\\s+)*(?:(?:uv|poetry|pipenv)\\s+run\\s+)?(?:" + [
+    "(?:npm|pnpm|yarn|bun)\\s+(?:run\\s+)?test(?::[\\w:-]+)?(?![\\w-])",
+    "(?:npx\\s+|pnpm\\s+(?:exec\\s+)?|yarn\\s+|bunx\\s+)?(?:jest|vitest|mocha|ava|pytest|rspec|phpunit|playwright\\s+test)(?![\\w-])",
+    "python3?\\s+-m\\s+(?:pytest|unittest)(?![\\w-])",
+    "(?:go|cargo|deno|mix|dotnet)\\s+(?:test|nextest)(?![\\w-])",
+    "(?:\\.\\/)?(?:gradlew|gradle|mvn|mvnw)(?:\\s+\\S+)*?\\s+test(?![\\w-])",
+    "(?:npx\\s+)?(?:node|tsx|bun)(?:\\s+\\S+)*?\\s+--test(?![\\w-])",
+    "make\\s+test(?![\\w-])",
+  ].join("|") + ")"
+);
+
+/** True when a shell command runs tests (so its pass/fail is a step mark worth showing). */
+export function isTestCommand(cmd) {
+  return typeof cmd === "string" && TEST_COMMAND.test(cmd);
+}
+
+/** Record a test run (passed or failed) on the session's timeline. */
+export async function sendRun(o) {
+  const where = o.git !== false ? gitIdentity(o.cwd) : {};
+  return postJson(o, "/api/hook/run", {
+    project: o.project,
+    member: o.member || resolveMember(),
+    command: redactSecrets(String(o.command || "")).slice(0, 200),
+    ok: !!o.ok,
+    session: o.session,
+    source: o.source,
+    ...where,
+  }, o.timeoutMs ?? 1500);
+}
+
+export function sendRunDetached(o) {
+  return spawnDetached({ ...o, command: redactSecrets(String(o.command || "")).slice(0, 200), op: "run" });
+}
+
 /**
  * Hand the event to a detached, unref'd child process and return at once, so
  * the host agent never waits on the network (a hook runs on every prompt). The
@@ -235,6 +273,6 @@ if (isMain && process.env.REINS_EVENT) {
   let o = null;
   try { o = JSON.parse(process.env.REINS_EVENT); } catch { /* malformed → nothing to do */ }
   if (!o) process.exit(0);
-  const send = o.op === "touch" ? sendTouch : sendEvent;
+  const send = o.op === "touch" ? sendTouch : o.op === "run" ? sendRun : sendEvent;
   send({ ...o, timeoutMs: o.timeoutMs ?? 10000 }).finally(() => process.exit(0));
 }

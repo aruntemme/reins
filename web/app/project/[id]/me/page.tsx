@@ -98,7 +98,7 @@ export default function MyDayPage({ params }: { params: Promise<{ id: string }> 
         <div className="w-row">
           <div className="w-col-main w-stack-lg">
             <section aria-labelledby="ya-h" className="w-stack w-order-2">
-              <SectionHead id="ya-h" title="Your agents" note={<span className="w-desk-inline">every mark is a step: an edit or a question</span>} />
+              <SectionHead id="ya-h" title="Your agents" note={<span className="w-desk-inline">every mark is a step: an edit, a test run or a question</span>} />
               {d.agents.length === 0 ? (
                 <div className="w-card w-calm-empty">
                   <p>No agent of yours has checked in today.</p>
@@ -212,7 +212,7 @@ function AgentDay({ projectId, a, win, now }: { projectId: string; a: MyAgent; w
         <span className="w-mono w-meta">{[a.branch, base(a.worktree)].filter(Boolean).join(" · ")}</span>
         <span className="w-agentday-state"><StateDot state={a.state} />{stateText(a, now)}</span>
       </div>
-      <div className="w-mini" role="img" aria-label={`${name} today: ${a.clips.map((c) => c.label).join(", ") || "no tasks yet"}; ${a.steps.length} steps`}>
+      <div className="w-mini" role="img" aria-label={`${name} today: ${a.clips.map((c) => c.label).join(", ") || "no tasks yet"}; ${a.steps.length} steps${testsLine(a.steps)}`}>
         <span className="w-mini-bg" />
         {a.clips.map((c, i) => {
           const l = pctIn(c.from, win);
@@ -229,6 +229,13 @@ function AgentDay({ projectId, a, win, now }: { projectId: string; a: MyAgent; w
       {a.lastLine && <span className="w-mono w-small w-ink2">{a.lastLine}</span>}
     </div>
   );
+}
+
+/** ", 3 test runs (1 failed)" for the step marks' accessible label. */
+function testsLine(steps: MyAgent["steps"]): string {
+  const runs = steps.filter((s) => s.kind === "test" || s.kind === "test_fail").length;
+  const failed = steps.filter((s) => s.kind === "test_fail").length;
+  return runs ? `, ${runs} test run${runs === 1 ? "" : "s"}${failed ? ` (${failed} failed)` : ""}` : "";
 }
 
 /** One of your agents on a phone: a small terminal tile with its step ticks and last line. */

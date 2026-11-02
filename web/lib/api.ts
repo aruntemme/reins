@@ -109,6 +109,8 @@ export interface ProjectSummary {
   goal: string;
   members: number;
   active: number;
+  /** Items not done yet (owned work); absent from servers older than the calm workspace. */
+  open?: number;
   updatedAt: number;
 }
 
@@ -332,7 +334,7 @@ export interface MyAgent {
   lastLine: string | null;
   clips: Clip[];
   /** Agent step marks: edits and questions ("test" may never appear). */
-  steps: { at: number; kind: "edit" | "test" | "ask" }[];
+  steps: { at: number; kind: "edit" | "test" | "test_fail" | "ask" }[];
 }
 export interface MyDayData {
   me: Who;
@@ -466,10 +468,11 @@ export const api = {
     j<{ ok: boolean }>(`/api/admin/tokens/${encodeURIComponent(id)}/revoke`, { method: "POST" }),
 
   // ── Accounts ──────────────────────────────────────────────
-  signup: (email: string, password: string, workspaceName?: string) =>
-    j<{ ok: boolean; user: { email: string }; workspace: Workspace; tokens?: { ingest: string; access: string; admin: string } }>(
+  /** `invite`: the code from an invite link, so the account joins that workspace instead of getting its own. */
+  signup: (email: string, password: string, workspaceName?: string, invite?: string) =>
+    j<{ ok: boolean; user: { email: string }; workspace: Workspace; role: Role }>(
       "/api/auth/signup",
-      { method: "POST", body: JSON.stringify({ email, password, workspaceName }) }
+      { method: "POST", body: JSON.stringify({ email, password, workspaceName, invite }) }
     ),
   login: (email: string, password: string) =>
     j<{ ok: boolean; user: { email: string }; workspace: Workspace; workspaces: WorkspaceMembership[] }>(
